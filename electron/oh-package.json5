@@ -1,0 +1,13 @@
+{
+  "license": "",
+  "devDependencies": {},
+  "author": "MikannQAQ",
+  "name": "chromium",
+  "description": "Please describe the basic information.",
+  "main": "",
+  "version": "1.0.0",
+  "dependencies": {
+    "web_engine": "file:../web_engine",
+    "libentry.so": "file:./src/main/cpp/types/libentry"
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "module": {
+    "name": "electron",
+    "type": "entry",
+    "srcEntry": "./ets/Application/AbilityStage.ets",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "2in1",
+      "tablet"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "compressNativeLibs": false,
+    "pages": "$profile:main_pages",
+    "metadata": [
+      {
+        "name": "client_id",
+        "value": ""
+      }
+    ],
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_layered_image",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "launchType": "specified",
+        "removeMissionAfterTerminate": true,
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home",
+              "entity.system.browsable"
+            ],
+            "actions": [
+              "action.system.home",
+              "ohos.want.action.viewData"
+            ],
+            "uris": []
+          },
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.text"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.plain-text"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.source-code"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.c-source"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.c-header"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.c-plus-plus-source"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.c-plus-plus-header"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.java-source"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.java-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.type-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.python-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.ruby-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.perl-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.php-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.shell-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "com.microsoft.powershell-script"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.css"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.html"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.xml"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.yaml"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.json"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.markdown"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.diff"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.log"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.conf"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "com.microsoft.ini"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.comma-separated-values-text"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "general.tab-separated-values-text"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "org.tug.tex"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "org.tug.bib"},
+              {"scheme": "file", "linkFeature": "FileOpen", "type": "org.tug.cls"}
+            ]
+          }
+        ],
+      },
+      {
+        "name": "BrowserAbility",
+        "srcEntry": "./ets/entryability/BrowserAbility.ets",
+        "description": "$string:BrowserAbility_desc",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "removeMissionAfterTerminate": true,
+        "exported": false,
+        "skills": [
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": []
+          }
+        ],
+      }
+    ],
+    "requestPermissions": [
+      {"name":"ohos.permission.kernel.LOAD_INDEPENDENT_LIBRARY"},
+      {"name":"ohos.permission.kernel.IGNORE_LIBRARY_VALIDATION"},
+      {"name":"ohos.permission.kernel.ALLOW_WRITABLE_CODE_MEMORY"},
+      {"name":"ohos.permission.kernel.ALLOW_DEBUG"},
+      {"name":"ohos.permission.CUSTOM_SANDBOX"},
+      {"name":"ohos.permission.READ_WRITE_USER_FILE"},
+      {"name":"ohos.permission.STORE_PERSISTENT_DATA"},
+      {"name":"ohos.permission.INTERNET"},
+      {"name":"ohos.permission.GET_NETWORK_INFO"},
+      {"name":"ohos.permission.ACCESS_CERT_MANAGER"},
+      {"name":"ohos.permission.RUNNING_LOCK"},
+      {"name":"ohos.permission.PRINT"},
+      {"name":"ohos.permission.PREPARE_APP_TERMINATE"},
+      {"name":"ohos.permission.ACCESS_BIOMETRIC"},
+      {"name":"ohos.permission.FILE_ACCESS_PERSIST"},
+      {"name":"ohos.permission.PRIVACY_WINDOW"},
+      {"name":"ohos.permission.WINDOW_TOPMOST"}
+    ],
+    "extensionAbilities": [
+      {
+        "name": "StatusBarEntryAbility",
+        "icon": "$media:app_layered_image",
+        "description": "$string:StatusBarEntryAbility_desc",
+        "type": "statusBarView",
+        "exported": false,
+        "srcEntry": "./ets/entryability/StatusBarEntryAbility.ets"
+      },
+      {
+        "name": "BrowserEmbeddedAbility",
+        "srcEntry": "./ets/extensionAbility/BrowserEmbeddedAbility.ets",
+        "type": "embeddedUI",
+        "exported": false,
+      }
+    ],
+    "hnpPackages": [
+      {
+        "package": "bash.hnp",
+        "type": "private",
+        "independentSign": false
+      },
+      {
+        "package": "rg.hnp",
+        "type": "private",
+        "independentSign": false
+      },
+      {
+        "package": "node.hnp",
+        "type": "private",
+        "independentSign": false
+      },
+      {
+        "package": "electron.hnp",
+        "type": "private",
+        "independentSign": false
+      },
+      {
+        "package": "fastfetch.hnp",
+        "type": "public",
+        "independentSign": false
+      }
+    ]
+  }
+}

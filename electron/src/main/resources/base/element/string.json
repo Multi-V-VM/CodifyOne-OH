@@ -1,0 +1,40 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "OHcode"
+    },
+    {
+      "name": "BrowserAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "BrowserAbility_label",
+      "value": "BrowserAbility"
+    },
+    {
+      "name": "button_ok",
+      "value": "ok"
+    },
+    {
+      "name": "button_cancel",
+      "value": "cancel"
+    },
+    {
+      "name": "StatusBarEntryAbility_desc",
+      "value": "Application status bar"
+    },
+    {
+      "name": "StatusBarEntryAbility_label",
+      "value": "Application status bar"
+    }
+  ]
+}
