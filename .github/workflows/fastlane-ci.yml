@@ -85,6 +85,8 @@ jobs:
             harmony-tools-${{ runner.os }}-
 
       - name: Setup HarmonyOS Command Line Tools
+        env:
+          HARMONY_COMMANDLINE_TOOLS_URL: ${{ secrets.HARMONY_COMMANDLINE_TOOLS_URL }}
         run: |
           tools_dir="${{ github.workspace }}/.harmony-tools"
           tools_zip="commandline-tools-mac-arm64-5.0.3.810.zip"
@@ -95,40 +97,80 @@ jobs:
 
           mkdir -p "${tools_dir}"
 
+          valid_tools_home() {
+            local home="$1"
+            { [ -x "${home}/ohpm/bin/ohpm" ] && [ -x "${home}/hvigor/bin/hvigorw" ]; } ||
+              { [ -x "${home}/bin/ohpm" ] && [ -x "${home}/bin/hvigorw" ]; }
+          }
+
+          use_tools_home() {
+            local home="$1"
+            echo "HM_COMMAND_LINE_TOOLS_HOME=${home}" >> $GITHUB_ENV
+            echo "HARMONY_TOOLS_AVAILABLE=true" >> $GITHUB_ENV
+          }
+
+          validate_and_use_tools_home() {
+            local home="$1"
+            if valid_tools_home "${home}"; then
+              use_tools_home "${home}"
+            else
+              echo "::error::HarmonyOS tools were found or extracted, but ${home} does not contain executable ohpm and hvigorw."
+              exit 1
+            fi
+          }
+
           # Check if tools already exist from cache
-          if [ -d "${tools_home}" ]; then
+          if valid_tools_home "${tools_home}"; then
             echo "✅ Tools found at ${tools_home}"
-            echo "HM_COMMAND_LINE_TOOLS_HOME=${tools_home}" >> $GITHUB_ENV
+            use_tools_home "${tools_home}"
           elif [ -f "${tools_dir}/${tools_zip}" ]; then
             echo "📦 Found zip file, extracting..."
             mkdir -p "${tools_unzip}"
             unzip -q "${tools_dir}/${tools_zip}" -d "${tools_unzip}"
-            echo "HM_COMMAND_LINE_TOOLS_REPO=${tools_dir}" >> $GITHUB_ENV
-          elif [ -x "${app_tools}/ohpm/bin/ohpm" ] && [ -x "${app_tools}/hvigor/bin/hvigorw" ]; then
+            validate_and_use_tools_home "${tools_home}"
+          elif [ -n "${HARMONY_COMMANDLINE_TOOLS_URL}" ]; then
+            echo "📥 Downloading HarmonyOS Command Line Tools from secret URL..."
+            curl -fL "${HARMONY_COMMANDLINE_TOOLS_URL}" -o "${tools_dir}/${tools_zip}"
+            mkdir -p "${tools_unzip}"
+            unzip -q "${tools_dir}/${tools_zip}" -d "${tools_unzip}"
+            validate_and_use_tools_home "${tools_home}"
+          elif valid_tools_home "${app_tools}"; then
             echo "✅ DevEco Studio tools found at ${app_tools}"
-            echo "HM_COMMAND_LINE_TOOLS_HOME=${app_tools}" >> $GITHUB_ENV
-          elif [ -x "${user_tools}/ohpm/bin/ohpm" ] && [ -x "${user_tools}/hvigor/bin/hvigorw" ]; then
+            use_tools_home "${app_tools}"
+          elif valid_tools_home "${user_tools}"; then
             echo "✅ DevEco Studio tools found at ${user_tools}"
-            echo "HM_COMMAND_LINE_TOOLS_HOME=${user_tools}" >> $GITHUB_ENV
+            use_tools_home "${user_tools}"
           else
             echo "⚠️  HarmonyOS Command Line Tools not found in cache"
             echo ""
             echo "To enable CI:"
             echo "1. Download tools from DevEco Studio or https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos"
-            echo "2. Put ${tools_zip} in ${tools_dir} on a self-hosted runner, or install DevEco Studio"
+            echo "2. Put ${tools_zip} in ${tools_dir} on a self-hosted runner, install DevEco Studio, or set HARMONY_COMMANDLINE_TOOLS_URL"
             echo "3. Re-run this workflow"
-            exit 1
+            echo "HARMONY_TOOLS_AVAILABLE=false" >> $GITHUB_ENV
+            {
+              echo "## HarmonyOS build skipped"
+              echo ""
+              echo "HarmonyOS Command Line Tools were not available on this runner."
+              echo "Use a self-hosted macOS runner with DevEco Studio installed, cache ${tools_zip}, or set the HARMONY_COMMANDLINE_TOOLS_URL secret."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Run Fastlane
+        if: env.HARMONY_TOOLS_AVAILABLE == 'true'
         working-directory: ./electron
         run: |
           task="${{ github.event.inputs.task || 'build_hap' }}"
           echo "Running fastlane lane: $task"
           bundle exec fastlane $task
 
+      - name: Skip Fastlane
+        if: env.HARMONY_TOOLS_AVAILABLE != 'true'
+        run: |
+          echo "Skipping fastlane because HarmonyOS Command Line Tools are unavailable on this runner."
+
       - name: Upload HAP artifact
-        if: success()
+        if: env.HARMONY_TOOLS_AVAILABLE == 'true' && success()
         uses: actions/upload-artifact@v4
         with:
           name: harmony-hap
@@ -138,7 +180,7 @@ jobs:
           retention-days: 30
 
       - name: Upload APP artifact
-        if: success()
+        if: env.HARMONY_TOOLS_AVAILABLE == 'true' && success()
         uses: actions/upload-artifact@v4
         with:
           name: harmony-app
