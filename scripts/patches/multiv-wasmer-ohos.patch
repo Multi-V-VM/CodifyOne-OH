@@ -1,0 +1,119 @@
+diff --git a/lib/journal/src/concrete/archived.rs b/lib/journal/src/concrete/archived.rs
+index 1a0e633..272ae50 100644
+--- a/lib/journal/src/concrete/archived.rs
++++ b/lib/journal/src/concrete/archived.rs
+@@ -406,6 +406,9 @@ impl JournalEntry<'_> {
+             Self::SocketSetOptTimeV1 { .. } => JournalEntryRecordType::SocketSetOptTimeV1,
+             Self::SocketShutdownV1 { .. } => JournalEntryRecordType::SocketShutdownV1,
+             Self::SnapshotV1 { .. } => JournalEntryRecordType::SnapshotV1,
++            Self::MvvmCheckpointV1 { .. }
++            | Self::MvvmIncrementalCheckpointV1 { .. }
++            | Self::MigrationRequestV1 { .. } => JournalEntryRecordType::SnapshotV1,
+         }
+     }
+ 
+@@ -987,6 +990,13 @@ impl JournalEntry<'_> {
+                 },
+                 serializer,
+             ),
++            JournalEntry::MvvmCheckpointV1 { .. }
++            | JournalEntry::MvvmIncrementalCheckpointV1 { .. }
++            | JournalEntry::MigrationRequestV1 { .. } => {
++                return Err(anyhow::format_err!(
++                    "MVVM journal entries are not supported by the rkyv archive writer yet"
++                ));
++            }
+         }
+         .map_err(|err| anyhow::format_err!("failed to serialize journal record - {err}"))?;
+         Ok(amt)
+diff --git a/lib/journal/src/concrete/compacting.rs b/lib/journal/src/concrete/compacting.rs
+index 6b542e1..eaf3ad6 100644
+--- a/lib/journal/src/concrete/compacting.rs
++++ b/lib/journal/src/concrete/compacting.rs
+@@ -808,7 +808,10 @@ impl WritableJournal for CompactingJournalTx {
+             | JournalEntry::PortRouteClearV1
+             | JournalEntry::PortRouteDelV1 { .. }
+             | JournalEntry::CreateSymbolicLinkV1 { .. }
+-            | JournalEntry::CreateHardLinkV1 { .. } => {
++            | JournalEntry::CreateHardLinkV1 { .. }
++            | JournalEntry::MvvmCheckpointV1 { .. }
++            | JournalEntry::MvvmIncrementalCheckpointV1 { .. }
++            | JournalEntry::MigrationRequestV1 { .. } => {
+                 state.whitelist.insert(event_index);
+             }
+         }
+diff --git a/lib/journal/src/concrete/filter.rs b/lib/journal/src/concrete/filter.rs
+index 918554d..11b2af5 100644
+--- a/lib/journal/src/concrete/filter.rs
++++ b/lib/journal/src/concrete/filter.rs
+@@ -320,7 +320,10 @@ impl<W: WritableJournal> WritableJournal for FilteredJournalTx<W> {
+                 }
+                 entry
+             }
+-            JournalEntry::SnapshotV1 { .. } => {
++            JournalEntry::SnapshotV1 { .. }
++            | JournalEntry::MvvmCheckpointV1 { .. }
++            | JournalEntry::MvvmIncrementalCheckpointV1 { .. }
++            | JournalEntry::MigrationRequestV1 { .. } => {
+                 if self.config.filter_snapshots {
+                     return Ok(LogWriteResult {
+                         record_start: 0,
+diff --git a/lib/journal/src/concrete/printing.rs b/lib/journal/src/concrete/printing.rs
+index 5d6086d..b8f2440 100644
+--- a/lib/journal/src/concrete/printing.rs
++++ b/lib/journal/src/concrete/printing.rs
+@@ -350,6 +350,38 @@ impl fmt::Display for JournalEntry<'_> {
+             JournalEntry::SnapshotV1 { when, trigger } => {
+                 write!(f, "snapshot (when={when:?}, trigger={trigger:?})")
+             }
++            JournalEntry::MvvmCheckpointV1 {
++                version,
++                source_arch,
++                module_hash,
++                checkpoint_data,
++                when,
++            } => write!(
++                f,
++                "mvvm-checkpoint (version={version}, arch={source_arch}, hash.len={}, data.len={}, when={when:?})",
++                module_hash.len(),
++                checkpoint_data.len()
++            ),
++            JournalEntry::MvvmIncrementalCheckpointV1 {
++                base_checkpoint_id,
++                memory_delta,
++                stack_delta,
++                when,
++            } => write!(
++                f,
++                "mvvm-incremental-checkpoint (base={base_checkpoint_id}, memory-delta.len={}, stack-delta.len={}, when={when:?})",
++                memory_delta.len(),
++                stack_delta.len()
++            ),
++            JournalEntry::MigrationRequestV1 {
++                target_arch,
++                target_endpoint,
++                priority,
++                when,
++            } => write!(
++                f,
++                "mvvm-migration-request (target-arch={target_arch}, endpoint={target_endpoint}, priority={priority}, when={when:?})"
++            ),
+         }
+     }
+ }
+diff --git a/lib/wasix/src/syscalls/journal/play_event.rs b/lib/wasix/src/syscalls/journal/play_event.rs
+index 92a9d70..adb67c4 100644
+--- a/lib/wasix/src/syscalls/journal/play_event.rs
++++ b/lib/wasix/src/syscalls/journal/play_event.rs
+@@ -851,6 +851,11 @@ impl<'a> JournalSyscallPlayer<'a, '_> {
+                         .map_err(anyhow_err_to_runtime_err)?
+                 }
+             }
++            JournalEntry::MvvmCheckpointV1 { .. }
++            | JournalEntry::MvvmIncrementalCheckpointV1 { .. }
++            | JournalEntry::MigrationRequestV1 { .. } => {
++                tracing::trace!("Replay journal - ignoring MVVM migration marker");
++            }
+         }
+         Ok(())
+     }

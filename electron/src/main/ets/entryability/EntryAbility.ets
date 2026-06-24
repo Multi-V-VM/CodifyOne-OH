@@ -7,9 +7,8 @@ import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
 import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
 import { Configuration } from '@ohos.app.ability.Configuration';
-import { startOhPtyChild } from '../ohpty/OhPtyChild';
 import { WebAbility } from 'web_engine';
-import { startQemu } from '../qemu/QemuRunner';
+import { startWasmer } from '../wasmer/WasmerHost';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 
 // 文件管理器"用 OHcode 打开"文件/文件夹时写入的一次性标记，WebWindow.buildArgs 启动时消费。
@@ -25,12 +24,12 @@ export default class EntryAbility extends WebAbility {
 
     this.handleOpenWant(want);
 
-    startQemu(this.context)
+    startWasmer()
       .then((ok: boolean) => {
-        console.info(`[QEMU] started=${ok}`);
+        console.info(`[Wasmer] started=${ok}`);
       })
       .catch((err: Error) => {
-        console.error(`[QEMU] failed=${JSON.stringify(err)}`);
+        console.error(`[Wasmer] failed=${JSON.stringify(err)}`);
       });
   }
 
