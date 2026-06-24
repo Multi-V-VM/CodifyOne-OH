@@ -1,3 +1,6 @@
 [submodule "third_party/wasmer"]
 	path = third_party/wasmer
 	url = https://github.com/Multi-V-VM/wasmer.git
+[submodule "third_party/electron"]
+	path = third_party/electron
+	url = https://github.com/Multi-V-VM/electron

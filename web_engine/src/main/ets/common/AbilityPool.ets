@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { inject, injectable } from 'inversify';
+import { injectable } from 'inversify';
 import common from '@ohos.app.ability.common';
 import { NewWindowParam, WindowBound, WindowPreferences } from '../interface/CommonInterface';
 import { AbilityManager } from './AbilityManager';
 import LogUtil from '../utils/LogUtil';
+import Inject from './InjectModule';
+import { getWindowPoolNative, NativePoolStats } from './WindowPoolNative';
 
 const TAG: string = 'AbilityPool';
 
@@ -20,6 +22,7 @@ export interface PooledAbility {
   lastUsed: number;
   preferences: WindowPreferences;
   bounds: WindowBound;
+  url?: string; // URL associated with this window
 }
 
 /**
@@ -37,7 +40,7 @@ export interface PoolConfig {
 /**
  * Pool statistics for monitoring
  */
-export interface PoolStats {
+export interface AbilityPoolStats {
   totalIdle: number;
   active: number;
   entryAbilityIdle: number;
@@ -54,13 +57,14 @@ export interface PoolStats {
 @injectable()
 export class AbilityPool {
   private abilityManager: AbilityManager;
+  private nativePool = getWindowPoolNative();
   private idlePool: Map<string, PooledAbility[]> = new Map();
   private activePool: Map<string, PooledAbility> = new Map();
 
   // Pool configuration
-  private maxPoolSize: number = 5;
-  private baseMaxPoolSize: number = 5; // Original max for adaptive sizing
-  private maxIdleTime: number = 300000; // 5 minutes
+  private maxPoolSize: number = 2;  // Reduced to limit memory usage
+  private baseMaxPoolSize: number = 2; // Original max for adaptive sizing
+  private maxIdleTime: number = 120000; // 2 minutes - more aggressive cleanup
   private cleanupInterval: number = 60000; // 1 minute
 
   // Memory pressure monitoring
@@ -78,22 +82,8 @@ export class AbilityPool {
   // Cleanup timer
   private cleanupTimer: number = -1;
 
-  constructor(
-    @inject(AbilityManager) abilityManager: AbilityManager,
-    config?: PoolConfig
-  ) {
-    this.abilityManager = abilityManager;
-
-    if (config) {
-      this.maxPoolSize = config.maxPoolSize ?? this.maxPoolSize;
-      this.baseMaxPoolSize = this.maxPoolSize;
-      this.maxIdleTime = config.maxIdleTime ?? this.maxIdleTime;
-      this.cleanupInterval = config.cleanupInterval ?? this.cleanupInterval;
-      this.enableMemoryPressure = config.enableMemoryPressure ?? this.enableMemoryPressure;
-      this.lowMemoryThreshold = config.lowMemoryThreshold ?? this.lowMemoryThreshold;
-      this.adaptiveSizing = config.adaptiveSizing ?? this.adaptiveSizing;
-    }
-
+  constructor() {
+    this.abilityManager = Inject.get(AbilityManager);
     this.startCleanupTimer();
     this.startMemoryMonitoring();
   }
@@ -143,6 +133,7 @@ export class AbilityPool {
 
   /**
    * Releases an ability back to the pool instead of destroying it
+   * Uses very conservative strategy - only pool EntryAbility, destroy stateless
    * @param windowId The window ID to release
    */
   release(windowId: string): void {
@@ -152,12 +143,22 @@ export class AbilityPool {
       return;
     }
 
-    // Check if pool is at capacity
+    // More aggressive: always destroy stateless abilities, only consider pooling EntryAbility
+    if (pooled.abilityType !== 'EntryAbility') {
+      LogUtil.info(TAG, `Destroying ${pooled.abilityType} (only EntryAbility is pooled)`);
+      this.destroyAbility(pooled);
+      this.activePool.delete(windowId);
+      this.nativePool.notifyDestroyed(windowId);
+      return;
+    }
+
+    // Check if pool is at capacity (very conservative)
     const idleList = this.idlePool.get(pooled.abilityType) || [];
     if (idleList.length >= this.maxPoolSize) {
       LogUtil.info(TAG, `Pool at capacity for ${pooled.abilityType}, destroying ability: ${windowId}`);
       this.destroyAbility(pooled);
       this.activePool.delete(windowId);
+      this.nativePool.notifyDestroyed(windowId);
       return;
     }
 
@@ -166,6 +167,8 @@ export class AbilityPool {
     idleList.push(pooled);
     this.idlePool.set(pooled.abilityType, idleList);
     this.activePool.delete(windowId);
+
+    this.nativePool.poolWindow(windowId, 0, pooled.url ?? '');
 
     LogUtil.info(TAG, `Released ability to pool: ${windowId} (type: ${pooled.abilityType})`);
     LogUtil.info(TAG, `Pool stats - Idle: ${idleList.length}, Active: ${this.activePool.size}`);
@@ -182,6 +185,9 @@ export class AbilityPool {
       LogUtil.info(TAG, `Notified of destroyed ability: ${windowId}`);
     }
 
+    // Notify native pool of destruction
+    this.nativePool.notifyDestroyed(windowId);
+
     // Also check idle pool
     this.idlePool.forEach((list, abilityType) => {
       const idx = list.findIndex(p => p.windowId === windowId);
@@ -189,6 +195,8 @@ export class AbilityPool {
         list.splice(idx, 1);
         this.idlePool.set(abilityType, list);
         LogUtil.info(TAG, `Removed destroyed ability from idle pool: ${windowId}`);
+        // Notify native pool
+        this.nativePool.notifyDestroyed(windowId);
       }
     });
   }
@@ -252,6 +260,9 @@ export class AbilityPool {
    * Destroys an ability and its resources
    */
   private destroyAbility(pooled: PooledAbility): void {
+    // Notify native pool before destruction
+    this.nativePool.notifyDestroyed(pooled.windowId);
+
     try {
       pooled.context?.terminateSelf()
         .catch((err: Error) => {
@@ -320,13 +331,19 @@ export class AbilityPool {
    */
   getPoolStats(): Record<string, number> {
     const stats: Record<string, number> = {
-      totalIdle: 0,
-      active: this.activePool.size
+      'totalIdle': 0,
+      'active': this.activePool.size,
+      'EntryAbility': 0,
+      'StatelessAbility': 0
     };
 
     this.idlePool.forEach((list, abilityType) => {
-      stats[abilityType] = list.length;
-      stats.totalIdle += list.length;
+      if (abilityType === 'EntryAbility') {
+        stats['EntryAbility'] = list.length;
+      } else if (abilityType === 'StatelessAbility') {
+        stats['StatelessAbility'] = list.length;
+      }
+      stats['totalIdle'] += list.length;
     });
 
     return stats;
@@ -357,47 +374,56 @@ export class AbilityPool {
 
   /**
    * Starts memory pressure monitoring
+   * More frequent checks to catch memory pressure earlier
    */
   private startMemoryMonitoring(): void {
     if (!this.enableMemoryPressure) {
       return;
     }
 
-    // Check memory every 30 seconds
+    // Check memory every 10 seconds (more frequent)
     setInterval(() => {
       this.checkMemoryPressure();
-    }, 30000);
+    }, 10000);
 
-    LogUtil.info(TAG, 'Memory pressure monitoring started');
+    LogUtil.info(TAG, 'Memory pressure monitoring started (10s interval)');
   }
 
   /**
    * Checks current memory pressure and adjusts pool accordingly
+   * Uses more aggressive strategy to prevent V8 OOM
    */
   private checkMemoryPressure(): void {
-    // This is a simplified check - in real implementation you'd query actual memory
-    // For now, use pool size as a proxy for memory pressure
     const totalAbilities = this.getTotalIdleCount() + this.getActiveCount();
 
-    if (totalAbilities > this.maxPoolSize * 2) {
+    // Much more aggressive - any idle abilities when we have active ones indicates potential pressure
+    if (this.getActiveCount() > 0 && this.getTotalIdleCount() > 0) {
       this.memoryPressureLevel = 'high';
-      if (this.adaptiveSizing) {
-        this.maxPoolSize = Math.max(2, Math.floor(this.baseMaxPoolSize / 2));
-        LogUtil.warn(TAG, `High memory pressure - Reduced pool size to ${this.maxPoolSize}`);
-      }
-      this.emergencyCleanup();
-    } else if (totalAbilities > this.maxPoolSize * 1.5) {
+      // Destroy ALL idle abilities when any are active to minimize memory
+      LogUtil.warn(TAG, `Memory pressure detected - clearing all idle abilities`);
+      this.clearIdlePool();
+      this.maxPoolSize = 1; // Minimize pool size
+    } else if (totalAbilities > this.maxPoolSize) {
       this.memoryPressureLevel = 'normal';
-      if (this.adaptiveSizing && this.maxPoolSize < this.baseMaxPoolSize) {
-        this.maxPoolSize = Math.min(this.baseMaxPoolSize, this.maxPoolSize + 1);
-        LogUtil.info(TAG, `Memory pressure normal - Adjusted pool size to ${this.maxPoolSize}`);
-      }
+      this.emergencyCleanup();
     } else {
       this.memoryPressureLevel = 'low';
-      if (this.adaptiveSizing && this.maxPoolSize < this.baseMaxPoolSize) {
-        this.maxPoolSize = Math.min(this.baseMaxPoolSize, this.maxPoolSize + 1);
-      }
     }
+  }
+
+  /**
+   * Clear only idle pool without affecting active abilities
+   */
+  private clearIdlePool(): void {
+    let totalCleared = 0;
+    this.idlePool.forEach((list, abilityType) => {
+      list.forEach(pooled => {
+        this.destroyAbility(pooled);
+        totalCleared++;
+      });
+    });
+    this.idlePool.clear();
+    LogUtil.warn(TAG, `Cleared ${totalCleared} idle abilities from pool`);
   }
 
   /**
@@ -422,11 +448,11 @@ export class AbilityPool {
   /**
    * Gets detailed pool statistics
    */
-  getDetailedStats(): PoolStats {
+  getDetailedStats(): AbilityPoolStats {
     const entryIdle = this.getIdleCount('EntryAbility');
     const statelessIdle = this.getIdleCount('StatelessAbility');
 
-    return {
+    const stats: AbilityPoolStats = {
       totalIdle: this.getTotalIdleCount(),
       active: this.getActiveCount(),
       entryAbilityIdle: entryIdle,
@@ -435,6 +461,7 @@ export class AbilityPool {
       totalReused: this.totalReused,
       memoryPressureLevel: this.memoryPressureLevel
     };
+    return stats;
   }
 
   /**

@@ -7,6 +7,7 @@ include_directories(${NATIVERENDER_ROOT_PATH})
 
 add_library(entry SHARED
     wasmer_host.cpp
+    window_pool_host.cpp
 )
 
 target_compile_features(entry PRIVATE cxx_std_17)

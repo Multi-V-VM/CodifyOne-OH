@@ -1,0 +1,131 @@
+name: Fastlane CI
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main, develop ]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Fastlane task to run'
+        required: true
+        default: 'build_hap'
+        type: choice
+        options:
+          - build_hap
+          - build_app
+          - test
+          - deploy
+
+env:
+  NODE_VERSION: '18'
+  JAVA_VERSION: '17'
+
+jobs:
+  fastlane-harmony:
+    name: Fastlane Harmony Build
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Cache ohpm modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ohos
+            ~/.ohpm
+          key: ${{ runner.os }}-ohpm-${{ hashFiles('**/oh-package.json5') }}
+          restore-keys: |
+            ${{ runner.os }}-ohpm-
+
+      - name: Cache hvigor build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.hvigor
+            **/.hvigor
+          key: ${{ runner.os }}-hvigor-${{ hashFiles('**/hvigor') }}
+          restore-keys: |
+            ${{ runner.os }}-hvigor-
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: './electron'
+
+      - name: Install fastlane
+        working-directory: ./electron
+        run: |
+          gem install fastlane -NV
+
+      - name: Run Fastlane
+        working-directory: ./electron
+        env:
+          HM_COMMAND_LINE_TOOLS_REPO: ${{ github.workspace }}/.harmony-tools
+          # Add any required signing/config env vars here as secrets
+          # HARMY_SIGNING_KEY: ${{ secrets.HARMY_SIGNING_KEY }}
+        run: |
+          task="${{ github.event.inputs.task || 'build_hap' }}"
+          echo "Running fastlane lane: $task"
+          fastlane $task
+
+      - name: Upload HAP artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-hap
+          path: |
+            **/build/**/*.hap
+            **/outputs/**/*.hap
+          retention-days: 30
+
+      - name: Upload APP artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-app
+          path: |
+            **/build/**/*.app
+            **/outputs/**/*.app
+          retention-days: 30
+
+  # Optional: Deploy job that runs only on specific conditions
+  deploy:
+    name: Deploy to Distribution
+    needs: fastlane-harmony
+    runs-on: macos-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'deploy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Deploy to server
+        env:
+          DEPLOY_SERVER: ${{ secrets.DEPLOY_SERVER }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          # Add your deployment commands here
+          echo "Deploying to distribution server..."
+          # Example: scp/minio upload, etc.

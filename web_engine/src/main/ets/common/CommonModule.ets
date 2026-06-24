@@ -5,13 +5,11 @@
 import { ContainerModule } from 'inversify';
 
 import { AbilityManager } from '../common/AbilityManager';
-import { AbilityPool } from '../common/AbilityPool';
 import { DragParamManager } from '../common/DragParamManager';
 import { SystemFloatingWindowManager } from './SystemFloatingWindowManager';
 
 export const commonModule = new ContainerModule((bind) => {
   bind(AbilityManager).toSelf();
-  bind(AbilityPool).toSelf();
   bind(DragParamManager).toSelf();
   bind(SystemFloatingWindowManager).toSelf();
 });

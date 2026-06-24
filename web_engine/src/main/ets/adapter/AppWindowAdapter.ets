@@ -21,6 +21,7 @@ import { IStyleData, IUpdateStyle, WindowStyle } from '../common/WindowStyle';
 import LaunchHelper from '../utils/LaunchHelper';
 import LogMethod from '../common/LogDecorator';
 import LogUtil from '../utils/LogUtil';
+import Inject from '../common/InjectModule';
 import { NewWindowParam, PointCoordinate, WindowType, WindowBound, WindowPreferences, ILoginInfo, ILogin } from "../interface/CommonInterface"
 
 const TAG: string = 'AppWindow';
@@ -28,7 +29,7 @@ const TAG: string = 'AppWindow';
 @injectable()
 export class AppWindowAdapter extends BaseAdapter {
   private abilityManager: AbilityManager;
-  private abilityPool: AbilityPool;
+  private abilityPool: AbilityPool | undefined = undefined;
   private bundleName: string = 'com.huawei.ohos_electron';
   private bundleFlags = bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION |
                         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_METADATA;
@@ -39,13 +40,11 @@ export class AppWindowAdapter extends BaseAdapter {
 
   constructor(
     @inject(AbilityManager) abilityManager: AbilityManager,
-    @inject(ContextAdapter) ctxAdapter: ContextAdapter,
-    @inject(AbilityPool) abilityPool: AbilityPool
+    @inject(ContextAdapter) ctxAdapter: ContextAdapter
   ) {
     super();
     this.abilityManager = abilityManager;
     this.ctxAdapter = ctxAdapter;
-    this.abilityPool = abilityPool;
 
     try {
       let data = bundleManager.getBundleInfoForSelfSync(this.bundleFlags);
@@ -54,6 +53,17 @@ export class AppWindowAdapter extends BaseAdapter {
       let message = (err as BusinessError).message;
       LogUtil.error(TAG, `getBundleInfoForSelfSync failed.: ${message}`);
     }
+  }
+
+  /**
+   * Lazily gets the AbilityPool instance
+   * Uses Inject.get() pattern to avoid DI binding conflicts
+   */
+  private getPool(): AbilityPool {
+    if (!this.abilityPool) {
+      this.abilityPool = Inject.get(AbilityPool);
+    }
+    return this.abilityPool;
   }
 
   private getWindow(id: number): window.Window | undefined {
@@ -82,7 +92,7 @@ export class AppWindowAdapter extends BaseAdapter {
     }
 
     // Check pool first for reusable ability
-    let pooled = this.abilityPool.acquire(abilityName, param);
+    let pooled = this.getPool().acquire(abilityName, param);
     if (pooled) {
       this.reusePooledAbility(pooled, param);
       return;
@@ -138,46 +148,45 @@ export class AppWindowAdapter extends BaseAdapter {
       if (param.display_id != -1) {
         options.displayId = param.display_id;
       }
-      LaunchHelper.LaunchWithOptions(this.ctxAdapter.getActiveContext(), want, options)
-        .catch((err: BusinessError) => {
-          LogUtil.error(TAG, `Failed to launch window. Cause: ${JSON.stringify(err)}`);
-        })
-        .finally(() => {
-          // Always release PixelMap to prevent native memory leaks
-          imagePixelMap?.release?.();
-        });
+      const launchSuccess = LaunchHelper.LaunchWithOptions(this.ctxAdapter.getActiveContext(), want, options);
+      if (!launchSuccess) {
+        LogUtil.error(TAG, 'Failed to launch window');
+      }
+      // Always release PixelMap to prevent native memory leaks
+      imagePixelMap?.release?.();
     }).catch((err: BusinessError) => {
       LogUtil.error(TAG, `Failed to create PixelMap. Cause: ${JSON.stringify(err)}`);
+      // Still release PixelMap on error
+      imagePixelMap?.release?.();
     })
   }
 
   /**
    * Reuses a pooled ability for a new window
-   * Shows the hidden ability and notifies native context
+   * Shows the hidden ability and notifies native context to reuse WebContents
    */
   private reusePooledAbility(pooled: PooledAbility, param: NewWindowParam): void {
     let context = pooled.context as common.UIAbilityContext;
 
-    // Show the hidden ability
-    context?.showAbility().then(() => {
-      LogUtil.info(TAG, `Reusing pooled ability: ${param.window_id} (type: ${pooled.abilityType})`);
-
-      // Update window position if needed
-      let windowClass = this.abilityManager.getProxy(parseInt(param.window_id))?.getWindow();
-      if (windowClass && (pooled.bounds.left !== param.bounds.left || pooled.bounds.top !== param.bounds.top)) {
-        windowClass.moveWindowToAsync(param.bounds.left, param.bounds.top)
-          .catch((err: BusinessError) => {
-            LogUtil.error(TAG, `Failed to move reused window. Cause: ${JSON.stringify(err)}`);
-          });
+    // Pass reuse information through Want parameters
+    const want: Want = {
+      bundleName: this.bundleName,
+      abilityName: pooled.abilityType,
+      parameters: {
+        'xcomponentId': param.window_id,
+        'windowType': WindowType.MAIN_WINDOW,
+        'reuseWindow': 'true',  // Signal to reuse instead of create new
+        'originWindowId': pooled.windowId,  // Original window ID for WebContents lookup
+        'instanceKey': param.window_id,
       }
+    };
 
-      // Notify native context to update WebView content without creating new isolate
-      // TODO: Add kReuseWindow command implementation in native code
-      LogUtil.info(TAG, `Pooled ability shown for window: ${param.window_id}`);
+    // Show the hidden ability with reuse parameters
+    context?.startAbility(want).then(() => {
+      LogUtil.info(TAG, `Reusing pooled ability: ${param.window_id} (type: ${pooled.abilityType})`);
     }).catch((err: BusinessError) => {
       LogUtil.error(TAG, `Failed to show pooled ability. Cause: ${JSON.stringify(err)}`);
-      // If showing fails, release back to pool and create new window
-      this.abilityPool.release(param.window_id);
+      // If showing fails, create new window instead
       this.createWindow(param);
     });
   }
@@ -195,7 +204,7 @@ export class AppWindowAdapter extends BaseAdapter {
         // Hide and return to pool instead of destroying
         context.hideAbility().then(() => {
           LogUtil.info(TAG, `Hiding ability for pooling: ${windowId}`);
-          this.abilityPool.release(windowId);
+          this.getPool().release(windowId);
         }).catch((err: BusinessError) => {
           LogUtil.error(TAG, `Failed to hide ability. Cause: ${JSON.stringify(err)}`);
           // If hide fails, fall through to terminate
@@ -221,11 +230,12 @@ export class AppWindowAdapter extends BaseAdapter {
     // Get ability type from window ID or preferences
     // For now, pool stateless abilities always, EntryAbility only if under limit
     let preferences = proxy.getWindowPreferences();
-    let idleCount = this.abilityPool.getIdleCount('StatelessAbility');
+    let poolStats = this.getPool().getPoolStats();
+    let idleCount = poolStats['StatelessAbility'];
 
     // Pool stateless abilities more aggressively
-    // Pool EntryAbility only if under the limit
-    return idleCount < this.abilityPool['maxPoolSize'];
+    // Pool EntryAbility only if under the limit (max 5 by default)
+    return idleCount < 5;
   }
 
   /**

@@ -1,0 +1,235 @@
+# Fastlane configuration for HarmonyOS Electron project
+# Based on: https://docs.fastlane.tools
+
+# Command line tools configuration
+COMMAND_LINE_TOOLS_PLATFORM = "mac-arm64"
+COMMAND_LINE_TOOLS_VERSION = "5.0.3.810"
+
+default_platform(:harmony)
+
+platform :harmony do
+  desc "构建环境准备"
+  private_lane :prepare do
+    command_line_tools_repo = ENV["HM_COMMAND_LINE_TOOLS_REPO"]
+    puts "$HM_COMMAND_LINE_TOOLS_REPO: #{command_line_tools_repo}"
+
+    if !command_line_tools_repo.nil?
+      command_line_tools_zip = File.join(command_line_tools_repo, "commandline-tools-#{COMMAND_LINE_TOOLS_PLATFORM}-#{COMMAND_LINE_TOOLS_VERSION}.zip")
+      command_line_tools_unzip = File.join(command_line_tools_repo, "unzip", COMMAND_LINE_TOOLS_VERSION)
+      command_line_tools_home = File.join(command_line_tools_unzip, "command-line-tools")
+
+      if !File.exist?(command_line_tools_home)
+        if !File.exist?(command_line_tools_unzip)
+          sh "mkdir -p #{command_line_tools_unzip}"
+        end
+        sh "unzip #{command_line_tools_zip} -d #{command_line_tools_unzip}"
+      end
+
+      ENV["NODE_HOME"] = "#{command_line_tools_home}/tool/node"
+      ENV["PATH"] = "#{command_line_tools_home}/bin:#{ENV["NODE_HOME"]}/bin:#{ENV["PATH"]}"
+      puts "$PATH: #{ENV["PATH"]}"
+    end
+
+    sh "java -version"
+    sh "ohpm -v"
+
+    Dir.chdir("../") do
+      sh("ohpm install --all")
+    end
+  end
+
+  desc "hvigor 命令行"
+  private_lane :hvigor do |options|
+    task = options[:task]
+    product = options[:product]
+    build_mode = options[:build_mode]
+    args = options[:args] || []
+
+    if !product.nil?
+      args = args + ["-p", "product=#{product}"]
+    end
+    if !build_mode.nil?
+      args = args + ["-p", "buildMode=#{build_mode}"]
+    end
+
+    if task.nil?
+      cmds = ["hvigorw"] + args
+    else
+      cmds = ["hvigorw", task] + args
+    end
+
+    project_dir = "../"
+    Dir.chdir(project_dir) do
+      sh(*cmds)
+    end
+
+    # 只处理打包task
+    if !(task =~ /\b(assemble)/)
+      next
+    end
+
+    hap_search_path = File.join(project_dir, "**", "build", "**", "outputs", "**", "*.hap")
+    app_search_path = File.join(project_dir, "build", "outputs", "**", "*.app")
+    new_haps = Dir[hap_search_path].map { |path| File.expand_path(path) }
+    new_apps = Dir[app_search_path].map { |path| File.expand_path(path) }
+
+    last_hap_path = new_haps.sort_by(&File.method(:mtime)).last
+    last_app_path = new_apps.sort_by(&File.method(:mtime)).last
+
+    Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH] = File.expand_path(last_hap_path) if last_hap_path
+    Actions.lane_context[:HVIGOR_APP_OUTPUT_PATH] = File.expand_path(last_app_path) if last_app_path
+  end
+
+  desc "Hap打包"
+  lane :build_hap do |options|
+    product = options[:product] || "default"
+    build_mode = options[:build_mode] || "release"
+
+    prepare
+
+    hvigor(task: "clean")
+    hvigor(
+      task: "assembleHap",
+      product: product,
+      build_mode: build_mode,
+      args: ["--mode", "module", "--no-daemon"],
+    )
+
+    hap_path = Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH]
+    if hap_path
+      version_name = get_version_name()
+      hap_name = "#{File.basename(hap_path, ".hap")}_#{version_name}.hap"
+      new_hap_path = File.join(File.dirname(hap_path), hap_name)
+      File.rename(hap_path, new_hap_path)
+      puts "Build output: #{new_hap_path}"
+
+      Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH] = new_hap_path
+    end
+  end
+
+  desc "App商店包打包"
+  lane :build_app do |options|
+    product = options[:product] || "default"
+    build_mode = options[:build_mode] || "release"
+
+    prepare
+
+    hvigor(task: "clean")
+    hvigor(
+      task: "assembleApp",
+      product: product,
+      build_mode: build_mode,
+      args: ["--mode", "project", "--no-daemon"],
+    )
+
+    app_path = Actions.lane_context[:HVIGOR_APP_OUTPUT_PATH]
+    if app_path
+      version_name = get_version_name()
+      app_name = "#{File.basename(app_path, ".app")}_#{version_name}.app"
+      new_app_path = File.join(File.dirname(app_path), app_name)
+      File.rename(app_path, new_app_path)
+      puts "Build output: #{new_app_path}"
+
+      Actions.lane_context[:HVIGOR_APP_OUTPUT_PATH] = new_app_path
+    end
+  end
+
+  desc "上传文件到文件服务"
+  private_lane :upload_to_storage do |options|
+    file_path = options[:file_path]
+    remote_path = options[:remote_path]
+
+    if !File.exist?(file_path)
+      puts "⚠️ File not exist: #{file_path}"
+      next
+    end
+
+    file_name = File.basename(file_path)
+
+    # 使用 mc (MinIO Client) 上传
+    if options[:minio]
+      sh("mc", "cp", file_path, "#{remote_path}/#{file_name}")
+    end
+
+    # 使用 scp 上传
+    if options[:scp_server]
+      sh("scp", file_path, "#{options[:scp_server]}:#{remote_path}/#{file_name}")
+    end
+
+    puts "Uploaded: #{file_name}"
+  end
+
+  desc "部署"
+  lane :deploy do |options|
+    target = options[:target] || "minio"
+
+    build_hap
+
+    hap_path = Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH]
+    if hap_path
+      upload_to_storage(
+        file_path: hap_path,
+        remote_path: options[:remote_path] || "internal/harmony",
+        minio: target == "minio"
+      )
+    end
+
+    send_notification(
+      message: "HarmonyOS 构建成功",
+      url: options[:download_url]
+    )
+  end
+
+  desc "发送通知"
+  private_lane :send_notification do |options|
+    message = options[:message]
+    url = options[:url]
+
+    puts "发送通知: #{message}"
+    puts "下载地址: #{url}"
+
+    # 钉钉通知
+    if ENV["DINGTALK_WEBHOOK"]
+      require 'net/http'
+      require 'json'
+      uri = URI(ENV["DINGTALK_WEBHOOK"])
+      data = {
+        msgtype: "text",
+        text: {
+          content: "#{message}\n下载: #{url}"
+        }
+      }
+
+      Net::HTTP.post(uri, body: data.to_json, headers: {'Content-Type' => 'application/json'})
+    end
+  end
+
+  desc "获取版本号"
+  private_lane :get_version_name do
+    app_scope_path = "../AppScope/app.json5"
+    if File.exist?(app_scope_path)
+      JSON.parse(File.read(app_scope_path))["app"]["versionName"]
+    else
+      "1.0.0"
+    end
+  end
+
+  desc "测试"
+  lane :test do
+    prepare
+    # 运行测试命令
+    Dir.chdir("../") do
+      sh("hvigorw test --no-daemon")
+    end
+  end
+end
+
+# Helper function
+def get_version_name
+  app_scope_path = "../AppScope/app.json5"
+  if File.exist?(app_scope_path)
+    JSON.parse(File.read(app_scope_path))["app"]["versionName"]
+  else
+    "1.0.0"
+  end
+end

@@ -227,12 +227,16 @@ export class WebAbility extends WebBaseAbility {
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     let uriNotNull = want["uri"] !== undefined && want["uri"] !== '';
+    let params = want.parameters || {};
+    let reuseWindow = params["reuseWindow"] === 'true';
+
     if(want!== undefined && want !== null) {
       LogUtil.info(TAG, 'onNewWant begin, want: ' +
         'bundleName: ' + JSON.stringify(want.bundleName) +
         ', abilityName: ' + JSON.stringify(want.abilityName) +
         ', deviceId: ' + JSON.stringify(want.deviceId) +
         ', uri not null: ' + JSON.stringify(uriNotNull) +
+        ', reuseWindow: ' + JSON.stringify(reuseWindow) +
         ', type: ' + JSON.stringify(want.type) +
         ', flags: ' + JSON.stringify(want.flags) +
         ', action: ' + JSON.stringify(want.action) +
@@ -241,9 +245,20 @@ export class WebAbility extends WebBaseAbility {
         ', moduleName: ' + JSON.stringify(want.moduleName) +
         ', LaunchParam: ' + JSON.stringify(launchParam));
     }
-    if (uriNotNull) {
-      let uri = want['uri'] as string;
-      this.openNewWindow(uri);
+
+    let url = (want['uri'] || this.startUri) as string;
+
+    if (reuseWindow) {
+      // Reuse existing WebContents instead of creating new
+      let originWindowId = params['originWindowId'] as string;
+      LogUtil.info(TAG, `Reusing WebContents from window: ${originWindowId}`);
+      // Pass originWindowId via user_data field since CommandParameter is limited
+      this.nativeContext.ExecuteCommand(CommandType.kReuseWindow, {
+        url: url,
+        user_data: originWindowId  // Use user_data to pass originWindowId
+      });
+    } else if (uriNotNull || url) {
+      this.openNewWindow(url);
     }
   }
 
