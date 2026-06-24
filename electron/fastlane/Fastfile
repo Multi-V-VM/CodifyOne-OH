@@ -5,6 +5,90 @@
 COMMAND_LINE_TOOLS_PLATFORM = "mac-arm64"
 COMMAND_LINE_TOOLS_VERSION = "5.0.3.810"
 
+def executable_file?(path)
+  !path.nil? && File.file?(path) && File.executable?(path)
+end
+
+def find_tool_executable(tools_home, name)
+  return nil if tools_home.nil? || tools_home.empty?
+
+  candidates = [
+    File.join(tools_home, "bin", name),
+    File.join(tools_home, "ohpm", "bin", name),
+    File.join(tools_home, "hvigor", "bin", name),
+    File.join(tools_home, "node", "bin", name),
+    File.join(tools_home, "tool", "node", "bin", name),
+  ]
+
+  candidates.find { |path| executable_file?(path) }
+end
+
+def valid_command_line_tools_home?(tools_home)
+  return false if tools_home.nil? || tools_home.empty? || !File.directory?(tools_home)
+
+  !find_tool_executable(tools_home, "ohpm").nil? &&
+    !find_tool_executable(tools_home, "hvigorw").nil?
+end
+
+def command_line_tools_home_candidates(path)
+  return [] if path.nil? || path.empty?
+
+  expanded = File.expand_path(path)
+  [
+    expanded,
+    File.join(expanded, "command-line-tools"),
+    File.join(expanded, "tools"),
+    File.join(expanded, "unzip", COMMAND_LINE_TOOLS_VERSION, "command-line-tools"),
+  ].uniq
+end
+
+def find_valid_tools_home(paths)
+  paths
+    .flat_map { |path| command_line_tools_home_candidates(path) }
+    .find { |candidate| valid_command_line_tools_home?(candidate) }
+end
+
+def extract_command_line_tools_repo(repo)
+  return nil if repo.nil? || repo.empty?
+
+  command_line_tools_zip = File.join(
+    repo,
+    "commandline-tools-#{COMMAND_LINE_TOOLS_PLATFORM}-#{COMMAND_LINE_TOOLS_VERSION}.zip",
+  )
+  command_line_tools_unzip = File.join(repo, "unzip", COMMAND_LINE_TOOLS_VERSION)
+  command_line_tools_home = File.join(command_line_tools_unzip, "command-line-tools")
+
+  return command_line_tools_home if valid_command_line_tools_home?(command_line_tools_home)
+
+  if File.exist?(command_line_tools_zip)
+    sh("mkdir", "-p", command_line_tools_unzip)
+    sh("unzip", "-q", command_line_tools_zip, "-d", command_line_tools_unzip)
+    return command_line_tools_home if valid_command_line_tools_home?(command_line_tools_home)
+  else
+    puts "⚠️  Command line tools zip not found at #{command_line_tools_zip}"
+  end
+
+  nil
+end
+
+def prepend_command_line_tools_path(tools_home)
+  path_entries = [
+    File.join(tools_home, "bin"),
+    File.join(tools_home, "ohpm", "bin"),
+    File.join(tools_home, "hvigor", "bin"),
+    File.join(tools_home, "node", "bin"),
+    File.join(tools_home, "tool", "node", "bin"),
+  ].select { |path| File.directory?(path) }
+
+  node_home = [
+    File.join(tools_home, "node"),
+    File.join(tools_home, "tool", "node"),
+  ].find { |path| File.directory?(path) }
+
+  ENV["NODE_HOME"] = node_home unless node_home.nil?
+  ENV["PATH"] = (path_entries + [ENV["PATH"]]).join(":")
+end
+
 default_platform(:harmony)
 
 platform :harmony do
@@ -13,47 +97,37 @@ platform :harmony do
     command_line_tools_repo = ENV["HM_COMMAND_LINE_TOOLS_REPO"]
     puts "$HM_COMMAND_LINE_TOOLS_REPO: #{command_line_tools_repo}"
 
-    command_line_tools_home = nil
+    command_line_tools_home = find_valid_tools_home([
+      ENV["HM_COMMAND_LINE_TOOLS_HOME"],
+      command_line_tools_repo,
+    ])
 
-    # Try to use provided repo
-    if !command_line_tools_repo.nil?
-      command_line_tools_zip = File.join(command_line_tools_repo, "commandline-tools-#{COMMAND_LINE_TOOLS_PLATFORM}-#{COMMAND_LINE_TOOLS_VERSION}.zip")
-      command_line_tools_unzip = File.join(command_line_tools_repo, "unzip", COMMAND_LINE_TOOLS_VERSION)
-      command_line_tools_home = File.join(command_line_tools_unzip, "command-line-tools")
-
-      if !File.exist?(command_line_tools_home)
-        if !File.exist?(command_line_tools_unzip)
-          sh "mkdir -p #{command_line_tools_unzip}"
-        end
-        if File.exist?(command_line_tools_zip)
-          sh "unzip -q #{command_line_tools_zip} -d #{command_line_tools_unzip}"
-        else
-          puts "⚠️  Command line tools zip not found at #{command_line_tools_zip}"
-          command_line_tools_home = nil
-        end
-      end
+    if command_line_tools_home.nil? && !command_line_tools_repo.nil?
+      command_line_tools_home = extract_command_line_tools_repo(command_line_tools_repo)
     end
 
-    # Fallback to local DevEco Studio installation
-    if command_line_tools_home.nil? || !File.exist?(command_line_tools_home)
-      devenv_home = File.expand_path("~/DevEco-Studio/tools")
-      if File.exist?(devenv_home)
-        puts "📂 Using local DevEco Studio tools from #{devenv_home}"
-        command_line_tools_home = devenv_home
-      else
-        puts "❌ Command line tools not found!"
-        puts ""
-        puts "Please either:"
-        puts "1. Set HM_COMMAND_LINE_TOOLS_REPO to the tools directory"
-        puts "2. Install DevEco Studio (tools will be at ~/DevEco-Studio/tools)"
-        puts "3. Download tools from: https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos"
-        puts ""
-        raise "Command line tools not found"
-      end
+    if command_line_tools_home.nil?
+      command_line_tools_home = find_valid_tools_home([
+        ENV["DEVECO_STUDIO_TOOLS"],
+        File.expand_path("~/DevEco-Studio/tools"),
+        "/Applications/DevEco-Studio.app/Contents/tools",
+      ])
     end
 
-    ENV["NODE_HOME"] = "#{command_line_tools_home}/tool/node"
-    ENV["PATH"] = "#{command_line_tools_home}/bin:#{ENV["NODE_HOME"]}/bin:#{ENV["PATH"]}"
+    if command_line_tools_home.nil?
+      puts "❌ Command line tools not found!"
+      puts ""
+      puts "Please either:"
+      puts "1. Set HM_COMMAND_LINE_TOOLS_HOME directly to an extracted tools directory"
+      puts "2. Set HM_COMMAND_LINE_TOOLS_REPO to a directory containing the commandline-tools zip"
+      puts "3. Install DevEco Studio on the runner"
+      puts "4. Download tools from: https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos"
+      puts ""
+      raise "Command line tools not found"
+    end
+
+    puts "📂 Using HarmonyOS command line tools from #{command_line_tools_home}"
+    prepend_command_line_tools_path(command_line_tools_home)
     puts "$PATH: #{ENV["PATH"]}"
 
     sh "java -version"

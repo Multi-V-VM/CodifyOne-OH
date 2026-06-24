@@ -72,7 +72,7 @@ jobs:
       - name: Install fastlane
         working-directory: ./electron
         run: |
-          gem install fastlane -NV
+          bundle install
 
       - name: Cache HarmonyOS Command Line Tools
         uses: actions/cache@v4
@@ -85,46 +85,47 @@ jobs:
             harmony-tools-${{ runner.os }}-
 
       - name: Setup HarmonyOS Command Line Tools
-        continue-on-error: true
         run: |
           tools_dir="${{ github.workspace }}/.harmony-tools"
           tools_zip="commandline-tools-mac-arm64-5.0.3.810.zip"
           tools_unzip="${tools_dir}/unzip/5.0.3.810"
           tools_home="${tools_unzip}/command-line-tools"
+          app_tools="/Applications/DevEco-Studio.app/Contents/tools"
+          user_tools="${HOME}/DevEco-Studio/tools"
 
           mkdir -p "${tools_dir}"
 
           # Check if tools already exist from cache
           if [ -d "${tools_home}" ]; then
             echo "✅ Tools found at ${tools_home}"
-            export HM_COMMAND_LINE_TOOLS_REPO="${tools_dir}"
-            echo "HM_COMMAND_LINE_TOOLS_REPO=${tools_dir}" >> $GITHUB_ENV
+            echo "HM_COMMAND_LINE_TOOLS_HOME=${tools_home}" >> $GITHUB_ENV
           elif [ -f "${tools_dir}/${tools_zip}" ]; then
             echo "📦 Found zip file, extracting..."
             mkdir -p "${tools_unzip}"
             unzip -q "${tools_dir}/${tools_zip}" -d "${tools_unzip}"
-            export HM_COMMAND_LINE_TOOLS_REPO="${tools_dir}"
             echo "HM_COMMAND_LINE_TOOLS_REPO=${tools_dir}" >> $GITHUB_ENV
+          elif [ -x "${app_tools}/ohpm/bin/ohpm" ] && [ -x "${app_tools}/hvigor/bin/hvigorw" ]; then
+            echo "✅ DevEco Studio tools found at ${app_tools}"
+            echo "HM_COMMAND_LINE_TOOLS_HOME=${app_tools}" >> $GITHUB_ENV
+          elif [ -x "${user_tools}/ohpm/bin/ohpm" ] && [ -x "${user_tools}/hvigor/bin/hvigorw" ]; then
+            echo "✅ DevEco Studio tools found at ${user_tools}"
+            echo "HM_COMMAND_LINE_TOOLS_HOME=${user_tools}" >> $GITHUB_ENV
           else
             echo "⚠️  HarmonyOS Command Line Tools not found in cache"
-            echo "Will use system DevEco Studio tools if available"
             echo ""
-            echo "To enable CI, manually populate the cache:"
+            echo "To enable CI:"
             echo "1. Download tools from DevEco Studio or https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos"
-            echo "2. Run workflow_dispatch to upload to cache"
-            echo "Or use local DevEco Studio for builds"
+            echo "2. Put ${tools_zip} in ${tools_dir} on a self-hosted runner, or install DevEco Studio"
+            echo "3. Re-run this workflow"
+            exit 1
           fi
 
       - name: Run Fastlane
         working-directory: ./electron
-        env:
-          HM_COMMAND_LINE_TOOLS_REPO: ${{ github.workspace }}/.harmony-tools
-          # Add any required signing/config env vars here as secrets
-          # HARMY_SIGNING_KEY: ${{ secrets.HARMY_SIGNING_KEY }}
         run: |
           task="${{ github.event.inputs.task || 'build_hap' }}"
           echo "Running fastlane lane: $task"
-          fastlane $task
+          bundle exec fastlane $task
 
       - name: Upload HAP artifact
         if: success()
