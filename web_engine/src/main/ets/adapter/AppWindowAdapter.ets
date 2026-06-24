@@ -14,6 +14,7 @@ import { image } from '@kit.ImageKit';
 import Want from '@ohos.app.ability.Want';
 
 import { AbilityManager } from '../common/AbilityManager';
+import { AbilityPool, PooledAbility } from '../common/AbilityPool';
 import { BaseAdapter } from '../common/BaseAdapter';
 import { ContextAdapter } from './ContextAdapter';
 import { IStyleData, IUpdateStyle, WindowStyle } from '../common/WindowStyle';
@@ -27,21 +28,24 @@ const TAG: string = 'AppWindow';
 @injectable()
 export class AppWindowAdapter extends BaseAdapter {
   private abilityManager: AbilityManager;
+  private abilityPool: AbilityPool;
   private bundleName: string = 'com.huawei.ohos_electron';
   private bundleFlags = bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION |
                         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_METADATA;
-  private queryWindowNum: number = 10;  
+  private queryWindowNum: number = 10;
   private ctxAdapter: ContextAdapter;
   private defaultBackgroundColor: string = '#00000000';
   private loginWindow: window.Window | null = null;
 
   constructor(
     @inject(AbilityManager) abilityManager: AbilityManager,
-    @inject(ContextAdapter) ctxAdapter: ContextAdapter
+    @inject(ContextAdapter) ctxAdapter: ContextAdapter,
+    @inject(AbilityPool) abilityPool: AbilityPool
   ) {
     super();
     this.abilityManager = abilityManager;
     this.ctxAdapter = ctxAdapter;
+    this.abilityPool = abilityPool;
 
     try {
       let data = bundleManager.getBundleInfoForSelfSync(this.bundleFlags);
@@ -56,12 +60,35 @@ export class AppWindowAdapter extends BaseAdapter {
     return this.abilityManager.getProxy(id)?.getWindow();
   }
 
+  private applyWindowCapability(name: string, action: () => void): void {
+    try {
+      action();
+    } catch (exception) {
+      LogUtil.warn(TAG, `Window capability ${name} is unavailable: ${JSON.stringify(exception)}`);
+    }
+  }
+
+  private setTitleButtonVisible(windowClass: window.Window | undefined, preferences: WindowPreferences): void {
+    this.applyWindowCapability('setWindowTitleButtonVisible', () => {
+      windowClass?.setWindowTitleButtonVisible(preferences.maximizable, preferences.minimizable, preferences.closable);
+    });
+  }
+
   @LogMethod
   createWindow(param: NewWindowParam) {
     let abilityName: string = "EntryAbility";
     if (param.is_stateless) {
       abilityName = "StatelessAbility";
     }
+
+    // Check pool first for reusable ability
+    let pooled = this.abilityPool.acquire(abilityName, param);
+    if (pooled) {
+      this.reusePooledAbility(pooled, param);
+      return;
+    }
+
+    // No pooled ability available, create new one
     const want: Want = {
       bundleName: this.bundleName,
       abilityName: abilityName,
@@ -111,17 +138,125 @@ export class AppWindowAdapter extends BaseAdapter {
       if (param.display_id != -1) {
         options.displayId = param.display_id;
       }
-      LaunchHelper.LaunchWithOptions(this.ctxAdapter.getActiveContext(), want, options);
+      LaunchHelper.LaunchWithOptions(this.ctxAdapter.getActiveContext(), want, options)
+        .catch((err: BusinessError) => {
+          LogUtil.error(TAG, `Failed to launch window. Cause: ${JSON.stringify(err)}`);
+        })
+        .finally(() => {
+          // Always release PixelMap to prevent native memory leaks
+          imagePixelMap?.release?.();
+        });
+    }).catch((err: BusinessError) => {
+      LogUtil.error(TAG, `Failed to create PixelMap. Cause: ${JSON.stringify(err)}`);
     })
+  }
+
+  /**
+   * Reuses a pooled ability for a new window
+   * Shows the hidden ability and notifies native context
+   */
+  private reusePooledAbility(pooled: PooledAbility, param: NewWindowParam): void {
+    let context = pooled.context as common.UIAbilityContext;
+
+    // Show the hidden ability
+    context?.showAbility().then(() => {
+      LogUtil.info(TAG, `Reusing pooled ability: ${param.window_id} (type: ${pooled.abilityType})`);
+
+      // Update window position if needed
+      let windowClass = this.abilityManager.getProxy(parseInt(param.window_id))?.getWindow();
+      if (windowClass && (pooled.bounds.left !== param.bounds.left || pooled.bounds.top !== param.bounds.top)) {
+        windowClass.moveWindowToAsync(param.bounds.left, param.bounds.top)
+          .catch((err: BusinessError) => {
+            LogUtil.error(TAG, `Failed to move reused window. Cause: ${JSON.stringify(err)}`);
+          });
+      }
+
+      // Notify native context to update WebView content without creating new isolate
+      // TODO: Add kReuseWindow command implementation in native code
+      LogUtil.info(TAG, `Pooled ability shown for window: ${param.window_id}`);
+    }).catch((err: BusinessError) => {
+      LogUtil.error(TAG, `Failed to show pooled ability. Cause: ${JSON.stringify(err)}`);
+      // If showing fails, release back to pool and create new window
+      this.abilityPool.release(param.window_id);
+      this.createWindow(param);
+    });
   }
 
   @LogMethod
   closeWindow(id: number) {
-    let context = this.abilityManager.getProxy(id)?.getWindowContext() as common.UIAbilityContext;
+    let windowId = this.paramNormalization(id);
+
+    // Check if ability should be pooled
+    if (this.shouldPoolAbility(id)) {
+      let proxy = this.abilityManager.getProxy(id);
+      let context = proxy?.getWindowContext() as common.UIAbilityContext;
+
+      if (context) {
+        // Hide and return to pool instead of destroying
+        context.hideAbility().then(() => {
+          LogUtil.info(TAG, `Hiding ability for pooling: ${windowId}`);
+          this.abilityPool.release(windowId);
+        }).catch((err: BusinessError) => {
+          LogUtil.error(TAG, `Failed to hide ability. Cause: ${JSON.stringify(err)}`);
+          // If hide fails, fall through to terminate
+          this.destroyAbility(id);
+        });
+        return;
+      }
+    }
+
+    // Not pooling or pooling failed - destroy the ability
+    this.destroyAbility(id);
+  }
+
+  /**
+   * Determines if an ability should be pooled instead of destroyed
+   */
+  private shouldPoolAbility(id: number): boolean {
+    let proxy = this.abilityManager.getProxy(id);
+    if (!proxy) {
+      return false;
+    }
+
+    // Get ability type from window ID or preferences
+    // For now, pool stateless abilities always, EntryAbility only if under limit
+    let preferences = proxy.getWindowPreferences();
+    let idleCount = this.abilityPool.getIdleCount('StatelessAbility');
+
+    // Pool stateless abilities more aggressively
+    // Pool EntryAbility only if under the limit
+    return idleCount < this.abilityPool['maxPoolSize'];
+  }
+
+  /**
+   * Destroys an ability and its resources
+   */
+  private destroyAbility(id: number): void {
+    // First remove from manager to prevent dangling references and ensure cleanup
+    let proxy = this.abilityManager.getProxy(id);
+    let context = proxy?.getWindowContext() as common.UIAbilityContext;
+
+    // Explicitly remove proxy before termination to ensure proper cleanup
+    this.abilityManager.removeProxy(id);
+
     context?.terminateSelf()
       .catch((err: BusinessError) => {
         LogUtil.error(TAG, 'Failed to close window. Cause: ' + JSON.stringify(err));
+        // Re-add proxy if termination failed so it can be retried
+        if (proxy) {
+          this.abilityManager.addProxy(proxy);
+        }
       });
+  }
+
+  /**
+   * Normalizes numeric ID to string format (browser{id})
+   */
+  private paramNormalization(id: string | number): string {
+    if (typeof id === 'number') {
+      return `browser${id}`;
+    }
+    return id;
   }
 
   @LogMethod
@@ -132,14 +267,16 @@ export class AppWindowAdapter extends BaseAdapter {
       preferences.maximizable = maximizable;
       proxy?.setWindowPreferences(preferences);
       if (!preferences.hideTitleBar)
-        proxy?.getWindow()?.setWindowTitleButtonVisible(preferences.maximizable, preferences.minimizable, preferences.closable);
+        this.setTitleButtonVisible(proxy?.getWindow(), preferences);
     }
     let windowStage = proxy?.getWindowStage();
-    if (!maximizable) {
-      windowStage?.setSupportedWindowModes([bundleManager.SupportWindowMode.FLOATING]);
-    } else {
-      windowStage?.setSupportedWindowModes([bundleManager.SupportWindowMode.FLOATING, bundleManager.SupportWindowMode.SPLIT, bundleManager.SupportWindowMode.FULL_SCREEN]);
-    }
+    this.applyWindowCapability('setSupportedWindowModes', () => {
+      if (!maximizable) {
+        windowStage?.setSupportedWindowModes([bundleManager.SupportWindowMode.FLOATING]);
+      } else {
+        windowStage?.setSupportedWindowModes([bundleManager.SupportWindowMode.FLOATING, bundleManager.SupportWindowMode.SPLIT, bundleManager.SupportWindowMode.FULL_SCREEN]);
+      }
+    });
   }
 
   @LogMethod
@@ -150,7 +287,7 @@ export class AppWindowAdapter extends BaseAdapter {
       preferences.minimizable = minimizable;
       proxy?.setWindowPreferences(preferences);
       if (!preferences.hideTitleBar)
-        proxy?.getWindow()?.setWindowTitleButtonVisible(preferences.maximizable, preferences.minimizable, preferences.closable);
+        this.setTitleButtonVisible(proxy?.getWindow(), preferences);
     }
   }
 
@@ -162,7 +299,7 @@ export class AppWindowAdapter extends BaseAdapter {
       preferences.closable = closable;
       proxy?.setWindowPreferences(preferences);
       if (!preferences.hideTitleBar)
-        proxy?.getWindow()?.setWindowTitleButtonVisible(preferences.maximizable, preferences.minimizable, preferences.closable);
+        this.setTitleButtonVisible(proxy?.getWindow(), preferences);
     }
   }
 
@@ -175,7 +312,7 @@ export class AppWindowAdapter extends BaseAdapter {
       preferences.minimizable = visible;
       preferences.closable = visible;
       proxy?.setWindowPreferences(preferences);
-      proxy?.getWindow()?.setWindowTitleButtonVisible(preferences.maximizable, preferences.minimizable, preferences.closable);
+      this.setTitleButtonVisible(proxy?.getWindow(), preferences);
     }
   }
 
@@ -192,11 +329,13 @@ export class AppWindowAdapter extends BaseAdapter {
   @LogMethod
   setAlwaysOnTop(id: number, onTop: boolean) {
     let windowClass = this.getWindow(id);
-    let promise = windowClass?.setWindowTopmost(onTop);
-    promise?.then(() => {
-      LogUtil.info(TAG, `Succeeded in setting the window to be topmost.`);
-    }).catch((err: BusinessError) => {
-      LogUtil.error(TAG, `Failed to set the window to be topmost. Cause code: ${err.code}, message: ${err.message}`);
+    this.applyWindowCapability('setWindowTopmost', () => {
+      let promise = windowClass?.setWindowTopmost(onTop);
+      promise?.then(() => {
+        LogUtil.info(TAG, `Succeeded in setting the window to be topmost.`);
+      }).catch((err: BusinessError) => {
+        LogUtil.error(TAG, `Failed to set the window to be topmost. Cause code: ${err.code}, message: ${err.message}`);
+      });
     });
   }
 
@@ -660,32 +799,45 @@ export class AppWindowAdapter extends BaseAdapter {
     window.createWindow(config, (err: BusinessError, data) => {
       if (err.code) {
         LogUtil.error(TAG, 'Failed to create window. Cause: ' + JSON.stringify(err));
+        callback(loginFailInfo);
         return;
       }
       let windowClass: window.Window = data;
       if (!this.loginWindow) {
         this.loginWindow = windowClass;
       }
+
+      // Cleanup function to destroy window if setup fails
+      const cleanupWindow = (reason: string) => {
+        LogUtil.error(TAG, `Login window setup failed: ${reason}, destroying window`);
+        windowClass.destroyWindow((destroyErr: BusinessError) => {
+          if (this.loginWindow === windowClass) {
+            this.loginWindow = null;
+          }
+          if (destroyErr.code) {
+            LogUtil.error(TAG, `Failed to destroy window: ${JSON.stringify(destroyErr)}`);
+          }
+        });
+        callback(loginFailInfo);
+      };
+
       windowClass.moveWindowTo(bounds.left, bounds.top, (err: BusinessError) => {
         let errCode: number = err.code;
         if (errCode) {
           LogUtil.error(TAG, `Failed to move the window. Cause:${JSON.stringify(err)}`);
-          return;
         }
-        LogUtil.info(TAG, `succeeded in moving the window.`);
       });
       windowClass.resize(bounds.width, bounds.height, (err: BusinessError) => {
         let errCode: number = err.code;
         if (errCode) {
           LogUtil.error(TAG, `Failed to change the window size. Cause:${JSON.stringify(err)}`);
-          return;
         }
-        LogUtil.info(TAG, `succeeded in changing the window size.`);
       });
       windowClass.showWindow((err: BusinessError) => {
         const errCode: number = err.code;
         if (errCode) {
           LogUtil.error(TAG, `Failed to show the window. Cause: ${JSON.stringify(err)}`);
+          cleanupWindow('showWindow failed');
           return;
         }
         LogUtil.info(TAG, 'Succeeded in showing the window.');
@@ -700,6 +852,7 @@ export class AppWindowAdapter extends BaseAdapter {
         let errCode: number = err.code;
         if (errCode) {
           LogUtil.error(TAG, 'Failed to load the content. Cause:' + JSON.stringify(err));
+          cleanupWindow('loadContent failed');
           return;
         }
         windowClass.setWindowBackgroundColor('#00000000'); // argb

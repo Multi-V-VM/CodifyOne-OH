@@ -6,6 +6,7 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import { DisplayAdapter } from  '../adapter/DisplayAdapter';
 import { NativeThemeAdapter } from '../adapter/NativeThemeAdapter';
 import { AbilityManager } from '../common/AbilityManager';
+import { AbilityPool } from '../common/AbilityPool';
 import { Configuration } from '@ohos.app.ability.Configuration';
 import Inject from '../common/InjectModule';
 import { WindowBound } from '../interface/CommonInterface';
@@ -21,8 +22,17 @@ const TAG: string = 'WebAbility';
 export class WebAbility extends WebBaseAbility {
   private static WINDOW_CLOSE: number = 1000;
   private abilityManager: AbilityManager | undefined = undefined;
+  private abilityPool: AbilityPool | undefined = undefined;
   private displayAdapter : DisplayAdapter | undefined = undefined;
   private nativeThemeAdapter: NativeThemeAdapter | undefined = undefined;
+
+  private applyWindowCapability(name: string, action: () => void): void {
+    try {
+      action();
+    } catch (exception) {
+      LogUtil.warn(TAG, `Window capability ${name} is unavailable: ${JSON.stringify(exception)}`);
+    }
+  }
 
   onConfigurationUpdate(config: Configuration) {
     if (config.colorMode !== undefined) {
@@ -39,6 +49,7 @@ export class WebAbility extends WebBaseAbility {
     super.onCreate(want, launchParam);
 
     this.abilityManager = Inject.get(AbilityManager);
+    this.abilityPool = Inject.getOrCreate(AbilityPool);
     this.nativeThemeAdapter = Inject.get(NativeThemeAdapter);
 
     Inject.get(PermissionManagerAdapter).initPermissions();
@@ -146,20 +157,37 @@ export class WebAbility extends WebBaseAbility {
 
       let window: window.Window = windowStage.getMainWindowSync();
       // hide title bar
-      window.setWindowDecorVisible(!this.hideTitleBar);
+      this.applyWindowCapability('setWindowDecorVisible', () => {
+        window.setWindowDecorVisible(!this.hideTitleBar);
+      });
       if (this.useDarkMode) {
         let buttonStyle: window.DecorButtonStyle = {
           colorMode: ConfigurationConstant.ColorMode.COLOR_MODE_DARK
         };
-        window.setDecorButtonStyle(buttonStyle);
+        this.applyWindowCapability('setDecorButtonStyle', () => {
+          window.setDecorButtonStyle(buttonStyle);
+        });
       }
-      window.setWindowTitleMoveEnabled(!this.hideTitleBar);
-      window.setWindowTitleButtonVisible(true, true, true);
-      window.setWindowTopmost(this.alwaysOntop);
-      window.setResizeByDragEnabled(this.resizable);
-      windowStage.setWindowModal(this.isModal);
-      if (this.isPanel)
-        window.setTitleAndDockHoverShown(false, false);
+      this.applyWindowCapability('setWindowTitleMoveEnabled', () => {
+        window.setWindowTitleMoveEnabled(!this.hideTitleBar);
+      });
+      this.applyWindowCapability('setWindowTitleButtonVisible', () => {
+        window.setWindowTitleButtonVisible(true, true, true);
+      });
+      this.applyWindowCapability('setWindowTopmost', () => {
+        window.setWindowTopmost(this.alwaysOntop);
+      });
+      this.applyWindowCapability('setResizeByDragEnabled', () => {
+        window.setResizeByDragEnabled(this.resizable);
+      });
+      this.applyWindowCapability('setWindowModal', () => {
+        windowStage.setWindowModal(this.isModal);
+      });
+      if (this.isPanel) {
+        this.applyWindowCapability('setTitleAndDockHoverShown', () => {
+          window.setTitleAndDockHoverShown(false, false);
+        });
+      }
       if (deviceInfo.sdkApiVersion >= 15) {
         this.nativeContext.RegisterWindowEventFilter(window.getWindowProperties().id);
       }
@@ -176,16 +204,25 @@ export class WebAbility extends WebBaseAbility {
   }
 
   onWindowStageDestroy() {
-    if (CheckEmptyUtils.isEmpty(this.xcomponentId)) {
-      LogUtil.warn(TAG, 'onWindowStageDestroy component is not instantiated');
-      return;
+    // Always attempt cleanup, even if xcomponentId is empty
+    // This prevents memory leaks if the ID was cleared prematurely
+    let componentId = this.xcomponentId;
+
+    if (CheckEmptyUtils.isEmpty(componentId)) {
+      LogUtil.warn(TAG, 'onWindowStageDestroy component is not instantiated, attempting cleanup anyway');
     }
+
+    // Notify pool that this ability is being destroyed
+    if (this.abilityPool && componentId) {
+      this.abilityPool.notifyDestroyed(componentId);
+    }
+
     if (deviceInfo.sdkApiVersion >= 15) {
-      let originWindowId = this.abilityManager?.getOriginWindowId(this.xcomponentId);
+      let originWindowId = this.abilityManager?.getOriginWindowId(componentId);
       this.nativeContext.ClearWindowEventFilter(originWindowId);
     }
     // Main window is destroyed, release UI related resources
-    this.abilityManager?.removeProxy(this.xcomponentId);
+    this.abilityManager?.removeProxy(componentId);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {

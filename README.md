@@ -470,7 +470,7 @@ flowchart TB
 |------|------|
 | Wasmer in-process | 避免鸿蒙应用启动外部 VM/进程，降低包体和启动成本 |
 | 动态加载 `libwasmer.so` | 应用可在没有 Wasmer 产物时继续启动，便于分阶段替换 |
-| 默认 Wasmer `wasmi` 后端 | 纯解释执行，先规避鸿蒙 JIT/可执行内存限制；需要性能时可换 WAMR/Cranelift |
+| 默认 Wasmer WAMR 后端 | 使用解释器路径，规避鸿蒙 JIT/可执行内存限制，同时避免 wasmi C API 符号重定位问题 |
 | WASI preopen workspace | 模块只看到显式授权目录，替代原 guest 文件共享和 hostcmd 通道 |
 
 #### 原生模块 (`libentry.so`)
@@ -489,7 +489,7 @@ export OHOS_NDK_HOME=/path/to/HarmonyOS/native
 scripts/build-wasmer-ohos.sh
 ```
 
-默认源码为 `https://github.com/Multi-V-VM/wasmer.git`，固定到当前验证过的 commit `affc5cc6e3532b0dc482e3d1b982b8443cd3aed7`。默认 features 为 `wat,wasmi-default,wasi`，可通过 `WASMER_FEATURES` 覆盖。
+默认源码为 `https://github.com/Multi-V-VM/wasmer.git`，固定到当前验证过的 commit `affc5cc6e3532b0dc482e3d1b982b8443cd3aed7`。默认 features 为 `wat,wamr-default,wasi`，可通过 `WASMER_FEATURES` 覆盖。
 
 ---
 
@@ -728,7 +728,7 @@ scripts/build-wasmer-ohos.sh
 |------|----------|
 | 换 wasmer fork | `WASMER_REPO_URL=https://github.com/Multi-V-VM/wasmer.git` |
 | 锁定 commit/分支 | `WASMER_REPO_REF=<commit-or-ref>` |
-| 使用 WAMR 后端 | `WASMER_FEATURES=wat,wamr-default,wasi` |
+| 覆盖 Wasmer features | `WASMER_FEATURES=wat,wamr-default,wasi` |
 | 指定 Rust OHOS target | `WASMER_OHOS_TARGET=aarch64-unknown-linux-ohos` |
 | 指定输出 ABI 目录 | `OHCODE_ABI=arm64-v8a` |
 
@@ -891,7 +891,7 @@ OHcode 需要以下系统权限（`module.json5` 中声明）：
 
 | 权限 | 级别 | 用途 |
 |------|------|------|
-| `ALLOW_WRITABLE_CODE_MEMORY` | kernel | Wasmer JIT 后端可执行内存；纯 `wasmi` 后端可继续评估移除 |
+| `ALLOW_WRITABLE_CODE_MEMORY` | kernel | Wasmer JIT 后端可执行内存；默认 WAMR 解释器路径可继续评估移除 |
 | `ALLOW_DEBUG` | kernel | 调试支持 |
 | `READ_WRITE_USER_FILE` | system | 读写用户文件（编辑器核心能力） |
 | `INTERNET` / `GET_NETWORK_INFO` | normal | 网络访问（扩展市场、Remote SSH） |

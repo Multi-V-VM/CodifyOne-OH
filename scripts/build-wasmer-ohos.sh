@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_URL="${WASMER_REPO_URL:-https://github.com/Multi-V-VM/wasmer.git}"
 REPO_REF="${WASMER_REPO_REF:-affc5cc6e3532b0dc482e3d1b982b8443cd3aed7}"
 TARGET="${WASMER_OHOS_TARGET:-aarch64-unknown-linux-ohos}"
-FEATURES="${WASMER_FEATURES:-wat,wasmi-default,wasi}"
+FEATURES="${WASMER_FEATURES:-wat,wamr-default,wasi}"
 
 if [[ "${TARGET}" != "aarch64-unknown-linux-ohos" ]]; then
   echo "Only aarch64-unknown-linux-ohos is supported right now; got ${TARGET}" >&2
@@ -14,29 +14,56 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="${WASMER_WORK_DIR:-${PROJECT_ROOT}/.wasmer-ohos}"
-SRC_DIR="${WASMER_SRC_DIR:-${WORK_DIR}/wasmer}"
+
+# Check for submodule first, then fall back to work directory
+SUBMODULE_DIR="${PROJECT_ROOT}/third_party/wasmer"
+if [[ -d "${SUBMODULE_DIR}/.git" ]]; then
+  echo "Using wasmer submodule: ${SUBMODULE_DIR}"
+  SRC_DIR="${WASMER_SRC_DIR:-${SUBMODULE_DIR}}"
+else
+  SRC_DIR="${WASMER_SRC_DIR:-${WORK_DIR}/wasmer}"
+fi
 
 ABI="${OHCODE_ABI:-${WASMER_OHOS_ABI:-arm64-v8a}}"
 OUT_DIR="${PROJECT_ROOT}/electron/libs/${ABI}"
 
+# Auto-detect OHOS_NDK_HOME from DevEco Studio if not set
 if [[ -z "${OHOS_NDK_HOME:-}" ]]; then
-  cat >&2 <<'EOF'
+  # Try DevEco Studio default location
+  DEV_ECO_SDK="/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native"
+  if [[ -d "${DEV_ECO_SDK}" ]]; then
+    export OHOS_NDK_HOME="${DEV_ECO_SDK}"
+    echo "Auto-detected OHOS_NDK_HOME: ${OHOS_NDK_HOME}"
+  else
+    cat >&2 <<'EOF'
 OHOS_NDK_HOME is not set.
 
 Set it to the HarmonyOS/OpenHarmony native SDK directory, for example:
   export OHOS_NDK_HOME="$HOME/Library/Huawei/Sdk/openharmony/10/native"
+
+Or from DevEco Studio:
+  export OHOS_NDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native"
 EOF
-  exit 2
+    exit 2
+  fi
 fi
 
 CLANG="${OHOS_NDK_HOME}/llvm/bin/${TARGET}-clang"
 CLANGXX="${OHOS_NDK_HOME}/llvm/bin/${TARGET}-clang++"
 AR="${OHOS_NDK_HOME}/llvm/bin/llvm-ar"
+OBJCOPY="${OHOS_NDK_HOME}/llvm/bin/llvm-objcopy"
 
 if [[ ! -x "${CLANG}" ]]; then
   echo "OHOS clang not found: ${CLANG}" >&2
   exit 2
 fi
+
+if [[ ! -x "${OBJCOPY}" ]]; then
+  echo "OHOS llvm-objcopy not found: ${OBJCOPY}" >&2
+  exit 2
+fi
+
+export PATH="${OHOS_NDK_HOME}/llvm/bin:${PATH}"
 
 mkdir -p "${WORK_DIR}" "${OUT_DIR}"
 

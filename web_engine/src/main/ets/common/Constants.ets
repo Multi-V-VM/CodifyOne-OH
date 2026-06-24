@@ -32,6 +32,7 @@ export enum WebStatus {
 
 export enum CommandType {
   kNewWindow,
+  kReuseWindow,  // Reuse existing pooled ability instead of creating new
   kNewWebContent,
   kNewWidget,
   kGetWidget,

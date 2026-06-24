@@ -117,3 +117,48 @@ index 92a9d70..adb67c4 100644
          }
          Ok(())
      }
+diff --git a/lib/api/build.rs b/lib/api/build.rs
+index c45fb4d..c4af3a2 100644
+--- a/lib/api/build.rs
++++ b/lib/api/build.rs
+@@ -216,7 +216,7 @@ fn build_wamr() {
+                 // A bit hacky: we need a way to figure out if we're going to target a Mach-O
+                 // library or an ELF one to take care of the "_" in front of symbols.
+             {
+-                if cfg!(any(target_os = "macos", target_os = "ios")) {
++                if target_os == "darwin" || target_os == "ios" {
+                     format!("--redefine-sym=_{old}={new}")
+                 } else {
+                     format!("--redefine-sym={old}={new}")
+@@ -866,7 +866,12 @@ fn build_wasmi() {
+     use std::{env, path::PathBuf};
+ 
+     #[derive(Debug)]
+-    struct WasmiRenamer {}
++    struct WasmiRenamer {
++        target_is_macho: bool,
++    }
++
++    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
++    let target_is_macho = target_os == "macos" || target_os == "ios";
+ 
+     impl ParseCallbacks for WasmiRenamer {
+         /// This function will run for every extern variable and function. The returned value determines
+@@ -876,7 +881,7 @@ fn build_wasmi() {
+             item_info: bindgen::callbacks::ItemInfo<'_>,
+         ) -> Option<String> {
+             if item_info.name.starts_with("wasm") {
+-                let new_name = if cfg!(any(target_os = "macos", target_os =     "ios")) {
++                let new_name = if self.target_is_macho {
+                     format!("_wasmi_{}", item_info.name)
+                 } else {
+                     format!("wasmi_{}", item_info.name)
+@@ -897,7 +902,7 @@ fn build_wasmi() {
+         )
+         .derive_default(true)
+         .derive_debug(true)
+-        .parse_callbacks(Box::new(WasmiRenamer {}))
++        .parse_callbacks(Box::new(WasmiRenamer { target_is_macho }))
+         .generate()
+         .expect("Unable to generate bindings for `wasmi`!");
+     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
