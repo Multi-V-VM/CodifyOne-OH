@@ -13,6 +13,9 @@ platform :harmony do
     command_line_tools_repo = ENV["HM_COMMAND_LINE_TOOLS_REPO"]
     puts "$HM_COMMAND_LINE_TOOLS_REPO: #{command_line_tools_repo}"
 
+    command_line_tools_home = nil
+
+    # Try to use provided repo
     if !command_line_tools_repo.nil?
       command_line_tools_zip = File.join(command_line_tools_repo, "commandline-tools-#{COMMAND_LINE_TOOLS_PLATFORM}-#{COMMAND_LINE_TOOLS_VERSION}.zip")
       command_line_tools_unzip = File.join(command_line_tools_repo, "unzip", COMMAND_LINE_TOOLS_VERSION)
@@ -22,13 +25,36 @@ platform :harmony do
         if !File.exist?(command_line_tools_unzip)
           sh "mkdir -p #{command_line_tools_unzip}"
         end
-        sh "unzip #{command_line_tools_zip} -d #{command_line_tools_unzip}"
+        if File.exist?(command_line_tools_zip)
+          sh "unzip -q #{command_line_tools_zip} -d #{command_line_tools_unzip}"
+        else
+          puts "⚠️  Command line tools zip not found at #{command_line_tools_zip}"
+          command_line_tools_home = nil
+        end
       end
-
-      ENV["NODE_HOME"] = "#{command_line_tools_home}/tool/node"
-      ENV["PATH"] = "#{command_line_tools_home}/bin:#{ENV["NODE_HOME"]}/bin:#{ENV["PATH"]}"
-      puts "$PATH: #{ENV["PATH"]}"
     end
+
+    # Fallback to local DevEco Studio installation
+    if command_line_tools_home.nil? || !File.exist?(command_line_tools_home)
+      devenv_home = File.expand_path("~/DevEco-Studio/tools")
+      if File.exist?(devenv_home)
+        puts "📂 Using local DevEco Studio tools from #{devenv_home}"
+        command_line_tools_home = devenv_home
+      else
+        puts "❌ Command line tools not found!"
+        puts ""
+        puts "Please either:"
+        puts "1. Set HM_COMMAND_LINE_TOOLS_REPO to the tools directory"
+        puts "2. Install DevEco Studio (tools will be at ~/DevEco-Studio/tools)"
+        puts "3. Download tools from: https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos"
+        puts ""
+        raise "Command line tools not found"
+      end
+    end
+
+    ENV["NODE_HOME"] = "#{command_line_tools_home}/tool/node"
+    ENV["PATH"] = "#{command_line_tools_home}/bin:#{ENV["NODE_HOME"]}/bin:#{ENV["PATH"]}"
+    puts "$PATH: #{ENV["PATH"]}"
 
     sh "java -version"
     sh "ohpm -v"

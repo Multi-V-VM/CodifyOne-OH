@@ -74,33 +74,46 @@ jobs:
         run: |
           gem install fastlane -NV
 
-      - name: Download HarmonyOS Command Line Tools
-        env:
-          HM_COMMAND_LINE_TOOLS_VERSION: '5.0.3.810'
-          HM_COMMAND_LINE_TOOLS_PLATFORM: 'mac-arm64'
+      - name: Cache HarmonyOS Command Line Tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.harmony-tools
+            ${{ github.workspace }}/.harmony-tools
+          key: harmony-tools-${{ runner.os }}-5.0.3.810
+          restore-keys: |
+            harmony-tools-${{ runner.os }}-
+
+      - name: Setup HarmonyOS Command Line Tools
+        continue-on-error: true
         run: |
           tools_dir="${{ github.workspace }}/.harmony-tools"
-          tools_zip="commandline-tools-${HM_COMMAND_LINE_TOOLS_PLATFORM}-${HM_COMMAND_LINE_TOOLS_VERSION}.zip"
-          tools_url="https://contentcenter-hz.cdn.packagehub.com/harmonyos/ide/${HM_COMMAND_LINE_TOOLS_VERSION}/${tools_zip}"
+          tools_zip="commandline-tools-mac-arm64-5.0.3.810.zip"
+          tools_unzip="${tools_dir}/unzip/5.0.3.810"
+          tools_home="${tools_unzip}/command-line-tools"
 
-          echo "Downloading HarmonyOS Command Line Tools from: ${tools_url}"
           mkdir -p "${tools_dir}"
 
-          # Try to download from HarmonyOS package hub
-          curl -fSL -o "${tools_dir}/${tools_zip}" "${tools_url}" || {
-            echo "Failed to download from primary URL, trying alternative..."
-            # Alternative: download from Huawei developer site
-            # You may need to update this URL based on actual availability
-            curl -fSL -o "${tools_dir}/${tools_zip}" \
-              "https://repo.harmonyosa.com/harmonyos/ide/${tools_zip}" || {
-              echo "ERROR: Could not download HarmonyOS Command Line Tools"
-              echo "Please download manually from DevEco Studio or Huawei Developer Portal"
-              exit 1
-            }
-          }
-
-          echo "Downloaded: ${tools_zip}"
-          ls -la "${tools_dir}/"
+          # Check if tools already exist from cache
+          if [ -d "${tools_home}" ]; then
+            echo "✅ Tools found at ${tools_home}"
+            export HM_COMMAND_LINE_TOOLS_REPO="${tools_dir}"
+            echo "HM_COMMAND_LINE_TOOLS_REPO=${tools_dir}" >> $GITHUB_ENV
+          elif [ -f "${tools_dir}/${tools_zip}" ]; then
+            echo "📦 Found zip file, extracting..."
+            mkdir -p "${tools_unzip}"
+            unzip -q "${tools_dir}/${tools_zip}" -d "${tools_unzip}"
+            export HM_COMMAND_LINE_TOOLS_REPO="${tools_dir}"
+            echo "HM_COMMAND_LINE_TOOLS_REPO=${tools_dir}" >> $GITHUB_ENV
+          else
+            echo "⚠️  HarmonyOS Command Line Tools not found in cache"
+            echo "Will use system DevEco Studio tools if available"
+            echo ""
+            echo "To enable CI, manually populate the cache:"
+            echo "1. Download tools from DevEco Studio or https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos"
+            echo "2. Run workflow_dispatch to upload to cache"
+            echo "Or use local DevEco Studio for builds"
+          fi
 
       - name: Run Fastlane
         working-directory: ./electron

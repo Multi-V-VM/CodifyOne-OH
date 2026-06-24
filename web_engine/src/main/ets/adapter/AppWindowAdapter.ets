@@ -23,8 +23,21 @@ import LogMethod from '../common/LogDecorator';
 import LogUtil from '../utils/LogUtil';
 import Inject from '../common/InjectModule';
 import { NewWindowParam, PointCoordinate, WindowType, WindowBound, WindowPreferences, ILoginInfo, ILogin } from "../interface/CommonInterface"
+import promptAction from '@ohos.promptAction';
+import { WebProxy } from '../interface/WebProxy';
 
 const TAG: string = 'AppWindow';
+
+/**
+ * Window limit configuration to prevent V8 OOM crashes
+ * Each window creates a new V8 isolate (~50-100MB), so we must limit concurrent windows
+ *
+ * NOTE: Set to 1 due to memory constraints on some devices.
+ * Devices with limited free memory (~1-2GB) can crash even with 2 windows.
+ * Increase only if you have confirmed sufficient memory available.
+ */
+const MAX_CONCURRENT_WINDOWS: number = 1;
+const WINDOW_LIMIT_WARNING_MS: number = 3000; // Show warning for 3 seconds
 
 @injectable()
 export class AppWindowAdapter extends BaseAdapter {
@@ -37,6 +50,10 @@ export class AppWindowAdapter extends BaseAdapter {
   private ctxAdapter: ContextAdapter;
   private defaultBackgroundColor: string = '#00000000';
   private loginWindow: window.Window | null = null;
+
+  // Window limit tracking
+  private activeWindowCount: number = 0;
+  private windowIdSet: Set<string> = new Set<string>();
 
   constructor(
     @inject(AbilityManager) abilityManager: AbilityManager,
@@ -91,10 +108,18 @@ export class AppWindowAdapter extends BaseAdapter {
       abilityName = "StatelessAbility";
     }
 
+    // Check window limit before creating new window
+    if (!this.checkWindowLimit(param.window_id, true)) {
+      this.showWindowLimitWarning();
+      return;
+    }
+
     // Check pool first for reusable ability
     let pooled = this.getPool().acquire(abilityName, param);
     if (pooled) {
       this.reusePooledAbility(pooled, param);
+      // Track the reused window
+      this.trackWindow(param.window_id);
       return;
     }
 
@@ -149,13 +174,21 @@ export class AppWindowAdapter extends BaseAdapter {
         options.displayId = param.display_id;
       }
       const launchSuccess = LaunchHelper.LaunchWithOptions(this.ctxAdapter.getActiveContext(), want, options);
-      if (!launchSuccess) {
+      if (launchSuccess) {
+        // Track the newly created window
+        this.trackWindow(param.window_id);
+        LogUtil.info(TAG, `Successfully launched window: ${param.window_id}`);
+      } else {
         LogUtil.error(TAG, 'Failed to launch window');
+        // Untrack since launch failed
+        this.untrackWindow(param.window_id);
       }
       // Always release PixelMap to prevent native memory leaks
       imagePixelMap?.release?.();
     }).catch((err: BusinessError) => {
       LogUtil.error(TAG, `Failed to create PixelMap. Cause: ${JSON.stringify(err)}`);
+      // Untrack since creation failed
+      this.untrackWindow(param.window_id);
       // Still release PixelMap on error
       imagePixelMap?.release?.();
     })
@@ -184,8 +217,11 @@ export class AppWindowAdapter extends BaseAdapter {
     // Show the hidden ability with reuse parameters
     context?.startAbility(want).then(() => {
       LogUtil.info(TAG, `Reusing pooled ability: ${param.window_id} (type: ${pooled.abilityType})`);
+      // Tracking is already done before this call
     }).catch((err: BusinessError) => {
       LogUtil.error(TAG, `Failed to show pooled ability. Cause: ${JSON.stringify(err)}`);
+      // Untrack since reuse failed
+      this.untrackWindow(param.window_id);
       // If showing fails, create new window instead
       this.createWindow(param);
     });
@@ -205,9 +241,11 @@ export class AppWindowAdapter extends BaseAdapter {
         context.hideAbility().then(() => {
           LogUtil.info(TAG, `Hiding ability for pooling: ${windowId}`);
           this.getPool().release(windowId);
+          // Note: We keep tracking pooled windows since they can be reshown
         }).catch((err: BusinessError) => {
           LogUtil.error(TAG, `Failed to hide ability. Cause: ${JSON.stringify(err)}`);
           // If hide fails, fall through to terminate
+          this.untrackWindow(windowId);
           this.destroyAbility(id);
         });
         return;
@@ -215,6 +253,7 @@ export class AppWindowAdapter extends BaseAdapter {
     }
 
     // Not pooling or pooling failed - destroy the ability
+    this.untrackWindow(windowId);
     this.destroyAbility(id);
   }
 
@@ -879,5 +918,96 @@ export class AppWindowAdapter extends BaseAdapter {
       return -1;
     }
     return windowId;
+  }
+
+  /**
+   * Window limit tracking - prevent V8 OOM by limiting concurrent windows
+   */
+  private checkWindowLimit(windowId: string, isNewWindow: boolean): boolean {
+    // Clean up stale window IDs from set (in case windows were destroyed without proper cleanup)
+    this.cleanupStaleWindows();
+
+    if (isNewWindow) {
+      // Check if adding this window would exceed the limit
+      if (this.windowIdSet.size >= MAX_CONCURRENT_WINDOWS && !this.windowIdSet.has(windowId)) {
+        LogUtil.warn(TAG, `Window limit reached: ${this.windowIdSet.size}/${MAX_CONCURRENT_WINDOWS}. Rejecting new window: ${windowId}`);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Track a new or reused window
+   */
+  private trackWindow(windowId: string): void {
+    this.windowIdSet.add(windowId);
+    this.activeWindowCount = this.windowIdSet.size;
+    LogUtil.info(TAG, `Tracking window: ${windowId}, active count: ${this.activeWindowCount}/${MAX_CONCURRENT_WINDOWS}`);
+  }
+
+  /**
+   * Remove a window from tracking (called when window is destroyed)
+   */
+  private untrackWindow(windowId: string): void {
+    if (this.windowIdSet.has(windowId)) {
+      this.windowIdSet.delete(windowId);
+      this.activeWindowCount = this.windowIdSet.size;
+      LogUtil.info(TAG, `Untracked window: ${windowId}, active count: ${this.activeWindowCount}/${MAX_CONCURRENT_WINDOWS}`);
+    }
+  }
+
+  /**
+   * Clean up stale window IDs that no longer exist
+   */
+  private cleanupStaleWindows(): void {
+    // Get current actual window count from AbilityManager
+    const actualProxies: WebProxy[] = this.abilityManager.getProxyList();
+    if (actualProxies && actualProxies.length > 0) {
+      // Rebuild set from actual active windows
+      const newSet: Set<string> = new Set<string>();
+      actualProxies.forEach((proxy: WebProxy) => {
+        const windowId: string = proxy.getWindowId();
+        if (this.windowIdSet.has(windowId)) {
+          newSet.add(windowId);
+        }
+      });
+
+      // If counts differ, update the tracking set
+      if (newSet.size !== this.windowIdSet.size) {
+        LogUtil.info(TAG, `Cleanup stale windows: tracked ${this.windowIdSet.size}, actual ${newSet.size}`);
+        this.windowIdSet = newSet;
+        this.activeWindowCount = newSet.size;
+      }
+    }
+  }
+
+  /**
+   * Show warning dialog when window limit is reached
+   */
+  private showWindowLimitWarning(): void {
+    LogUtil.warn(TAG, `Window limit reached (${MAX_CONCURRENT_WINDOWS}). Showing warning to user.`);
+
+    // Show prompt dialog to user
+    promptAction.showToast({
+      message: `已达到最大窗口数限制 (${MAX_CONCURRENT_WINDOWS})。请关闭一些窗口后再打开新窗口。`,
+      duration: WINDOW_LIMIT_WARNING_MS,
+      bottom: '50%'
+    });
+
+    // Also log to console for debugging
+    console.warn(`[AppWindow] Window limit reached: ${this.activeWindowCount}/${MAX_CONCURRENT_WINDOWS}`);
+    console.warn(`[AppWindow] Active windows: ${Array.from(this.windowIdSet).join(', ')}`);
+  }
+
+  /**
+   * Override destroyAbility to also untrack the window
+   */
+  private destroyAbilityWithUntrack(id: number): void {
+    let windowId = this.paramNormalization(id);
+    this.untrackWindow(windowId);
+    // Call original destroyAbility
+    this.destroyAbility(id);
   }
 };
