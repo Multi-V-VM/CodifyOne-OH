@@ -108,7 +108,7 @@ platform :harmony do
   end
 
   desc "App商店包打包"
-  lane :build_app do |options|
+  lane :build_app_package do |options|
     product = options[:product] || "default"
     build_mode = options[:build_mode] || "release"
 

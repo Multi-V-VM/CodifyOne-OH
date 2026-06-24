@@ -14,7 +14,7 @@ on:
         type: choice
         options:
           - build_hap
-          - build_app
+          - build_app_package
           - test
           - deploy
 
@@ -73,6 +73,34 @@ jobs:
         working-directory: ./electron
         run: |
           gem install fastlane -NV
+
+      - name: Download HarmonyOS Command Line Tools
+        env:
+          HM_COMMAND_LINE_TOOLS_VERSION: '5.0.3.810'
+          HM_COMMAND_LINE_TOOLS_PLATFORM: 'mac-arm64'
+        run: |
+          tools_dir="${{ github.workspace }}/.harmony-tools"
+          tools_zip="commandline-tools-${HM_COMMAND_LINE_TOOLS_PLATFORM}-${HM_COMMAND_LINE_TOOLS_VERSION}.zip"
+          tools_url="https://contentcenter-hz.cdn.packagehub.com/harmonyos/ide/${HM_COMMAND_LINE_TOOLS_VERSION}/${tools_zip}"
+
+          echo "Downloading HarmonyOS Command Line Tools from: ${tools_url}"
+          mkdir -p "${tools_dir}"
+
+          # Try to download from HarmonyOS package hub
+          curl -fSL -o "${tools_dir}/${tools_zip}" "${tools_url}" || {
+            echo "Failed to download from primary URL, trying alternative..."
+            # Alternative: download from Huawei developer site
+            # You may need to update this URL based on actual availability
+            curl -fSL -o "${tools_dir}/${tools_zip}" \
+              "https://repo.harmonyosa.com/harmonyos/ide/${tools_zip}" || {
+              echo "ERROR: Could not download HarmonyOS Command Line Tools"
+              echo "Please download manually from DevEco Studio or Huawei Developer Portal"
+              exit 1
+            }
+          }
+
+          echo "Downloaded: ${tools_zip}"
+          ls -la "${tools_dir}/"
 
       - name: Run Fastlane
         working-directory: ./electron
