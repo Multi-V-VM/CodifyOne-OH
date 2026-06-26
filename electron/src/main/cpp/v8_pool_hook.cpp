@@ -111,6 +111,12 @@ constexpr size_t kNodePlatformRegisterIsolateVtableOffset = 0xe0;
 // the platform map. Hook it too because the renderer can reach this lookup
 // outside node::InitializeContext.
 constexpr uintptr_t kNodePlatformForIsolateOffset = 0x868bb68;
+constexpr uintptr_t kNodePlatformMapLookupOffset = 0x2cf09c4;
+constexpr uintptr_t kNodePlatformMapLookupAuxOffset = 0x176e178;
+constexpr size_t kNodePlatformMutexOffset = 0x8;
+constexpr size_t kNodePlatformMapOffset = 0x30;
+constexpr size_t kNodePlatformLookupDataOffset = 0x18;
+constexpr size_t kNodePlatformLookupControlOffset = 0x28;
 constexpr size_t kMaxNodePlatformHookIsolates = 256;
 constexpr size_t kAarch64InlineBranchBytes = 16;
 constexpr uint32_t kAarch64LdrX16Literal8 = 0x58000050u;
@@ -129,8 +135,11 @@ using NodeInitializeContextFn = uint32_t (*)(void*);
 using V8ContextGetIsolateFn = void* (*)(void*);
 using V8GetCurrentPlatformFn = void* (*)();
 using UvDefaultLoopFn = void* (*)();
+using UvMutexFn = void (*)(void*);
 using NodePlatformRegisterIsolateFn = void (*)(void*, void*, void*);
 using NodePlatformForIsolateFn = void* (*)(void*, void*);
+using NodePlatformMapLookupFn =
+    void* (*)(void*, void*, void*, void*, void*);
 using AdapterArgVector = std::vector<std::string>;
 using AdapterFdVector = std::vector<std::pair<int, int>>;
 using AdapterStartChildProcess2Fn =
@@ -183,6 +192,7 @@ static std::atomic<uint64_t> g_v8InitializeTargetHits{0};
 static std::atomic<uint64_t> g_v8InitializeSerializedCalls{0};
 static std::atomic<uint64_t> g_v8InitializePassThroughCalls{0};
 static std::atomic<uint64_t> g_v8InitializeFailures{0};
+static std::atomic<uint64_t> g_v8InitializeForcedSuccesses{0};
 static std::atomic<uint32_t> g_activeV8Initializations{0};
 static std::atomic<uint32_t> g_maxConcurrentV8Initializations{0};
 static std::atomic<uintptr_t> g_lastV8InitializeCallerOffset{0};
@@ -202,6 +212,7 @@ static std::once_flag g_realAdapterStartLegacyChildProcessOnce;
 static std::once_flag g_realAdapterStartNormalChildProcessOnce;
 static std::once_flag g_realAdapterStartIsolateChildProcessOnce;
 static std::once_flag g_nodePlatformSymbolsOnce;
+static std::once_flag g_nodePlatformLookupSymbolsOnce;
 static std::mutex g_nodeInitializeContextInlineHookMutex;
 static NothrowNewFn g_realArrayNothrowNew = nullptr;
 static NothrowNewFn g_realScalarNothrowNew = nullptr;
@@ -212,6 +223,10 @@ static NodeInitializeContextFn g_realNodeInitializeContext = nullptr;
 static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
 static V8GetCurrentPlatformFn g_v8GetCurrentPlatform = nullptr;
 static UvDefaultLoopFn g_uvDefaultLoop = nullptr;
+static UvMutexFn g_uvMutexLock = nullptr;
+static UvMutexFn g_uvMutexUnlock = nullptr;
+static NodePlatformMapLookupFn g_nodePlatformMapLookup = nullptr;
+static void* g_nodePlatformMapLookupAux = nullptr;
 static NodePlatformForIsolateFn g_realNodePlatformForIsolate = nullptr;
 static AdapterStartChildProcess2Fn g_realAdapterStartGpuProcess = nullptr;
 static AdapterStartChildProcess2Fn g_realAdapterStartLegacyChildProcess =
@@ -241,6 +256,7 @@ static std::atomic<void*>
 static std::atomic<uint32_t> g_activeMmapAllocationCount{0};
 static std::atomic<bool> g_snapshotMmapFallbackEnabled{true};
 static std::atomic<bool> g_nodePlatformHookEnabled{false};
+static std::atomic<bool> g_nodePlatformRegisterOnLookupEnabled{true};
 static std::atomic<bool> g_adapterCrashpadBlockEnabled{true};
 static std::atomic<bool> g_nodePlatformResolveFailed{false};
 static std::atomic<int> g_snapshotMmapMinBytes{kDefaultSnapshotMmapMinBytes};
@@ -261,6 +277,10 @@ static std::atomic<uint64_t> g_nodePlatformRegisterSuccesses{0};
 static std::atomic<uint64_t> g_nodePlatformRegisterDuplicateSkips{0};
 static std::atomic<uint64_t> g_nodePlatformRegisterMissingVtable{0};
 static std::atomic<uint64_t> g_nodePlatformForIsolateCalls{0};
+static std::atomic<uint64_t> g_nodePlatformLookupHits{0};
+static std::atomic<uint64_t> g_nodePlatformLookupMisses{0};
+static std::atomic<uint64_t> g_nodePlatformLookupFallbacks{0};
+static std::atomic<uint64_t> g_nodePlatformLookupFakeFallbacks{0};
 static std::atomic<uint64_t> g_adapterChildProcessCalls{0};
 static std::atomic<uint64_t> g_adapterChildProcessPassThrough{0};
 static std::atomic<uint64_t> g_adapterCrashpadBlocks{0};
@@ -270,6 +290,9 @@ static std::atomic<uintptr_t> g_lastSnapshotAllocCallerOffset{0};
 static std::atomic<uintptr_t> g_lastNodePlatformIsolate{0};
 static std::atomic<uintptr_t> g_lastNodePlatformAddress{0};
 static std::atomic<uintptr_t> g_lastNodePlatformRegisterAddress{0};
+static std::atomic<uintptr_t> g_lastNodePlatformDataAddress{0};
+static std::atomic<void*> g_lastNodePlatformData{nullptr};
+static std::atomic<void*> g_lastNodePlatformDataPlatform{nullptr};
 static std::atomic<uint64_t> g_electronPltPatchAttempts{0};
 static std::atomic<uint64_t> g_electronPltPatchedSlots{0};
 static std::atomic<uint64_t> g_electronPltPatchFailures{0};
@@ -394,6 +417,10 @@ static void InitNodePlatformHookConfig() {
     // v8::Isolate::Initialize, so the default path must not register.
     g_nodePlatformHookEnabled.store(
         ReadEnvBool("V8_POOL_HOOK_NODE_PLATFORM_REGISTER_ENABLE", false),
+        std::memory_order_relaxed);
+    g_nodePlatformRegisterOnLookupEnabled.store(
+        ReadEnvBool("V8_POOL_HOOK_NODE_PLATFORM_REGISTER_ON_LOOKUP_ENABLE",
+                    true),
         std::memory_order_relaxed);
 }
 
@@ -676,6 +703,27 @@ static void ResolveNodePlatformHookSymbols() {
     }
 }
 
+static void ResolveNodePlatformLookupSymbols() {
+    g_uvMutexLock =
+        reinterpret_cast<UvMutexFn>(dlsym(RTLD_DEFAULT, "uv_mutex_lock"));
+    g_uvMutexUnlock =
+        reinterpret_cast<UvMutexFn>(dlsym(RTLD_DEFAULT, "uv_mutex_unlock"));
+    g_nodePlatformMapLookup = reinterpret_cast<NodePlatformMapLookupFn>(
+        ResolveElectronOffset(kNodePlatformMapLookupOffset));
+    g_nodePlatformMapLookupAux =
+        ResolveElectronOffset(kNodePlatformMapLookupAuxOffset);
+    if (!g_uvMutexLock || !g_uvMutexUnlock || !g_nodePlatformMapLookup ||
+        !g_nodePlatformMapLookupAux) {
+        g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
+        Log("WARNING: NodePlatform lookup symbols missing: lock=%p unlock=%p "
+            "lookup=%p aux=%p",
+            reinterpret_cast<void*>(g_uvMutexLock),
+            reinterpret_cast<void*>(g_uvMutexUnlock),
+            reinterpret_cast<void*>(g_nodePlatformMapLookup),
+            g_nodePlatformMapLookupAux);
+    }
+}
+
 static NodePlatformRegisterIsolateFn
 ResolveNodePlatformRegisterIsolate(void* platform) {
     if (!platform) {
@@ -727,6 +775,147 @@ static bool ShouldRegisterNodePlatformForCurrentThread() {
 
     return strcmp(name, "Chrome_InProcRe") == 0 ||
            strncmp(name, "Chrome_InProcRe", 15) == 0;
+}
+
+#if defined(__aarch64__)
+__attribute__((naked)) static void FakeNodePlatformGetForegroundTaskRunner() {
+    __asm__ volatile(
+        "bti c\n"
+        "stp xzr, xzr, [x8]\n"
+        "ret\n");
+}
+
+__attribute__((naked)) static void FakeNodePlatformReturnFalse() {
+    __asm__ volatile(
+        "bti c\n"
+        "mov w0, wzr\n"
+        "ret\n");
+}
+#else
+static void FakeNodePlatformGetForegroundTaskRunner() {}
+static void FakeNodePlatformReturnFalse() {}
+#endif
+
+static void* g_fakeNodePlatformDataVtable[] = {
+    reinterpret_cast<void*>(&FakeNodePlatformGetForegroundTaskRunner),
+    reinterpret_cast<void*>(&FakeNodePlatformReturnFalse),
+};
+
+struct FakeNodePlatformData {
+    void** vtable;
+};
+
+static FakeNodePlatformData g_fakeNodePlatformData = {
+    g_fakeNodePlatformDataVtable,
+};
+
+static void CacheNodePlatformData(void* platform, void* data) {
+    if (!platform || !data || data == &g_fakeNodePlatformData) {
+        return;
+    }
+    g_lastNodePlatformDataPlatform.store(platform, std::memory_order_release);
+    g_lastNodePlatformData.store(data, std::memory_order_release);
+    g_lastNodePlatformDataAddress.store(reinterpret_cast<uintptr_t>(data),
+                                        std::memory_order_relaxed);
+}
+
+static void* GetCachedNodePlatformData(void* platform) {
+    void* data = g_lastNodePlatformData.load(std::memory_order_acquire);
+    if (!data) {
+        return nullptr;
+    }
+    void* cachedPlatform =
+        g_lastNodePlatformDataPlatform.load(std::memory_order_acquire);
+    if (cachedPlatform && cachedPlatform != platform) {
+        return nullptr;
+    }
+    return data;
+}
+
+static void* TryLookupNodePlatformDataNoAbort(void* platform, void* isolate) {
+    if (!platform || !isolate) {
+        return nullptr;
+    }
+
+    std::call_once(g_nodePlatformLookupSymbolsOnce,
+                   ResolveNodePlatformLookupSymbols);
+    if (!g_uvMutexLock || !g_uvMutexUnlock || !g_nodePlatformMapLookup ||
+        !g_nodePlatformMapLookupAux) {
+        return nullptr;
+    }
+
+    void* key = isolate;
+    void* lookupScratch = &key;
+    void* nodeScratch = nullptr;
+    auto* base = reinterpret_cast<uint8_t*>(platform);
+    void* mutex = base + kNodePlatformMutexOffset;
+    void* map = base + kNodePlatformMapOffset;
+
+    g_uvMutexLock(mutex);
+    void* node = g_nodePlatformMapLookup(map, &key,
+                                         g_nodePlatformMapLookupAux,
+                                         &lookupScratch, &nodeScratch);
+    void* data = nullptr;
+    if (node) {
+        data = *reinterpret_cast<void**>(
+            reinterpret_cast<uint8_t*>(node) +
+            kNodePlatformLookupDataOffset);
+        // Keep the control-block read in step with libelectron's lookup
+        // layout. The raw data pointer is owned by the platform map.
+        (void)*reinterpret_cast<void**>(
+            reinterpret_cast<uint8_t*>(node) +
+            kNodePlatformLookupControlOffset);
+    }
+    g_uvMutexUnlock(mutex);
+
+    if (data) {
+        g_nodePlatformLookupHits.fetch_add(1, std::memory_order_relaxed);
+        CacheNodePlatformData(platform, data);
+    } else {
+        g_nodePlatformLookupMisses.fetch_add(1, std::memory_order_relaxed);
+    }
+    return data;
+}
+
+static bool RegisterNodePlatformForLookup(void* platform, void* isolate) {
+    if (!platform || !isolate) {
+        return false;
+    }
+
+    std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
+    if (!g_uvDefaultLoop) {
+        return false;
+    }
+
+    NodePlatformRegisterIsolateFn registerIsolate =
+        ResolveNodePlatformRegisterIsolate(platform);
+    g_lastNodePlatformRegisterAddress.store(
+        reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(registerIsolate)),
+        std::memory_order_relaxed);
+    if (!registerIsolate) {
+        g_nodePlatformRegisterMissingVtable.fetch_add(
+            1, std::memory_order_relaxed);
+        return false;
+    }
+
+    void* loop = g_uvDefaultLoop();
+    if (!loop) {
+        return false;
+    }
+
+    if (!ReserveNodePlatformHookIsolate(isolate)) {
+        g_nodePlatformRegisterDuplicateSkips.fetch_add(
+            1, std::memory_order_relaxed);
+        return false;
+    }
+
+    g_nodePlatformRegisterAttempts.fetch_add(1, std::memory_order_relaxed);
+    registerIsolate(platform, isolate, loop);
+    g_nodePlatformRegisterSuccesses.fetch_add(1, std::memory_order_relaxed);
+    Log("NodePlatform registered missing isolate from lookup isolate=%p "
+        "platform=%p register=%p loop=%p",
+        isolate, platform, reinterpret_cast<void*>(registerIsolate), loop);
+    return true;
 }
 
 static void EnsureNodePlatformRegisteredForIsolate(void* platform,
@@ -801,19 +990,40 @@ static void EnsureNodePlatformRegisteredForContext(void* context) {
 }
 
 static void* NodePlatformForIsolateLookupHook(void* platform, void* isolate) {
-    NodePlatformForIsolateFn realForIsolate = GetRealNodePlatformForIsolate();
-    if (!realForIsolate) {
-        return nullptr;
-    }
-
     g_nodePlatformForIsolateCalls.fetch_add(1, std::memory_order_relaxed);
-    if (!g_insideNodePlatformForIsolateHook) {
-        g_insideNodePlatformForIsolateHook = true;
-        EnsureNodePlatformRegisteredForIsolate(platform, isolate);
-        g_insideNodePlatformForIsolateHook = false;
+    g_lastNodePlatformIsolate.store(reinterpret_cast<uintptr_t>(isolate),
+                                    std::memory_order_relaxed);
+    g_lastNodePlatformAddress.store(reinterpret_cast<uintptr_t>(platform),
+                                    std::memory_order_relaxed);
+
+    void* data = TryLookupNodePlatformDataNoAbort(platform, isolate);
+    if (data) {
+        return data;
     }
 
-    return realForIsolate(platform, isolate);
+    std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
+    if (!g_insideNodePlatformForIsolateHook &&
+        g_nodePlatformRegisterOnLookupEnabled.load(
+            std::memory_order_relaxed)) {
+        g_insideNodePlatformForIsolateHook = true;
+        RegisterNodePlatformForLookup(platform, isolate);
+        g_insideNodePlatformForIsolateHook = false;
+
+        data = TryLookupNodePlatformDataNoAbort(platform, isolate);
+        if (data) {
+            return data;
+        }
+    }
+
+    if (void* cached = GetCachedNodePlatformData(platform)) {
+        g_nodePlatformLookupFallbacks.fetch_add(
+            1, std::memory_order_relaxed);
+        return cached;
+    }
+
+    g_nodePlatformLookupFakeFallbacks.fetch_add(
+        1, std::memory_order_relaxed);
+    return &g_fakeNodePlatformData;
 }
 
 static bool IsAarch64Bl(uint32_t instruction) {
@@ -1107,6 +1317,12 @@ static bool CallRealV8IsolateInitialize(V8IsolateInitializeFn realInitialize,
     const bool ok = realInitialize(isolate, params);
     if (!ok) {
         g_v8InitializeFailures.fetch_add(1, std::memory_order_relaxed);
+        g_v8InitializeForcedSuccesses.fetch_add(
+            1, std::memory_order_relaxed);
+        Log("v8::Isolate::Initialize returned false; forcing success "
+            "isolate=%p params=%p",
+            isolate, params);
+        return true;
     }
     return ok;
 }
@@ -1629,7 +1845,14 @@ static bool InstallNodeInitializeContextInlineHookAt(void* target,
         reinterpret_cast<char*>(target),
         reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
     if (pageStart && pageSize > 0) {
-        mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC);
+        if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
+            g_nodeInitializeContextInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node::InitializeContext inline hook restore RX failed "
+                "target=%p errno=%d",
+                target, errno);
+            return false;
+        }
     }
 
     g_patchedNodeInitializeContextInlineEntrypoints.fetch_add(
@@ -1709,7 +1932,17 @@ static bool InstallNodePlatformForIsolateInlineHookAt(void* target,
         reinterpret_cast<char*>(target),
         reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
     if (pageStart && pageSize > 0) {
-        mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC);
+        if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
+            g_nodePlatformForIsolateInlineTrampoline.store(
+                nullptr, std::memory_order_release);
+            g_realNodePlatformForIsolate = nullptr;
+            g_nodePlatformForIsolateInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("NodePlatform::ForIsolate inline hook restore RX failed "
+                "target=%p errno=%d",
+                target, errno);
+            return false;
+        }
     }
 
     g_patchedNodePlatformForIsolateInlineEntrypoints.fetch_add(
@@ -2485,6 +2718,9 @@ static napi_value GetV8InitializeHookStats(napi_env env,
               g_v8InitializePassThroughCalls.load(std::memory_order_relaxed));
     SetUint64(env, result, "failedCalls",
               g_v8InitializeFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "forcedSuccesses",
+              g_v8InitializeForcedSuccesses.load(
+                  std::memory_order_relaxed));
     SetUint64(env, result, "snapshotNothrowNewCalls",
               g_snapshotNothrowNewCalls.load(std::memory_order_relaxed));
     SetUint64(env, result, "snapshotNothrowNewFailures",
@@ -2520,6 +2756,7 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
     g_v8InitializeSerializedCalls.store(0, std::memory_order_relaxed);
     g_v8InitializePassThroughCalls.store(0, std::memory_order_relaxed);
     g_v8InitializeFailures.store(0, std::memory_order_relaxed);
+    g_v8InitializeForcedSuccesses.store(0, std::memory_order_relaxed);
     g_maxConcurrentV8Initializations.store(
         g_activeV8Initializations.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
@@ -2545,7 +2782,7 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
 static napi_value InstallElectronPltHooksWrapper(napi_env env,
                                                  napi_callback_info info) {
     StartElectronPltHookMonitor();
-    const bool installed = InstallElectronPltHooksNow(true, true);
+    const bool installed = InstallElectronPltHooksNow(true, false);
 
     napi_value result;
     napi_create_object(env, &result);
@@ -2573,6 +2810,9 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
                   std::memory_order_relaxed));
     SetUint64(env, result, "v8InitializeFailures",
               g_v8InitializeFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8InitializeForcedSuccesses",
+              g_v8InitializeForcedSuccesses.load(
+                  std::memory_order_relaxed));
     SetUint32(env, result, "nodeInitializeContextSlots",
               g_patchedNodeInitializeContextSlots.load(
                   std::memory_order_relaxed));
@@ -2600,6 +2840,9 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
               g_nodeInitializeContextCalls.load(std::memory_order_relaxed));
     SetBool(env, result, "nodePlatformHookEnabled",
             g_nodePlatformHookEnabled.load(std::memory_order_relaxed));
+    SetBool(env, result, "nodePlatformRegisterOnLookupEnabled",
+            g_nodePlatformRegisterOnLookupEnabled.load(
+                std::memory_order_relaxed));
     SetBool(env, result, "nodePlatformResolveFailed",
             g_nodePlatformResolveFailed.load(std::memory_order_relaxed));
     SetUint64(env, result, "nodePlatformRegisterAttempts",
@@ -2611,6 +2854,18 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
                   std::memory_order_relaxed));
     SetUint64(env, result, "nodePlatformRegisterMissingVtable",
               g_nodePlatformRegisterMissingVtable.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupHits",
+              g_nodePlatformLookupHits.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupMisses",
+              g_nodePlatformLookupMisses.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupFallbacks",
+              g_nodePlatformLookupFallbacks.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupFakeFallbacks",
+              g_nodePlatformLookupFakeFallbacks.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodePlatformDataAddress",
+              g_lastNodePlatformDataAddress.load(
                   std::memory_order_relaxed));
     SetUint64(env, result, "lastNodePlatformRegisterAddress",
               g_lastNodePlatformRegisterAddress.load(
@@ -2656,6 +2911,9 @@ static napi_value GetElectronPltHookStats(napi_env env,
                   std::memory_order_relaxed));
     SetUint64(env, result, "v8InitializeFailures",
               g_v8InitializeFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8InitializeForcedSuccesses",
+              g_v8InitializeForcedSuccesses.load(
+                  std::memory_order_relaxed));
     SetUint32(env, result, "epollWaitSlots",
               g_patchedEpollWaitSlots.load(std::memory_order_relaxed));
     SetUint32(env, result, "v8InitializeSlots",
@@ -2693,6 +2951,9 @@ static napi_value GetElectronPltHookStats(napi_env env,
                   std::memory_order_relaxed));
     SetBool(env, result, "nodePlatformHookEnabled",
             g_nodePlatformHookEnabled.load(std::memory_order_relaxed));
+    SetBool(env, result, "nodePlatformRegisterOnLookupEnabled",
+            g_nodePlatformRegisterOnLookupEnabled.load(
+                std::memory_order_relaxed));
     SetBool(env, result, "nodePlatformResolveFailed",
             g_nodePlatformResolveFailed.load(std::memory_order_relaxed));
     SetUint64(env, result, "nodeInitializeContextCalls",
@@ -2707,6 +2968,15 @@ static napi_value GetElectronPltHookStats(napi_env env,
     SetUint64(env, result, "nodePlatformRegisterMissingVtable",
               g_nodePlatformRegisterMissingVtable.load(
                   std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupHits",
+              g_nodePlatformLookupHits.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupMisses",
+              g_nodePlatformLookupMisses.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupFallbacks",
+              g_nodePlatformLookupFallbacks.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePlatformLookupFakeFallbacks",
+              g_nodePlatformLookupFakeFallbacks.load(
+                  std::memory_order_relaxed));
     SetUint64(env, result, "nodePlatformForIsolateCalls",
               g_nodePlatformForIsolateCalls.load(std::memory_order_relaxed));
     SetUint64(env, result, "lastNodePlatformIsolate",
@@ -2715,6 +2985,9 @@ static napi_value GetElectronPltHookStats(napi_env env,
               g_lastNodePlatformAddress.load(std::memory_order_relaxed));
     SetUint64(env, result, "lastNodePlatformRegisterAddress",
               g_lastNodePlatformRegisterAddress.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodePlatformDataAddress",
+              g_lastNodePlatformDataAddress.load(
                   std::memory_order_relaxed));
     SetUint32(env, result, "adapterChildProcessSlots",
               GetPatchedAdapterChildProcessSlots());
