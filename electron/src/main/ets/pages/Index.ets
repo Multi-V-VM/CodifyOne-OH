@@ -7,7 +7,7 @@ import CustomChildProcess from '../process/CustomChildProcess';
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
 const READY_FLAG: string = '/data/storage/el2/base/files/ohcode-ready.flag';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-nosnapshot1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-snapnull1';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'OHcodeStartup';
 

@@ -68,6 +68,7 @@ export interface ElectronPltHookInstallResult {
   lastCreateParamsSlot4?: number;
   lastCreateParamsSlot5?: number;
   lastSnapshotBlobAddress?: number;
+  createParamsSlotsHex?: string;
   v8StartupFlagsApplied?: boolean;
   v8StartupFlagsResolveFailed?: boolean;
   v8StartupFlagsSymbolResolved?: boolean;
@@ -78,6 +79,24 @@ export interface ElectronPltHookInstallResult {
   v8StartupFlagsLength?: number;
   v8StartupFlagsApplyAttempts?: number;
   v8StartupFlagsEmptySkips?: number;
+  v8SetSnapshotDataBlobCalls?: number;
+  lastV8SnapshotDataBlobAddress?: number;
+  lastV8SnapshotDataBlobDataAddress?: number;
+  lastV8SnapshotDataBlobRawSize?: number;
+  lastEffectiveV8SnapshotDataBlobAddress?: number;
+  lastEffectiveV8SnapshotDataBlobDataAddress?: number;
+  lastEffectiveV8SnapshotDataBlobRawSize?: number;
+  replaceContextSnapshotWithStartup?: boolean;
+  skipV8SnapshotDataBlob?: boolean;
+  snapshotBlobSkips?: number;
+  snapshotBlobReplacementAttempts?: number;
+  snapshotBlobReplacements?: number;
+  snapshotBlobReplacementFailures?: number;
+  baseStartupBlobRawSize?: number;
+  snapshotBlobReplacementPath?: string;
+  v8InitializeExternalStartupDataCalls?: number;
+  v8InitializeExternalStartupDataFromFileCalls?: number;
+  lastV8ExternalStartupDataPath?: string;
   snapshotNothrowNewCalls?: number;
   snapshotNothrowNewFailures?: number;
   snapshotMmapFallbacks?: number;
@@ -120,6 +139,9 @@ export interface ElectronPltHookInstallResult {
 export interface ElectronPltHookStats extends ElectronPltHookInstallResult {
   epollWaitSlots: number;
   v8InitializeSlots: number;
+  v8SetSnapshotDataBlobSlots?: number;
+  v8InitializeExternalStartupDataSlots?: number;
+  v8InitializeExternalStartupDataFromFileSlots?: number;
   snapshotDecompressSlots: number;
   arrayNothrowNewSlots: number;
   scalarNothrowNewSlots: number;

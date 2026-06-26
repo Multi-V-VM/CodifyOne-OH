@@ -22,7 +22,7 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-nosnapshot1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-snapnull1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -206,6 +206,18 @@ class WindowNodeController extends NodeController {
           ' v8StartupFlagsSymbolResolved=' + hookStats.v8StartupFlagsSymbolResolved +
           ' v8StartupFlagsEnvEmpty=' + hookStats.v8StartupFlagsEnvEmpty +
           ' v8StartupFlagsUsingDefault=' + hookStats.v8StartupFlagsUsingDefault +
+          ' v8SetSnapshotDataBlobCalls=' + hookStats.v8SetSnapshotDataBlobCalls +
+          ' lastV8SnapshotDataBlobRawSize=' + hookStats.lastV8SnapshotDataBlobRawSize +
+          ' lastEffectiveV8SnapshotDataBlobRawSize=' + hookStats.lastEffectiveV8SnapshotDataBlobRawSize +
+          ' replaceContextSnapshotWithStartup=' + hookStats.replaceContextSnapshotWithStartup +
+          ' skipV8SnapshotDataBlob=' + hookStats.skipV8SnapshotDataBlob +
+          ' snapshotBlobSkips=' + hookStats.snapshotBlobSkips +
+          ' snapshotBlobReplacements=' + hookStats.snapshotBlobReplacements +
+          ' snapshotBlobReplacementFailures=' + hookStats.snapshotBlobReplacementFailures +
+          ' baseStartupBlobRawSize=' + hookStats.baseStartupBlobRawSize +
+          ' v8InitializeExternalStartupDataCalls=' + hookStats.v8InitializeExternalStartupDataCalls +
+          ' v8InitializeExternalStartupDataFromFileCalls=' + hookStats.v8InitializeExternalStartupDataFromFileCalls +
+          ' lastV8ExternalStartupDataPath=' + hookStats.lastV8ExternalStartupDataPath +
           ' snapshotBlobClears=' + hookStats.snapshotBlobClears +
           ' lastSnapshotBlobAddress=' + hookStats.lastSnapshotBlobAddress +
           ' snapshotDecompressCalls=' + hookStats.snapshotDecompressCalls +
