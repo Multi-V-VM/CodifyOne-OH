@@ -146,6 +146,7 @@ export interface ElectronPltHookInstallResult {
   nodePostLoadTraceFailures?: number;
   lastNodeLoadEnvironmentEnv?: number;
   lastNodeLoadEnvironmentSource?: number;
+  lastNodeLoadEnvironmentPreload?: number;
   lastNodeLoadEnvironmentResult?: number;
   nodeInitializeContextInlineInstalled?: boolean;
   nodeInitializeContextInlineEntrypoints?: number;
@@ -210,6 +211,7 @@ export interface ElectronPltHookStats extends ElectronPltHookInstallResult {
   nodePostLoadTraceFailures?: number;
   lastNodeLoadEnvironmentEnv?: number;
   lastNodeLoadEnvironmentSource?: number;
+  lastNodeLoadEnvironmentPreload?: number;
   lastNodeLoadEnvironmentResult?: number;
   nodeInitializeContextInlineInstalled?: boolean;
   nodeInitializeContextInlineEntrypoints?: number;

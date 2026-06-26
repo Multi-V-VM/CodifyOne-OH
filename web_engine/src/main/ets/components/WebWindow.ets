@@ -22,8 +22,13 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_MAIN_TRACE_FILE: string = '/data/storage/el2/base/files/ohcode-main-trace.log';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-loadenvpost1';
+const STARTUP_MAIN_TRACE_FILES: string[] = [
+  '/data/storage/el2/base/files/ohcode-main-trace.log',
+  '/data/storage/el1/base/files/ohcode-main-trace.log',
+  '/tmp/ohcode-main-trace.log'
+];
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-tracefanout1';
+const ELECTRON_APP_PATH: string = '--app-path=../../electron/resources/resfile/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -127,18 +132,24 @@ class WindowNodeController extends NodeController {
   }
 
   private readStartupMainTraceTail(maxChars: number): string {
-    try {
-      if (!fileIo.accessSync(STARTUP_MAIN_TRACE_FILE)) {
-        return '<missing>';
+    const parts: string[] = [];
+    for (let i = 0; i < STARTUP_MAIN_TRACE_FILES.length; i++) {
+      const traceFile = STARTUP_MAIN_TRACE_FILES[i];
+      try {
+        if (!fileIo.accessSync(traceFile)) {
+          parts.push(traceFile + '=<missing>');
+          continue;
+        }
+        const traceText: string = fileIo.readTextSync(traceFile);
+        const tail = traceText.length <= maxChars
+          ? traceText
+          : traceText.substring(traceText.length - maxChars);
+        parts.push(traceFile + '=' + tail.replace(/\n/g, ' | '));
+      } catch (err) {
+        parts.push(traceFile + '=<read failed ' + JSON.stringify(err) + '>');
       }
-      const traceText: string = fileIo.readTextSync(STARTUP_MAIN_TRACE_FILE);
-      if (traceText.length <= maxChars) {
-        return traceText.replace(/\n/g, ' | ');
-      }
-      return traceText.substring(traceText.length - maxChars).replace(/\n/g, ' | ');
-    } catch (err) {
-      return '<read failed ' + JSON.stringify(err) + '>';
     }
+    return parts.join(' ; ');
   }
 
   makeNode(uiContext: UIContext): FrameNode | null {
@@ -261,6 +272,7 @@ class WindowNodeController extends NodeController {
           ' nodePostLoadTraceAttempts=' + hookStats.nodePostLoadTraceAttempts +
           ' nodePostLoadTraceSuccesses=' + hookStats.nodePostLoadTraceSuccesses +
           ' nodePostLoadTraceFailures=' + hookStats.nodePostLoadTraceFailures +
+          ' lastNodeLoadEnvironmentPreload=' + hookStats.lastNodeLoadEnvironmentPreload +
           ' lastNodeLoadEnvironmentResult=' + hookStats.lastNodeLoadEnvironmentResult +
           ' nodePlatformForIsolateCalls=' + hookStats.nodePlatformForIsolateCalls +
           ' nodePlatformLookupHits=' + hookStats.nodePlatformLookupHits +
@@ -280,29 +292,27 @@ class WindowNodeController extends NodeController {
   }
 
   private openInitialWindowWithRetry(attemptIndex: number): void {
-    const delays: number[] = [0, 250, 750, 1500, 3000, 5000, 8000, 12000, 16000, 20000];
-    const shouldRetry = this.openInitialWindow('retry' + attemptIndex);
-    if (shouldRetry && attemptIndex + 1 < delays.length) {
-      const nextDelay = delays[attemptIndex + 1];
-      setTimeout(() => {
-        this.openInitialWindowWithRetry(attemptIndex + 1);
-      }, nextDelay);
+    const delays: number[] = [0, 750, 2000, 5000, 8000];
+    if (attemptIndex >= delays.length) {
+      return;
     }
+    setTimeout(() => {
+      this.openInitialWindow('async' + attemptIndex);
+      this.openInitialWindowWithRetry(attemptIndex + 1);
+    }, delays[attemptIndex]);
   }
 
-  private openInitialWindow(attempt: string): boolean {
+  private openInitialWindow(attempt: string): void {
     try {
-      this.writeStartupStatus('opening initial window ' + attempt + ' uri=' +
+      this.writeStartupStatus('dispatching initial window ' + attempt + ' uri=' +
         (this.config.uri.length > 0 ? this.config.uri : '<empty>'));
-      const result = this.config.nativeContext.ExecuteCommand(CommandType.kNewWindow, {
+      this.config.nativeContext.ExecuteCommand(CommandType.kNewWindow, {
         url: this.config.uri,
-        is_sync: true
+        is_sync: false
       });
-      this.writeStartupStatus('initial kNewWindow ' + attempt + ' returned=' + JSON.stringify(result));
-      return !result || result.ret_code !== 0;
+      this.writeStartupStatus('initial kNewWindow ' + attempt + ' dispatched async');
     } catch (err) {
       this.writeStartupStatus('initial kNewWindow ' + attempt + ' threw ' + JSON.stringify(err));
-      return true;
     }
   }
 
@@ -336,7 +346,7 @@ class WindowNodeController extends NodeController {
 
   private buildArgs(): string[] {
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
-    let vec_args = [resDir];
+    let vec_args = [resDir, ELECTRON_APP_PATH];
     const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16';
     let hasJsFlags: boolean = false;
     // 过滤掉残留的 --folder-uri，确保"是否连远程"只由标记文件决定（防上次启动参数残留）。

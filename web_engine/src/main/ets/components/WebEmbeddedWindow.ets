@@ -13,7 +13,8 @@ import { MultiInputAdapter } from '../adapter/MultiInputAdapter';
 import { DragParamManager } from '../common/DragParamManager';
 import { UIExtensionContentSession } from '@kit.AbilityKit';
 
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-loadenvpost1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-tracefanout1';
+const ELECTRON_APP_PATH: string = '--app-path=../../electron/resources/resfile/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -196,7 +197,7 @@ export struct WebEmbeddedWindow {
     }
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
     const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16';
-    let vec_args = [override_ua, resDir, jsFlags, default_uri];
+    let vec_args = [override_ua, resDir, ELECTRON_APP_PATH, jsFlags, default_uri];
     this.appendMissingSwitches(vec_args, CHROMIUM_PROCESS_FLAGS);
     return vec_args;
   }

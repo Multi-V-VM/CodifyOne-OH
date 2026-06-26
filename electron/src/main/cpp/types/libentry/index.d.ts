@@ -98,6 +98,7 @@ export interface ElectronPltHookStats extends ElectronPltHookInstallResult {
   nodePostLoadTraceFailures?: number;
   lastNodeLoadEnvironmentEnv?: number;
   lastNodeLoadEnvironmentSource?: number;
+  lastNodeLoadEnvironmentPreload?: number;
   lastNodeLoadEnvironmentResult?: number;
   snapshotDecompressSlots: number;
   arrayNothrowNewSlots: number;

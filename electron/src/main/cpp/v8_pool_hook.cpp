@@ -43,7 +43,7 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
                                                 const char* source);
 extern "C" void*
 _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
-    void* environment, void* callback);
+    void* environment, void* callback, void* preload);
 
 #ifndef R_AARCH64_GLOB_DAT
 #define R_AARCH64_GLOB_DAT 1025
@@ -117,8 +117,12 @@ constexpr const char* kDefaultV8StartupFlags =
     "--max-old-space-size=512 --max-semi-space-size=16";
 constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
-  const STAMP = "diag-20260626-loadenvpost1";
-  const TRACE = "/data/storage/el2/base/files/ohcode-main-trace.log";
+  const STAMP = "diag-20260626-tracefanout1";
+  const TRACE_PATHS = [
+    "/data/storage/el2/base/files/ohcode-main-trace.log",
+    "/data/storage/el1/base/files/ohcode-main-trace.log",
+    "/tmp/ohcode-main-trace.log"
+  ];
   function stringify(value) {
     try {
       return JSON.stringify(value);
@@ -130,21 +134,47 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
     return String((err && (err.stack || err.message)) || err);
   }
   function trace(phase, detail) {
+    const line =
+      `${Date.now()} [${STAMP}] [loadenv-post] ${phase}${detail === undefined ? "" : " " + detail}`;
+    try {
+      if (process && typeof process._rawDebug === "function") {
+        process._rawDebug(`[OHcode]${line}`);
+      }
+    } catch (_) {}
+    try {
+      if (process && process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`[OHcode]${line}\n`);
+      }
+    } catch (_) {}
+    try {
+      console.error(`[OHcode]${line}`);
+    } catch (_) {}
     try {
       const fs = require("fs");
-      fs.appendFileSync(
-        TRACE,
-        `${Date.now()} [${STAMP}] [loadenv-post] ${phase}${detail === undefined ? "" : " " + detail}\n`
-      );
+      for (const tracePath of TRACE_PATHS) {
+        try {
+          fs.appendFileSync(tracePath, `${line}\n`);
+        } catch (err) {
+          try {
+            if (process && typeof process._rawDebug === "function") {
+              process._rawDebug(`[OHcode][loadenv-post] write failed ${tracePath} ${errorText(err)}`);
+            }
+          } catch (_) {}
+        }
+      }
     } catch (err) {
       try {
-        console.error(`[OHcode][loadenv-post] ${phase} ${errorText(err)}`);
+        if (process && typeof process._rawDebug === "function") {
+          process._rawDebug(`[OHcode][loadenv-post] fs unavailable ${phase} ${errorText(err)}`);
+        }
       } catch (_) {}
     }
   }
   try {
     const fs = require("fs");
     const path = require("path");
+    const enableRescue =
+      !!(process.env && process.env.OHCODE_POSTLOAD_RESCUE === "1");
     let hidden = {};
     try {
       const v8Util = process._linkedBinding("electron_common_v8_util");
@@ -186,12 +216,78 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
         argv: process.argv,
         execPath: process.execPath || "",
         cwd: typeof process.cwd === "function" ? process.cwd() : "",
+        modulePaths:
+          typeof module !== "undefined" && module && module.paths
+            ? module.paths
+            : [],
         appCodeLoadedType: typeof process.appCodeLoaded,
         electronVersion: (process.versions && process.versions.electron) || "",
+        postLoadRescueEnabled: enableRescue,
         hidden,
         exists
       })
     );
+
+    const appDirs = [
+      process.resourcesPath
+        ? path.join(process.resourcesPath, "app")
+        : "",
+      process.resourcesPath
+        ? path.join(process.resourcesPath, "resources", "app")
+        : "",
+      "/data/storage/el1/bundle/electron/resources/resfile/resources/app",
+      "/data/storage/el1/bundle/electron/resources/resfile/app"
+    ].filter(Boolean);
+    const candidates = appDirs.map((appDir) => {
+      const entry = path.join(appDir, "ohcode-entry-probe.js");
+      const pkg = path.join(appDir, "package.json");
+      return {
+        appDir,
+        entry,
+        pkg,
+        entryExists: fs.existsSync(entry),
+        packageExists: fs.existsSync(pkg)
+      };
+    });
+    for (const candidate of candidates) {
+      trace(
+        "rescue candidate",
+        `${candidate.entry} exists=${candidate.entryExists} pkg=${candidate.packageExists}`
+      );
+    }
+    if (!enableRescue) {
+      trace("rescue disabled", stringify(candidates));
+    } else {
+      const candidate = candidates.find((item) => item.entryExists);
+      if (!candidate) {
+        trace("rescue missing", stringify(candidates));
+      } else {
+        const schedule =
+          typeof setImmediate === "function" ? setImmediate : setTimeout;
+        trace("rescue scheduled", candidate.entry);
+        schedule(() => {
+          try {
+            const electron = require("electron");
+            if (
+              electron &&
+              electron.app &&
+              typeof electron.app.setAppPath === "function"
+            ) {
+              electron.app.setAppPath(candidate.appDir);
+              trace("rescue setAppPath", candidate.appDir);
+            }
+          } catch (err) {
+            trace("rescue setAppPath failed", errorText(err));
+          }
+          try {
+            require(candidate.entry);
+            trace("rescue loaded", candidate.entry);
+          } catch (err) {
+            trace("rescue load failed", errorText(err));
+          }
+        }, 0);
+      }
+    }
   } catch (err) {
     trace("error", errorText(err));
   }
@@ -274,7 +370,7 @@ using NodeNewContextFn = void* (*)(void*, void*);
 using NodeCreateEnvironmentFn =
     void* (*)(void*, void*, void*, void*, void*, void*, void*);
 using NodeLoadEnvironmentStringFn = void* (*)(void*, const char*);
-using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*);
+using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*, void*);
 
 struct V8StartupDataView {
     const char* data;
@@ -528,6 +624,7 @@ static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentContext{0};
 static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentResult{0};
 static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentEnv{0};
 static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentSource{0};
+static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentPreload{0};
 static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentResult{0};
 static std::atomic<void*> g_lastNodePlatformData{nullptr};
 static std::atomic<void*> g_lastNodePlatformDataPlatform{nullptr};
@@ -944,6 +1041,48 @@ static NodeCreateEnvironmentFn GetRealNodeCreateEnvironment() {
     return g_realNodeCreateEnvironment;
 }
 
+static void* ResolveElectronExport(const char* symbolName,
+                                   const void* wrapperAddress) {
+    void* symbol = nullptr;
+    if (g_electronPreloadHandle) {
+        symbol = dlsym(g_electronPreloadHandle, symbolName);
+    }
+
+    if (!symbol) {
+        void* handle = dlopen("libelectron.so", RTLD_LAZY | RTLD_GLOBAL);
+        if (handle) {
+            g_electronPreloadHandle = handle;
+            symbol = dlsym(handle, symbolName);
+        }
+    }
+
+    if (!symbol) {
+        symbol = dlsym(RTLD_DEFAULT, symbolName);
+    }
+
+    if (symbol && wrapperAddress && symbol == wrapperAddress) {
+        Log("WARNING: resolved %s to wrapper address %p; ignoring",
+            symbolName, symbol);
+        return nullptr;
+    }
+
+    if (symbol) {
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(symbol, &info) != 0 && info.dli_fname &&
+            strstr(info.dli_fname, "libelectron.so")) {
+            Log("resolved %s from %s at %p", symbolName, info.dli_fname,
+                symbol);
+            return symbol;
+        }
+        Log("WARNING: resolved %s from non-electron module %s at %p",
+            symbolName, info.dli_fname ? info.dli_fname : "<unknown>",
+            symbol);
+    }
+
+    return symbol;
+}
+
 static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
     if (void* gotReal =
             g_gotRealNodeLoadEnvironmentString.load(
@@ -952,9 +1091,10 @@ static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
     }
     std::call_once(g_realNodeLoadEnvironmentStringOnce, []() {
         g_realNodeLoadEnvironmentString =
-            reinterpret_cast<NodeLoadEnvironmentStringFn>(dlsym(
-                RTLD_NEXT,
-                "_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc"));
+            reinterpret_cast<NodeLoadEnvironmentStringFn>(ResolveElectronExport(
+                "_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc",
+                reinterpret_cast<const void*>(
+                    &_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc)));
         if (!g_realNodeLoadEnvironmentString) {
             Log("WARNING: node::LoadEnvironment(string) real symbol not found");
         }
@@ -2317,6 +2457,9 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
     SetUint64(env, result, "lastNodeLoadEnvironmentSource",
               g_lastNodeLoadEnvironmentSource.load(
                   std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeLoadEnvironmentPreload",
+              g_lastNodeLoadEnvironmentPreload.load(
+                  std::memory_order_relaxed));
     SetUint64(env, result, "lastNodeLoadEnvironmentResult",
               g_lastNodeLoadEnvironmentResult.load(
                   std::memory_order_relaxed));
@@ -2527,7 +2670,7 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
 
 extern "C" void*
 _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
-    void* environment, void* callback) {
+    void* environment, void* callback, void* preload) {
     NodeLoadEnvironmentCallbackFn realLoadEnvironment =
         GetRealNodeLoadEnvironmentCallback();
     if (!realLoadEnvironment) {
@@ -2543,18 +2686,21 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         reinterpret_cast<uintptr_t>(environment), std::memory_order_relaxed);
     g_lastNodeLoadEnvironmentSource.store(
         reinterpret_cast<uintptr_t>(callback), std::memory_order_relaxed);
-    void* value = realLoadEnvironment(environment, callback);
+    g_lastNodeLoadEnvironmentPreload.store(
+        reinterpret_cast<uintptr_t>(preload), std::memory_order_relaxed);
+    void* value = realLoadEnvironment(environment, callback, preload);
     g_lastNodeLoadEnvironmentResult.store(reinterpret_cast<uintptr_t>(value),
                                           std::memory_order_relaxed);
     MaybeRunNodePostLoadTrace(environment, callIndex);
     if (!value) {
         g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
-        Log("node::LoadEnvironment(callback) returned empty env=%p callback=%p",
-            environment, callback);
+        Log("node::LoadEnvironment(callback) returned empty env=%p callback=%p "
+            "preload=%p",
+            environment, callback, preload);
     } else if (callIndex <= 5) {
         Log("node::LoadEnvironment(callback) returned value=%p env=%p "
-            "callback=%p",
-            value, environment, callback);
+            "callback=%p preload=%p",
+            value, environment, callback, preload);
     }
     return value;
 }
