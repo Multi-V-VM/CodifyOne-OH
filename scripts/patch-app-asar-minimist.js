@@ -41,6 +41,10 @@ const filesToInstall = [
   [
     "extensions/ohcode-splash/package.json",
     path.join(patchRoot, "ohcode-splash", "package.json")
+  ],
+  [
+    "extensions/ohcode-splash/extension.js",
+    path.join(patchRoot, "ohcode-splash", "extension.js")
   ]
 ];
 

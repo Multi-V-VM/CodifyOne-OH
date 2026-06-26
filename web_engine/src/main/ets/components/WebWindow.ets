@@ -22,7 +22,7 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-fncache1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-splashready2';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +

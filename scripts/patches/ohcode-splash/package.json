@@ -11,11 +11,10 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "onStartupFinished"
   ],
   "extensionKind": [
     "ui"
   ],
-  "api": "none",
   "main": "./extension.js"
 }
