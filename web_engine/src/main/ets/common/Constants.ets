@@ -6,7 +6,7 @@ export class ConfigData {
   static DOMAIN: number = 0x0000;
   static TAG: string = '[WebEngine]';
   static WINDOW_PREFIX: string = 'browser';
-  static DEFAULT_WINDOW_ID: string = 'browser1';
+  static DEFAULT_WINDOW_ID: string = 'browser0';
 }
 let configData = new ConfigData();
 export default configData as ConfigData;

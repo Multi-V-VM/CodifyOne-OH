@@ -13,7 +13,7 @@ import { MultiInputAdapter } from '../adapter/MultiInputAdapter';
 import { DragParamManager } from '../common/DragParamManager';
 import { UIExtensionContentSession } from '@kit.AbilityKit';
 
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-splashready2';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-nosnapshot1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -195,7 +195,7 @@ export struct WebEmbeddedWindow {
       default_uri = this.startUri;
     }
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
-    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --regexp-interpret-all';
+    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16';
     let vec_args = [override_ua, resDir, jsFlags, default_uri];
     this.appendMissingSwitches(vec_args, CHROMIUM_PROCESS_FLAGS);
     return vec_args;

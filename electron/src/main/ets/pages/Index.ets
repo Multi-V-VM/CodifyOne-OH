@@ -7,7 +7,7 @@ import CustomChildProcess from '../process/CustomChildProcess';
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
 const READY_FLAG: string = '/data/storage/el2/base/files/ohcode-ready.flag';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-splashready2';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-nosnapshot1';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'OHcodeStartup';
 
@@ -73,8 +73,10 @@ struct Index {
     }, 200);
 
     this.loadingTimer = setTimeout(() => {
-      this.writeStartupStatus('loading timeout; showing web surface');
-      this.hideLoading();
+      hilog.info(LOG_DOMAIN, LOG_TAG, '[%{public}s] loading timeout; still waiting for workbench',
+        STARTUP_BUILD_STAMP);
+      this.loadingStatus = '[' + STARTUP_BUILD_STAMP + '] still waiting for workbench; last status: ' +
+        this.loadingStatus;
     }, 20000);
   }
 
@@ -95,8 +97,18 @@ struct Index {
         const raw: string = fileIo.readTextSync(STARTUP_STATUS_FILE).trim();
         const firstSpace: number = raw.indexOf(' ');
         this.loadingStatus = firstSpace >= 0 ? raw.substring(firstSpace + 1) : raw;
+        if (this.showLoading && this.isStartupReadyStatus(raw)) {
+          this.writeStartupStatus('ready status observed');
+          this.hideLoading();
+        }
       }
     } catch (_) { }
+  }
+
+  private isStartupReadyStatus(raw: string): boolean {
+    return raw.indexOf('[OHcode] workbench dom-ready') >= 0 ||
+      raw.indexOf('[OHcode] workbench did-finish-load') >= 0 ||
+      raw.indexOf('[ohcode-splash] ready flag written') >= 0;
   }
 
   private hideLoading(): void {
@@ -123,6 +135,28 @@ struct Index {
       this.loadingTimer = -1;
     }
     this.updateStyle.removeUpdateStyleFunction(this.xcomponentId);
+  }
+
+  @Builder
+  SurfaceDiagnosticRibbon() {
+    Column({ space: 2 }) {
+      Text('OHcode ArkUI surface visible [' + STARTUP_BUILD_STAMP + ']')
+        .fontSize(13)
+        .fontColor('#FFFFFFFF')
+        .fontWeight(FontWeight.Medium)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text(this.loadingStatus)
+        .fontSize(11)
+        .fontColor('#D9FFFFFF')
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor('#D0111827')
+    .position({ x: 0, y: 0 })
   }
 
   @Builder
@@ -235,6 +269,8 @@ struct Index {
 
       if (this.showLoading) {
         this.LoadingOverlay()
+      } else {
+        this.SurfaceDiagnosticRibbon()
       }
     }
     .width('100%')

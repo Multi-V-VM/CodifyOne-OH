@@ -28,6 +28,14 @@ const filesToInstall = [
     "out/vs/code/electron-main/main.js",
     path.join(appDir, "out", "vs", "code", "electron-main", "main.js")
   ],
+  [
+    "out/vs/code/electron-sandbox/workbench/workbench.html",
+    path.join(appDir, "out", "vs", "code", "electron-sandbox", "workbench", "workbench.html")
+  ],
+  [
+    "out/vs/code/electron-sandbox/workbench/workbench.js",
+    path.join(appDir, "out", "vs", "code", "electron-sandbox", "workbench", "workbench.js")
+  ],
   ["node_modules/minimist/index.js", path.join(minimistPatchDir, "index.js")],
   ["node_modules/minimist/package.json", path.join(minimistPatchDir, "package.json")],
   ["node_modules/graceful-fs/index.js", path.join(gracefulFsPatchDir, "index.js")],

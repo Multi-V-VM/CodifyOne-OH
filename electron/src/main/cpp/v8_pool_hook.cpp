@@ -94,8 +94,8 @@ constexpr uintptr_t kElectronV8InitializeCallOffset = 0x605639c;
 constexpr uintptr_t kElectronV8InitializeReturnOffset =
     kElectronV8InitializeCallOffset + 4;
 constexpr const char* kDefaultV8StartupFlags =
-    "--max-old-space-size=512 --max-semi-space-size=16 "
-    "--regexp-interpret-all";
+    "--max-old-space-size=512 --max-semi-space-size=16";
+constexpr size_t kV8CreateParamsSnapshotBlobSlot = 3;
 constexpr uintptr_t kSnapshotVectorAllocReturnOffset = 0x244f3e8;
 constexpr uintptr_t kSnapshotVectorRetryAllocReturnOffset = 0x244f420;
 constexpr uintptr_t kSnapshotDataAllocReturnOffset = 0x244f520;
@@ -185,14 +185,33 @@ static std::mutex g_v8FlagsMutex;
 static std::string g_v8StartupFlags;
 static std::atomic<bool> g_v8InitializeHookEnabled{true};
 static std::atomic<bool> g_serializeV8Initialize{true};
+static std::atomic<bool> g_forceV8InitializeSuccess{false};
 static std::atomic<bool> g_v8StartupFlagsApplied{false};
 static std::atomic<bool> g_v8StartupFlagsResolveFailed{false};
+static std::atomic<bool> g_v8StartupFlagsSymbolResolved{false};
+static std::atomic<bool> g_v8StartupFlagsEnvPresent{false};
+static std::atomic<bool> g_v8StartupFlagsEnvEmpty{false};
+static std::atomic<bool> g_v8StartupFlagsUsingDefault{false};
+static std::atomic<uint32_t> g_v8StartupFlagsLength{0};
+static std::atomic<uint64_t> g_v8StartupFlagsApplyAttempts{0};
+static std::atomic<uint64_t> g_v8StartupFlagsEmptySkips{0};
 static std::atomic<uint64_t> g_v8InitializeCalls{0};
 static std::atomic<uint64_t> g_v8InitializeTargetHits{0};
 static std::atomic<uint64_t> g_v8InitializeSerializedCalls{0};
 static std::atomic<uint64_t> g_v8InitializePassThroughCalls{0};
 static std::atomic<uint64_t> g_v8InitializeFailures{0};
 static std::atomic<uint64_t> g_v8InitializeForcedSuccesses{0};
+static std::atomic<bool> g_disableNodeStartupSnapshot{true};
+static std::atomic<uint64_t> g_v8SnapshotBlobClears{0};
+static std::atomic<uint64_t> g_v8SnapshotBlobNulls{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsAddress{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsSlot0{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsSlot1{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsSlot2{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsSlot3{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsSlot4{0};
+static std::atomic<uintptr_t> g_lastV8CreateParamsSlot5{0};
+static std::atomic<uintptr_t> g_lastV8SnapshotBlobAddress{0};
 static std::atomic<uint32_t> g_activeV8Initializations{0};
 static std::atomic<uint32_t> g_maxConcurrentV8Initializations{0};
 static std::atomic<uintptr_t> g_lastV8InitializeCallerOffset{0};
@@ -365,6 +384,14 @@ static int ReadEnvInt(const char* name, int default_value, int min_value,
     return static_cast<int>(parsed);
 }
 
+static uint32_t StringLengthForStats(const std::string& value) {
+    constexpr size_t kMaxUint32Size = 0xffffffffu;
+    if (value.size() > kMaxUint32Size) {
+        return 0xffffffffu;
+    }
+    return static_cast<uint32_t>(value.size());
+}
+
 static void InitEpollHookConfig() {
     g_epollHookEnabled.store(
         ReadEnvBool("V8_POOL_HOOK_EPOLL_ENABLE", true),
@@ -387,10 +414,25 @@ static void InitV8InitializeHookConfig() {
     g_serializeV8Initialize.store(
         ReadEnvBool("V8_POOL_HOOK_SERIALIZE_ISOLATE_INIT", true),
         std::memory_order_relaxed);
+    g_forceV8InitializeSuccess.store(
+        ReadEnvBool("V8_POOL_HOOK_FORCE_ISOLATE_INIT_SUCCESS", false),
+        std::memory_order_relaxed);
+    g_disableNodeStartupSnapshot.store(
+        ReadEnvBool("V8_POOL_HOOK_DISABLE_NODE_STARTUP_SNAPSHOT", true),
+        std::memory_order_relaxed);
 
     const char* flags = getenv("V8_POOL_HOOK_V8_FLAGS");
+    const bool envPresent = flags != nullptr;
+    const bool envEmpty = envPresent && flags[0] == '\0';
+    g_v8StartupFlagsEnvPresent.store(envPresent, std::memory_order_relaxed);
+    g_v8StartupFlagsEnvEmpty.store(envEmpty, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(g_v8FlagsMutex);
-    g_v8StartupFlags = flags != nullptr ? flags : kDefaultV8StartupFlags;
+    g_v8StartupFlags =
+        (!envPresent || envEmpty) ? kDefaultV8StartupFlags : flags;
+    g_v8StartupFlagsUsingDefault.store(!envPresent || envEmpty,
+                                       std::memory_order_relaxed);
+    g_v8StartupFlagsLength.store(StringLengthForStats(g_v8StartupFlags),
+                                 std::memory_order_relaxed);
 }
 
 static void InitSnapshotAllocHookConfig() {
@@ -1258,12 +1300,25 @@ static void* NothrowNewWithSnapshotFallback(NothrowNewFn realNew,
 static std::string GetConfiguredV8StartupFlags() {
     std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
     std::lock_guard<std::mutex> lock(g_v8FlagsMutex);
+    if (g_v8StartupFlags.empty()) {
+        g_v8StartupFlags = kDefaultV8StartupFlags;
+        g_v8StartupFlagsUsingDefault.store(true, std::memory_order_relaxed);
+        g_v8StartupFlagsLength.store(StringLengthForStats(g_v8StartupFlags),
+                                     std::memory_order_relaxed);
+    }
     return g_v8StartupFlags;
 }
 
 static void ApplyV8StartupFlagsOnce() {
+    g_v8StartupFlagsApplyAttempts.fetch_add(1, std::memory_order_relaxed);
+    if (g_v8StartupFlagsApplied.load(std::memory_order_relaxed)) {
+        return;
+    }
     const std::string flags = GetConfiguredV8StartupFlags();
+    g_v8StartupFlagsLength.store(StringLengthForStats(flags),
+                                 std::memory_order_relaxed);
     if (flags.empty()) {
+        g_v8StartupFlagsEmptySkips.fetch_add(1, std::memory_order_relaxed);
         Log("V8 startup flags disabled");
         return;
     }
@@ -1280,6 +1335,7 @@ static void ApplyV8StartupFlagsOnce() {
         return;
     }
 
+    g_v8StartupFlagsSymbolResolved.store(true, std::memory_order_relaxed);
     setFlags(flags.c_str());
     g_v8StartupFlagsApplied.store(true, std::memory_order_relaxed);
     Log("V8 startup flags applied: %s", flags.c_str());
@@ -1317,14 +1373,59 @@ static bool CallRealV8IsolateInitialize(V8IsolateInitializeFn realInitialize,
     const bool ok = realInitialize(isolate, params);
     if (!ok) {
         g_v8InitializeFailures.fetch_add(1, std::memory_order_relaxed);
-        g_v8InitializeForcedSuccesses.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("v8::Isolate::Initialize returned false; forcing success "
+        if (g_forceV8InitializeSuccess.load(std::memory_order_relaxed)) {
+            g_v8InitializeForcedSuccesses.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("v8::Isolate::Initialize returned false; forcing success "
+                "isolate=%p params=%p",
+                isolate, params);
+            return true;
+        }
+        Log("v8::Isolate::Initialize returned false; returning failure "
             "isolate=%p params=%p",
             isolate, params);
-        return true;
     }
     return ok;
+}
+
+static void InspectV8CreateParams(const void* params, bool targetCaller) {
+    g_lastV8CreateParamsAddress.store(reinterpret_cast<uintptr_t>(params),
+                                      std::memory_order_relaxed);
+    if (!params) {
+        g_lastV8SnapshotBlobAddress.store(0, std::memory_order_relaxed);
+        g_v8SnapshotBlobNulls.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    auto** slots = reinterpret_cast<void**>(const_cast<void*>(params));
+    g_lastV8CreateParamsSlot0.store(reinterpret_cast<uintptr_t>(slots[0]),
+                                    std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot1.store(reinterpret_cast<uintptr_t>(slots[1]),
+                                    std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot2.store(reinterpret_cast<uintptr_t>(slots[2]),
+                                    std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot3.store(reinterpret_cast<uintptr_t>(slots[3]),
+                                    std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot4.store(reinterpret_cast<uintptr_t>(slots[4]),
+                                    std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot5.store(reinterpret_cast<uintptr_t>(slots[5]),
+                                    std::memory_order_relaxed);
+
+    void* snapshotBlob = slots[kV8CreateParamsSnapshotBlobSlot];
+    g_lastV8SnapshotBlobAddress.store(reinterpret_cast<uintptr_t>(snapshotBlob),
+                                      std::memory_order_relaxed);
+    if (!snapshotBlob) {
+        g_v8SnapshotBlobNulls.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    if (targetCaller &&
+        g_disableNodeStartupSnapshot.load(std::memory_order_relaxed)) {
+        slots[kV8CreateParamsSnapshotBlobSlot] = nullptr;
+        g_v8SnapshotBlobClears.fetch_add(1, std::memory_order_relaxed);
+        Log("cleared V8 CreateParams snapshot_blob params=%p blob=%p",
+            params, snapshotBlob);
+    }
 }
 
 static void SetBool(napi_env env, napi_value object, const char* key,
@@ -1412,6 +1513,7 @@ extern "C" bool _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
     if (targetCaller) {
         g_v8InitializeTargetHits.fetch_add(1, std::memory_order_relaxed);
     }
+    InspectV8CreateParams(params, targetCaller);
 
     if (!g_v8InitializeHookEnabled.load(std::memory_order_relaxed) ||
         g_insideV8InitializeHook) {
@@ -2638,8 +2740,8 @@ static napi_value ConfigureV8InitializeHook(napi_env env,
                                             napi_callback_info info) {
     std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
 
-    size_t argc = 2;
-    napi_value argv[2] = {nullptr, nullptr};
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
     if (argc >= 1 && argv[0] != nullptr) {
@@ -2658,17 +2760,43 @@ static napi_value ConfigureV8InitializeHook(napi_env env,
         }
     }
 
+    if (argc >= 3 && argv[2] != nullptr) {
+        bool forceSuccess = false;
+        if (napi_get_value_bool(env, argv[2], &forceSuccess) == napi_ok) {
+            g_forceV8InitializeSuccess.store(forceSuccess,
+                                             std::memory_order_relaxed);
+        }
+    }
+
     napi_value result;
     napi_create_object(env, &result);
     SetBool(env, result, "enabled",
             g_v8InitializeHookEnabled.load(std::memory_order_relaxed));
     SetBool(env, result, "serialize",
             g_serializeV8Initialize.load(std::memory_order_relaxed));
+    SetBool(env, result, "forceSuccess",
+            g_forceV8InitializeSuccess.load(std::memory_order_relaxed));
+    SetBool(env, result, "disableNodeStartupSnapshot",
+            g_disableNodeStartupSnapshot.load(std::memory_order_relaxed));
     SetString(env, result, "startupFlags", GetConfiguredV8StartupFlags());
     SetBool(env, result, "startupFlagsApplied",
             g_v8StartupFlagsApplied.load(std::memory_order_relaxed));
     SetBool(env, result, "startupFlagsResolveFailed",
             g_v8StartupFlagsResolveFailed.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsSymbolResolved",
+            g_v8StartupFlagsSymbolResolved.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsEnvPresent",
+            g_v8StartupFlagsEnvPresent.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsEnvEmpty",
+            g_v8StartupFlagsEnvEmpty.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsUsingDefault",
+            g_v8StartupFlagsUsingDefault.load(std::memory_order_relaxed));
+    SetUint32(env, result, "startupFlagsLength",
+              g_v8StartupFlagsLength.load(std::memory_order_relaxed));
+    SetUint64(env, result, "startupFlagsApplyAttempts",
+              g_v8StartupFlagsApplyAttempts.load(std::memory_order_relaxed));
+    SetUint64(env, result, "startupFlagsEmptySkips",
+              g_v8StartupFlagsEmptySkips.load(std::memory_order_relaxed));
     return result;
 }
 
@@ -2683,11 +2811,29 @@ static napi_value GetV8InitializeHookStats(napi_env env,
             g_v8InitializeHookEnabled.load(std::memory_order_relaxed));
     SetBool(env, result, "serialize",
             g_serializeV8Initialize.load(std::memory_order_relaxed));
+    SetBool(env, result, "forceSuccess",
+            g_forceV8InitializeSuccess.load(std::memory_order_relaxed));
+    SetBool(env, result, "disableNodeStartupSnapshot",
+            g_disableNodeStartupSnapshot.load(std::memory_order_relaxed));
     SetString(env, result, "startupFlags", GetConfiguredV8StartupFlags());
     SetBool(env, result, "startupFlagsApplied",
             g_v8StartupFlagsApplied.load(std::memory_order_relaxed));
     SetBool(env, result, "startupFlagsResolveFailed",
             g_v8StartupFlagsResolveFailed.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsSymbolResolved",
+            g_v8StartupFlagsSymbolResolved.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsEnvPresent",
+            g_v8StartupFlagsEnvPresent.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsEnvEmpty",
+            g_v8StartupFlagsEnvEmpty.load(std::memory_order_relaxed));
+    SetBool(env, result, "startupFlagsUsingDefault",
+            g_v8StartupFlagsUsingDefault.load(std::memory_order_relaxed));
+    SetUint32(env, result, "startupFlagsLength",
+              g_v8StartupFlagsLength.load(std::memory_order_relaxed));
+    SetUint64(env, result, "startupFlagsApplyAttempts",
+              g_v8StartupFlagsApplyAttempts.load(std::memory_order_relaxed));
+    SetUint64(env, result, "startupFlagsEmptySkips",
+              g_v8StartupFlagsEmptySkips.load(std::memory_order_relaxed));
     SetBool(env, result, "realSymbolResolved",
             g_realV8IsolateInitialize != nullptr);
     SetBool(env, result, "snapshotMmapFallbackEnabled",
@@ -2721,6 +2867,26 @@ static napi_value GetV8InitializeHookStats(napi_env env,
     SetUint64(env, result, "forcedSuccesses",
               g_v8InitializeForcedSuccesses.load(
                   std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotBlobClears",
+              g_v8SnapshotBlobClears.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotBlobNulls",
+              g_v8SnapshotBlobNulls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsAddress",
+              g_lastV8CreateParamsAddress.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot0",
+              g_lastV8CreateParamsSlot0.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot1",
+              g_lastV8CreateParamsSlot1.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot2",
+              g_lastV8CreateParamsSlot2.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot3",
+              g_lastV8CreateParamsSlot3.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot4",
+              g_lastV8CreateParamsSlot4.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot5",
+              g_lastV8CreateParamsSlot5.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastSnapshotBlobAddress",
+              g_lastV8SnapshotBlobAddress.load(std::memory_order_relaxed));
     SetUint64(env, result, "snapshotNothrowNewCalls",
               g_snapshotNothrowNewCalls.load(std::memory_order_relaxed));
     SetUint64(env, result, "snapshotNothrowNewFailures",
@@ -2757,6 +2923,16 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
     g_v8InitializePassThroughCalls.store(0, std::memory_order_relaxed);
     g_v8InitializeFailures.store(0, std::memory_order_relaxed);
     g_v8InitializeForcedSuccesses.store(0, std::memory_order_relaxed);
+    g_v8SnapshotBlobClears.store(0, std::memory_order_relaxed);
+    g_v8SnapshotBlobNulls.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsAddress.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot0.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot1.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot2.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot3.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot4.store(0, std::memory_order_relaxed);
+    g_lastV8CreateParamsSlot5.store(0, std::memory_order_relaxed);
+    g_lastV8SnapshotBlobAddress.store(0, std::memory_order_relaxed);
     g_maxConcurrentV8Initializations.store(
         g_activeV8Initializations.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
@@ -2783,6 +2959,9 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
                                                  napi_callback_info info) {
     StartElectronPltHookMonitor();
     const bool installed = InstallElectronPltHooksNow(true, false);
+    if (installed) {
+        ApplyV8StartupFlagsOnce();
+    }
 
     napi_value result;
     napi_create_object(env, &result);
@@ -2813,6 +2992,70 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
     SetUint64(env, result, "v8InitializeForcedSuccesses",
               g_v8InitializeForcedSuccesses.load(
                   std::memory_order_relaxed));
+    SetBool(env, result, "v8InitializeForceSuccessEnabled",
+            g_forceV8InitializeSuccess.load(std::memory_order_relaxed));
+    SetBool(env, result, "disableNodeStartupSnapshot",
+            g_disableNodeStartupSnapshot.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotBlobClears",
+              g_v8SnapshotBlobClears.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotBlobNulls",
+              g_v8SnapshotBlobNulls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsAddress",
+              g_lastV8CreateParamsAddress.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot0",
+              g_lastV8CreateParamsSlot0.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot1",
+              g_lastV8CreateParamsSlot1.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot2",
+              g_lastV8CreateParamsSlot2.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot3",
+              g_lastV8CreateParamsSlot3.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot4",
+              g_lastV8CreateParamsSlot4.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot5",
+              g_lastV8CreateParamsSlot5.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastSnapshotBlobAddress",
+              g_lastV8SnapshotBlobAddress.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsApplied",
+            g_v8StartupFlagsApplied.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsResolveFailed",
+            g_v8StartupFlagsResolveFailed.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsSymbolResolved",
+            g_v8StartupFlagsSymbolResolved.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsEnvPresent",
+            g_v8StartupFlagsEnvPresent.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsEnvEmpty",
+            g_v8StartupFlagsEnvEmpty.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsUsingDefault",
+            g_v8StartupFlagsUsingDefault.load(std::memory_order_relaxed));
+    SetString(env, result, "v8StartupFlags", GetConfiguredV8StartupFlags());
+    SetUint32(env, result, "v8StartupFlagsLength",
+              g_v8StartupFlagsLength.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8StartupFlagsApplyAttempts",
+              g_v8StartupFlagsApplyAttempts.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8StartupFlagsEmptySkips",
+              g_v8StartupFlagsEmptySkips.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotNothrowNewCalls",
+              g_snapshotNothrowNewCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotNothrowNewFailures",
+              g_snapshotNothrowNewFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotMmapFallbacks",
+              g_snapshotMmapFallbacks.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotMmapFallbackFailures",
+              g_snapshotMmapFallbackFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotMmapBytes",
+              g_snapshotMmapBytes.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotDecompressCalls",
+              g_snapshotDecompressCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotDecompressBytesIn",
+              g_snapshotDecompressBytesIn.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastSnapshotCompressedSize",
+              g_lastSnapshotCompressedSize.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastSnapshotDecompressedSize",
+              g_lastSnapshotDecompressedSize.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastSnapshotAllocCallerOffset",
+              static_cast<uint32_t>(g_lastSnapshotAllocCallerOffset.load(
+                  std::memory_order_relaxed)));
     SetUint32(env, result, "nodeInitializeContextSlots",
               g_patchedNodeInitializeContextSlots.load(
                   std::memory_order_relaxed));
@@ -2914,6 +3157,70 @@ static napi_value GetElectronPltHookStats(napi_env env,
     SetUint64(env, result, "v8InitializeForcedSuccesses",
               g_v8InitializeForcedSuccesses.load(
                   std::memory_order_relaxed));
+    SetBool(env, result, "v8InitializeForceSuccessEnabled",
+            g_forceV8InitializeSuccess.load(std::memory_order_relaxed));
+    SetBool(env, result, "disableNodeStartupSnapshot",
+            g_disableNodeStartupSnapshot.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotBlobClears",
+              g_v8SnapshotBlobClears.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotBlobNulls",
+              g_v8SnapshotBlobNulls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsAddress",
+              g_lastV8CreateParamsAddress.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot0",
+              g_lastV8CreateParamsSlot0.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot1",
+              g_lastV8CreateParamsSlot1.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot2",
+              g_lastV8CreateParamsSlot2.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot3",
+              g_lastV8CreateParamsSlot3.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot4",
+              g_lastV8CreateParamsSlot4.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastCreateParamsSlot5",
+              g_lastV8CreateParamsSlot5.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastSnapshotBlobAddress",
+              g_lastV8SnapshotBlobAddress.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsApplied",
+            g_v8StartupFlagsApplied.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsResolveFailed",
+            g_v8StartupFlagsResolveFailed.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsSymbolResolved",
+            g_v8StartupFlagsSymbolResolved.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsEnvPresent",
+            g_v8StartupFlagsEnvPresent.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsEnvEmpty",
+            g_v8StartupFlagsEnvEmpty.load(std::memory_order_relaxed));
+    SetBool(env, result, "v8StartupFlagsUsingDefault",
+            g_v8StartupFlagsUsingDefault.load(std::memory_order_relaxed));
+    SetString(env, result, "v8StartupFlags", GetConfiguredV8StartupFlags());
+    SetUint32(env, result, "v8StartupFlagsLength",
+              g_v8StartupFlagsLength.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8StartupFlagsApplyAttempts",
+              g_v8StartupFlagsApplyAttempts.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8StartupFlagsEmptySkips",
+              g_v8StartupFlagsEmptySkips.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotNothrowNewCalls",
+              g_snapshotNothrowNewCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotNothrowNewFailures",
+              g_snapshotNothrowNewFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotMmapFallbacks",
+              g_snapshotMmapFallbacks.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotMmapFallbackFailures",
+              g_snapshotMmapFallbackFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotMmapBytes",
+              g_snapshotMmapBytes.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotDecompressCalls",
+              g_snapshotDecompressCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "snapshotDecompressBytesIn",
+              g_snapshotDecompressBytesIn.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastSnapshotCompressedSize",
+              g_lastSnapshotCompressedSize.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastSnapshotDecompressedSize",
+              g_lastSnapshotDecompressedSize.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastSnapshotAllocCallerOffset",
+              static_cast<uint32_t>(g_lastSnapshotAllocCallerOffset.load(
+                  std::memory_order_relaxed)));
     SetUint32(env, result, "epollWaitSlots",
               g_patchedEpollWaitSlots.load(std::memory_order_relaxed));
     SetUint32(env, result, "v8InitializeSlots",

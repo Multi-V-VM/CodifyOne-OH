@@ -22,7 +22,7 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-splashready2';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-nosnapshot1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -158,14 +158,12 @@ class WindowNodeController extends NodeController {
             const delayedHook = getV8PoolHook().getElectronPltHookStats();
             this.writeStartupStatus('electron PLT hook delayed=' + JSON.stringify(delayedHook));
           }, 500);
+          this.scheduleNativeStartupWatch();
         } catch (err) {
           this.writeStartupStatus('runBrowser threw ' + JSON.stringify(err));
           return;
         }
-        if (this.config.uri) {
-          this.writeStartupStatus('opening initial uri');
-          this.config.nativeContext.ExecuteCommand(CommandType.kNewWindow, { url: this.config.uri, is_sync: true });
-        }
+        this.openInitialWindowWithRetry(0);
       })
     node.appendChild(this.xComponent);
     return node;
@@ -185,6 +183,64 @@ class WindowNodeController extends NodeController {
           this.writeStartupStatus('electron PLT hook probe=' + JSON.stringify(probe));
         }
       }, delayMs);
+    }
+  }
+
+  private scheduleNativeStartupWatch(): void {
+    for (let i = 1; i <= 30; i++) {
+      setTimeout(() => {
+        let destroyed: boolean | undefined = undefined;
+        try {
+          destroyed = this.config.nativeContext.BrowserDestroyed();
+        } catch (err) {
+          this.writeStartupStatus('native startup watch ' + i + ' BrowserDestroyed threw ' + JSON.stringify(err));
+          return;
+        }
+        const hookStats = getV8PoolHook().getElectronPltHookStats();
+        this.writeStartupStatus('native startup watch ' + i + ' destroyed=' + destroyed +
+          ' v8InitializeCalls=' + hookStats.v8InitializeCalls +
+          ' v8InitializeFailures=' + hookStats.v8InitializeFailures +
+          ' v8StartupFlagsApplied=' + hookStats.v8StartupFlagsApplied +
+          ' v8StartupFlagsApplyAttempts=' + hookStats.v8StartupFlagsApplyAttempts +
+          ' v8StartupFlagsLength=' + hookStats.v8StartupFlagsLength +
+          ' v8StartupFlagsSymbolResolved=' + hookStats.v8StartupFlagsSymbolResolved +
+          ' v8StartupFlagsEnvEmpty=' + hookStats.v8StartupFlagsEnvEmpty +
+          ' v8StartupFlagsUsingDefault=' + hookStats.v8StartupFlagsUsingDefault +
+          ' snapshotBlobClears=' + hookStats.snapshotBlobClears +
+          ' lastSnapshotBlobAddress=' + hookStats.lastSnapshotBlobAddress +
+          ' snapshotDecompressCalls=' + hookStats.snapshotDecompressCalls +
+          ' lastSnapshotCompressedSize=' + hookStats.lastSnapshotCompressedSize +
+          ' lastSnapshotDecompressedSize=' + hookStats.lastSnapshotDecompressedSize +
+          ' snapshotMmapFallbacks=' + hookStats.snapshotMmapFallbacks +
+          ' adapterChildProcessCalls=' + hookStats.adapterChildProcessCalls);
+      }, i * 1000);
+    }
+  }
+
+  private openInitialWindowWithRetry(attemptIndex: number): void {
+    const delays: number[] = [0, 250, 750, 1500, 3000, 5000, 8000, 12000, 16000, 20000];
+    const shouldRetry = this.openInitialWindow('retry' + attemptIndex);
+    if (shouldRetry && attemptIndex + 1 < delays.length) {
+      const nextDelay = delays[attemptIndex + 1];
+      setTimeout(() => {
+        this.openInitialWindowWithRetry(attemptIndex + 1);
+      }, nextDelay);
+    }
+  }
+
+  private openInitialWindow(attempt: string): boolean {
+    try {
+      this.writeStartupStatus('opening initial window ' + attempt + ' uri=' +
+        (this.config.uri.length > 0 ? this.config.uri : '<empty>'));
+      const result = this.config.nativeContext.ExecuteCommand(CommandType.kNewWindow, {
+        url: this.config.uri,
+        is_sync: true
+      });
+      this.writeStartupStatus('initial kNewWindow ' + attempt + ' returned=' + JSON.stringify(result));
+      return !result || result.ret_code !== 0;
+    } catch (err) {
+      this.writeStartupStatus('initial kNewWindow ' + attempt + ' threw ' + JSON.stringify(err));
+      return true;
     }
   }
 
@@ -219,7 +275,7 @@ class WindowNodeController extends NodeController {
   private buildArgs(): string[] {
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
     let vec_args = [resDir];
-    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --regexp-interpret-all';
+    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16';
     let hasJsFlags: boolean = false;
     // 过滤掉残留的 --folder-uri，确保"是否连远程"只由标记文件决定（防上次启动参数残留）。
     this.config.electronRelaunchArgs.forEach((arg: string) => {
