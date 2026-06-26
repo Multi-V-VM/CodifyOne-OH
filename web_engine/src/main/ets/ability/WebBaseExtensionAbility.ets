@@ -10,6 +10,18 @@ import { common, EmbeddedUIExtensionAbility, UIExtensionContentSession } from '@
 import { BusinessError } from '@kit.BasicServicesKit';
 
 const TAG: string = 'WebBaseExtensionAbility';
+const BLOCKED_RELAUNCH_SWITCH_PREFIXES: string[] = [
+  '--use-angle',
+  '--use-gl',
+  '--enable-features',
+  '--enable-unsafe-swiftshader',
+  '--ozone-platform',
+  '--ozone-dump-file',
+  '--zygote',
+  '--single-process',
+  '--disable-gpu-watchdog',
+  '--ignore-gpu-blocklist'
+];
 
 export class WebBaseExtensionAbility extends EmbeddedUIExtensionAbility implements WebProxy {
   protected xcomponentId: string = ''; // Guest module id
@@ -59,7 +71,11 @@ export class WebBaseExtensionAbility extends EmbeddedUIExtensionAbility implemen
       }
       if (want.parameters["electronRelaunchArgs"] !== undefined) {
         (want.parameters["electronRelaunchArgs"] as string[]).forEach((arg: string) => {
-          this.electronRelaunchArgs.push(arg);
+          if (this.shouldKeepRelaunchArg(arg)) {
+            this.electronRelaunchArgs.push(arg);
+          } else {
+            LogUtil.warn(TAG, 'filtered stale relaunch arg: ' + arg);
+          }
         });
         LogUtil.info(TAG, 'electronRelaunchArgs = ' + JSON.stringify(this.electronRelaunchArgs));
       }
@@ -70,6 +86,16 @@ export class WebBaseExtensionAbility extends EmbeddedUIExtensionAbility implemen
       // convert storage path to uri
       this.startUri = storePath.replace("file://docs/", "file:///");
     }
+  }
+
+  private shouldKeepRelaunchArg(arg: string): boolean {
+    for (let i = 0; i < BLOCKED_RELAUNCH_SWITCH_PREFIXES.length; i++) {
+      const prefix = BLOCKED_RELAUNCH_SWITCH_PREFIXES[i];
+      if (arg === prefix || arg.indexOf(prefix + '=') === 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   onSessionCreate(want: Want, session: UIExtensionContentSession) {

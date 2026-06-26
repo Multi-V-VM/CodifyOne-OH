@@ -5,6 +5,7 @@
 import { injectable } from 'inversify';
 import childProcessManager from '@ohos.app.ability.childProcessManager';
 import { BusinessError } from '@ohos.base';
+import { deviceInfo } from '@kit.BasicServicesKit';
 
 import { BaseAdapter } from '../common/BaseAdapter';
 import LogUtil from '../utils/LogUtil';
@@ -12,6 +13,12 @@ import LogMethod from '../common/LogDecorator';
 
 function fireProcessBind(callback: Function) {
   const invalidPid: number = -1;
+  if (deviceInfo.deviceType === 'phone') {
+    callback(invalidPid);
+    LogUtil.warn('ProcessAdapter', 'startChildProcess skipped: HarmonyOS phones do not support child processes; single-process renderer mode is required');
+    return;
+  }
+
   try {
     childProcessManager.startChildProcess('./ets/process/CustomChildProcess.ets',
       childProcessManager.StartMode.APP_SPAWN_FORK)

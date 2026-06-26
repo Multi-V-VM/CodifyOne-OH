@@ -9,6 +9,7 @@ import LogUtil from '../utils/LogUtil';
 import { ConfigData, ContextType, PanAction } from '../common/Constants';
 import Inject from '../common/InjectModule';
 import JsBindingUtils from '../utils/JsBindingUtils';
+import { getV8PoolHook } from '../common/V8PoolHook';
 import { MultiInputAdapter } from '../adapter/MultiInputAdapter';
 import { DragParamManager } from '../common/DragParamManager';
 import { window } from '@kit.ArkUI';
@@ -20,6 +21,66 @@ import { MessageBox } from '../components/MessageBox';
 import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.node';
 
 const TAG: string = 'WindowXComponentController';
+const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
+const STARTUP_BUILD_STAMP: string = 'diag-20260625-noreg1';
+const DISABLED_PRELOAD_FEATURES: string =
+  'EnableNetworkPreload,' +
+  'PreloadingConfig,' +
+  'PreloadingHoldback,' +
+  'PrefetchFollowsNormalCacheSemantics,' +
+  'PrefetchNoVarySearch,' +
+  'PrefetchPrivacyChanges,' +
+  'PrefetchRedirects,' +
+  'PrefetchUseContentRefactor,' +
+  'Prerender2,' +
+  'Prerender2Holdback,' +
+  'Prerender2InNewTab,' +
+  'Prerender2MainFrameNavigation,' +
+  'Prerender2MemoryControls,' +
+  'Prerender2SequentialPrerendering,' +
+  'SpeculationRulesPrefetch,' +
+  'SpeculationRulesPrefetchFuture,' +
+  'SpeculationRulesPrefetchProxy,' +
+  'SpeculationRulesPrefetchWithSubresources';
+const CHROMIUM_PROCESS_FLAGS: string[] = [
+  '--no-sandbox',
+  '--disable-gpu-sandbox',
+  '--in-process-gpu',
+  '--single-process',
+  '--force-disable-user-env',
+  '--disable-dev-shm-usage',
+  '--disable-http-cache',
+  '--disable-background-networking',
+  '--dns-prefetch-disable',
+  '--disable-features=' + DISABLED_PRELOAD_FEATURES,
+  '--disable-crash-reporter',
+  '--disable-breakpad',
+  '--disable-gpu-watchdog',
+  '--ignore-gpu-blocklist',
+  '--enable-logging=stderr',
+  '--log-level=0',
+  '--ohcode-startup-build=' + STARTUP_BUILD_STAMP
+];
+const BLOCKED_RELAUNCH_SWITCH_PREFIXES: string[] = [
+  '--use-angle',
+  '--use-gl',
+  '--enable-features',
+  '--disable-features',
+  '--enable-unsafe-swiftshader',
+  '--ozone-platform',
+  '--ozone-dump-file',
+  '--zygote',
+  '--disable-gpu',
+  '--disable-vulkan',
+  '--disable-gpu-compositing',
+  '--disable-gpu-rasterization',
+  '--disable-gpu-memory-buffer-compositor-resources',
+  '--disable-gpu-memory-buffer-video-frames',
+  '--disable-accelerated-2d-canvas',
+  '--disable-accelerated-video-decode',
+  '--disable-zero-copy',
+  '--disable-software-rasterizer'
+];
 
 interface ComponentConfig {
   moduleName: string,
@@ -52,7 +113,20 @@ class WindowNodeController extends NodeController {
     this.config = config;
   }
 
+  private writeStartupStatus(status: string): void {
+    try {
+      const file = fileIo.openSync(STARTUP_STATUS_FILE,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
+      fileIo.writeSync(file.fd, `${Date.now()} [${STARTUP_BUILD_STAMP}] ${status}`);
+      fileIo.closeSync(file);
+    } catch (err) {
+      LogUtil.error(TAG, 'write startup status failed: ' + JSON.stringify(err));
+    }
+    LogUtil.info(TAG, 'startup status: [' + STARTUP_BUILD_STAMP + '] ' + status);
+  }
+
   makeNode(uiContext: UIContext): FrameNode | null {
+    this.writeStartupStatus('makeNode');
     let node = new FrameNode(uiContext);
     this.xComponent = TypedNode.createNode(uiContext, "XComponent", {
       type: XComponentType.SURFACE,
@@ -66,14 +140,50 @@ class WindowNodeController extends NodeController {
       .backgroundColor(Color.Transparent)
       .renderFit(RenderFit.TOP_LEFT)
       .onLoad(() => {
+        this.writeStartupStatus('xcomponent onLoad');
         this.setDefaultBounds();
         let vec_args = this.buildArgs();
-        this.config.nativeContext.runBrowser(vec_args);
-        if (this.config.uri)
+        const hookResult = getV8PoolHook().installElectronPltHooks();
+        this.writeStartupStatus('electron PLT hook=' + JSON.stringify(hookResult));
+        this.writeStartupStatus('calling runBrowser args=' + JSON.stringify(vec_args));
+        try {
+          this.config.nativeContext.runBrowser(vec_args);
+          this.writeStartupStatus('runBrowser returned');
+          const hookAfterRun = getV8PoolHook().getElectronPltHookStats();
+          this.writeStartupStatus('electron PLT hook after runBrowser=' + JSON.stringify(hookAfterRun));
+          this.schedulePostRunHookProbe();
+          setTimeout(() => {
+            const delayedHook = getV8PoolHook().getElectronPltHookStats();
+            this.writeStartupStatus('electron PLT hook delayed=' + JSON.stringify(delayedHook));
+          }, 500);
+        } catch (err) {
+          this.writeStartupStatus('runBrowser threw ' + JSON.stringify(err));
+          return;
+        }
+        if (this.config.uri) {
+          this.writeStartupStatus('opening initial uri');
           this.config.nativeContext.ExecuteCommand(CommandType.kNewWindow, { url: this.config.uri, is_sync: true });
+        }
       })
     node.appendChild(this.xComponent);
     return node;
+  }
+
+  private schedulePostRunHookProbe(): void {
+    let probeDone: boolean = false;
+    for (let i = 1; i <= 20; i++) {
+      const delayMs: number = i * 5;
+      setTimeout(() => {
+        if (probeDone) {
+          return;
+        }
+        const probe = getV8PoolHook().getElectronPltHookStats();
+        if (probe.installed || i === 20) {
+          probeDone = true;
+          this.writeStartupStatus('electron PLT hook probe=' + JSON.stringify(probe));
+        }
+      }, delayMs);
+    }
   }
 
   private setDefaultBounds() {
@@ -107,12 +217,24 @@ class WindowNodeController extends NodeController {
   private buildArgs(): string[] {
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
     let vec_args = [resDir];
+    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --regexp-interpret-all';
+    let hasJsFlags: boolean = false;
     // 过滤掉残留的 --folder-uri，确保"是否连远程"只由标记文件决定（防上次启动参数残留）。
     this.config.electronRelaunchArgs.forEach((arg: string) => {
+      if (!this.shouldKeepRelaunchArg(arg)) {
+        LogUtil.warn(TAG, 'filtered stale relaunch arg: ' + arg);
+        return;
+      }
+      if (arg.indexOf('--js-flags') === 0) {
+        hasJsFlags = true;
+      }
       if (arg.indexOf('--folder-uri') !== 0 && arg.indexOf('--file-uri') !== 0) {
         vec_args.push(arg);
       }
     });
+    if (!hasJsFlags) {
+      vec_args.push(jsFlags);
+    }
     // [OHcode Remote] 启动时读持久标记决定是否连远程：连接写标记 + 重启 → 注入 --folder-uri；
     // 断开删标记 + 重启 → 读不到 → 本地。
     const REMOTE_MARKER: string = '/data/storage/el2/base/files/ohcode-remote-target.txt';
@@ -152,7 +274,36 @@ class WindowNodeController extends NodeController {
     } catch (err) {
       LogUtil.error(TAG, 'read open marker failed: ' + JSON.stringify(err));
     }
+    this.appendMissingSwitches(vec_args, CHROMIUM_PROCESS_FLAGS);
     return vec_args;
+  }
+
+  private appendMissingSwitches(vec_args: string[], switches: string[]): void {
+    switches.forEach((switchName: string) => {
+      if (!this.hasSwitch(vec_args, switchName)) {
+        vec_args.push(switchName);
+      }
+    });
+  }
+
+  private shouldKeepRelaunchArg(arg: string): boolean {
+    for (let i = 0; i < BLOCKED_RELAUNCH_SWITCH_PREFIXES.length; i++) {
+      const prefix = BLOCKED_RELAUNCH_SWITCH_PREFIXES[i];
+      if (arg === prefix || arg.indexOf(prefix + '=') === 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private hasSwitch(vec_args: string[], switchName: string): boolean {
+    for (let i = 0; i < vec_args.length; i++) {
+      const arg = vec_args[i];
+      if (arg === switchName || arg.indexOf(switchName + '=') === 0) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -209,20 +360,25 @@ export struct WebWindow {
     }
   }
 
+  private effectiveXComponentId(): string {
+    return this.xComponentId.length > 0 ? this.xComponentId : ConfigData.DEFAULT_WINDOW_ID;
+  }
+
   aboutToAppear(): void {
+    const effectiveId = this.effectiveXComponentId();
     this.dragParamManager.addDragContextData({
-      id: this.xComponentId,
+      id: effectiveId,
       uiContext: this.getUIContext(),
     });
     this.abilityManager.addMessageBox({
-      id: this.xComponentId,
+      id: effectiveId,
       setMessageBoxParams: this.setMessageBoxParams(),
       dialogController: this.dialogController
     });
   }
 
   aboutToDisappear(): void {
-    this.dragParamManager.removeDragContextData(this.xComponentId);
+    this.dragParamManager.removeDragContextData(this.effectiveXComponentId());
   }
 
   build() {

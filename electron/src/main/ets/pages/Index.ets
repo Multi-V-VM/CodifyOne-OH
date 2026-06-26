@@ -1,10 +1,15 @@
 import { WebWindow } from 'web_engine';
 import { KeyCode } from '@kit.InputKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import CustomChildProcess from '../process/CustomChildProcess';
 
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
 const READY_FLAG: string = '/data/storage/el2/base/files/ohcode-ready.flag';
+const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
+const STARTUP_BUILD_STAMP: string = 'diag-20260625-noreg1';
+const LOG_DOMAIN: number = 0x0000;
+const LOG_TAG: string = 'OHcodeStartup';
 
 interface IStyleData {
   backgroundColor: string,
@@ -35,10 +40,15 @@ struct Index {
   @State private backgroundColor_: string = `#${this.initStyle.backgroundColor}`;
   @State private opacity_: number = this.initStyle.opacity;
   @State private showLoading: boolean = true;
+  @State private loadingStatus: string = 'Starting OHcode shell [' + STARTUP_BUILD_STAMP + ']';
+  @State private loadingElapsedSec: number = 0;
+  private loadingStartedAt: number = 0;
   private loadingTimer: number = -1;
   private pollTimer: number = -1;
 
   aboutToAppear() {
+    this.loadingStartedAt = Date.now();
+    this.writeStartupStatus('Index aboutToAppear');
     this.updateStyle.registerUpdateStyleFunction(this.xcomponentId, this.initStyle, (style: IStyleData) => {
       this.backgroundColor_ = `#${style.backgroundColor}`;
       this.opacity_ = style.opacity;
@@ -51,17 +61,42 @@ struct Index {
     } catch (_) { }
 
     this.pollTimer = setInterval(() => {
+      this.loadingElapsedSec = Math.floor((Date.now() - this.loadingStartedAt) / 1000);
+      this.refreshStartupStatus();
       try {
         if (fileIo.accessSync(READY_FLAG)) {
           try { fileIo.unlinkSync(READY_FLAG); } catch (_) { }
+          this.writeStartupStatus('ready flag observed');
           this.hideLoading();
         }
       } catch (_) { }
     }, 200);
 
     this.loadingTimer = setTimeout(() => {
+      this.writeStartupStatus('loading timeout; showing web surface');
       this.hideLoading();
     }, 20000);
+  }
+
+  private writeStartupStatus(status: string): void {
+    try {
+      const file = fileIo.openSync(STARTUP_STATUS_FILE,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
+      fileIo.writeSync(file.fd, `${Date.now()} [${STARTUP_BUILD_STAMP}] ${status}`);
+      fileIo.closeSync(file);
+    } catch (_) { }
+    hilog.info(LOG_DOMAIN, LOG_TAG, '[%{public}s] %{public}s', STARTUP_BUILD_STAMP, status);
+    this.loadingStatus = '[' + STARTUP_BUILD_STAMP + '] ' + status;
+  }
+
+  private refreshStartupStatus(): void {
+    try {
+      if (fileIo.accessSync(STARTUP_STATUS_FILE)) {
+        const raw: string = fileIo.readTextSync(STARTUP_STATUS_FILE).trim();
+        const firstSpace: number = raw.indexOf(' ');
+        this.loadingStatus = firstSpace >= 0 ? raw.substring(firstSpace + 1) : raw;
+      }
+    } catch (_) { }
   }
 
   private hideLoading(): void {
@@ -158,6 +193,14 @@ struct Index {
             .fontColor('#D9FFFFFF')
             .letterSpacing(0.6)
             .textAlign(TextAlign.Center)
+          Text(`${this.loadingStatus} (${this.loadingElapsedSec}s)`)
+            .fontSize(13)
+            .fontColor('#B8FFFFFF')
+            .letterSpacing(0)
+            .textAlign(TextAlign.Center)
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('80%')
         }
       }
       .alignItems(HorizontalAlign.Center)

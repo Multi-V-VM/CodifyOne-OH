@@ -105,20 +105,38 @@ export class AbilityManager {
   public addMessageBox(data: MessageBoxData) {
     for (let i = 0; i < this.messageBoxList.length; i++) {
       if (data.id === this.messageBoxList[i].id) {
-        LogUtil.error(TAG, `addMessageBox failed, id: ${data.id} already exists.`);
+        this.messageBoxList[i] = data;
+        LogUtil.warn(TAG, `addMessageBox replaced existing id: ${data.id}.`);
         return;
       }
     }
     this.messageBoxList.push(data);
   }
 
-  public getMessageBox(xComponent: string | number): MessageBoxData | undefined {
-    let id = this.paramNormalization(xComponent);
+  private findMessageBox(id: string): MessageBoxData | undefined {
     for (let i = 0; i < this.messageBoxList.length; i++) {
       if (id === this.messageBoxList[i].id) {
         return this.messageBoxList[i];
       }
     }
+    return undefined;
+  }
+
+  public getMessageBox(xComponent: string | number): MessageBoxData | undefined {
+    let id = this.paramNormalization(xComponent);
+    const target = this.findMessageBox(id);
+    if (target !== undefined) {
+      return target;
+    }
+
+    if (id !== ConfigData.DEFAULT_WINDOW_ID) {
+      const fallback = this.findMessageBox(ConfigData.DEFAULT_WINDOW_ID);
+      if (fallback !== undefined) {
+        LogUtil.warn(TAG, `getMessageBox fallback from ${id} to ${ConfigData.DEFAULT_WINDOW_ID}.`);
+        return fallback;
+      }
+    }
+
     LogUtil.error(TAG, `getMessageBox failed, xComponent: ${id} not found.`);
     return undefined;
   }

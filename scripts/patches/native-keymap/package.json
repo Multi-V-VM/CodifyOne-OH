@@ -1,0 +1,5 @@
+{
+  "name": "native-keymap",
+  "version": "3.3.4-ohos-fallback",
+  "main": "index.js"
+}

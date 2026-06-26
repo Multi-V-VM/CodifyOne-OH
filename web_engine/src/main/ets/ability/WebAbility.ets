@@ -18,6 +18,12 @@ import { PermissionManagerAdapter } from '../adapter/PermissionManagerAdapter';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 
 const TAG: string = 'WebAbility';
+const PHONE_UNSUPPORTED_WINDOW_CAPABILITIES: string[] = [
+  'setWindowTitleMoveEnabled',
+  'setWindowTitleButtonVisible',
+  'setWindowTopmost',
+  'setWindowModal'
+];
 
 export class WebAbility extends WebBaseAbility {
   private static WINDOW_CLOSE: number = 1000;
@@ -27,11 +33,22 @@ export class WebAbility extends WebBaseAbility {
   private nativeThemeAdapter: NativeThemeAdapter | undefined = undefined;
 
   private applyWindowCapability(name: string, action: () => void): void {
+    if (this.isPhoneUnsupportedWindowCapability(name)) {
+      LogUtil.info(TAG, `Window capability ${name} skipped on phone`);
+      return;
+    }
     try {
       action();
     } catch (exception) {
       LogUtil.warn(TAG, `Window capability ${name} is unavailable: ${JSON.stringify(exception)}`);
     }
+  }
+
+  private isPhoneUnsupportedWindowCapability(name: string): boolean {
+    if (deviceInfo.deviceType !== 'phone') {
+      return false;
+    }
+    return PHONE_UNSUPPORTED_WINDOW_CAPABILITIES.indexOf(name) >= 0;
   }
 
   onConfigurationUpdate(config: Configuration) {

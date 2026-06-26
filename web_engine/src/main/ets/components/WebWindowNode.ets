@@ -8,6 +8,7 @@ import LogUtil from '../utils/LogUtil';
 import { ConfigData, ContextType, PanAction } from '../common/Constants';
 import Inject from '../common/InjectModule';
 import JsBindingUtils from '../utils/JsBindingUtils';
+import { getV8PoolHook } from '../common/V8PoolHook';
 import { MultiInputAdapter } from '../adapter/MultiInputAdapter';
 import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.node';
 import { DragParamManager } from '../common/DragParamManager';
@@ -22,6 +23,45 @@ interface ComponentConfig {
 }
 
 const TAG: string = 'WebWindowNode';
+const STARTUP_BUILD_STAMP: string = 'diag-20260625-noreg1';
+const DISABLED_PRELOAD_FEATURES: string =
+  'EnableNetworkPreload,' +
+  'PreloadingConfig,' +
+  'PreloadingHoldback,' +
+  'PrefetchFollowsNormalCacheSemantics,' +
+  'PrefetchNoVarySearch,' +
+  'PrefetchPrivacyChanges,' +
+  'PrefetchRedirects,' +
+  'PrefetchUseContentRefactor,' +
+  'Prerender2,' +
+  'Prerender2Holdback,' +
+  'Prerender2InNewTab,' +
+  'Prerender2MainFrameNavigation,' +
+  'Prerender2MemoryControls,' +
+  'Prerender2SequentialPrerendering,' +
+  'SpeculationRulesPrefetch,' +
+  'SpeculationRulesPrefetchFuture,' +
+  'SpeculationRulesPrefetchProxy,' +
+  'SpeculationRulesPrefetchWithSubresources';
+const CHROMIUM_PROCESS_FLAGS: string[] = [
+  '--no-sandbox',
+  '--disable-gpu-sandbox',
+  '--in-process-gpu',
+  '--single-process',
+  '--force-disable-user-env',
+  '--disable-dev-shm-usage',
+  '--disable-http-cache',
+  '--disable-background-networking',
+  '--dns-prefetch-disable',
+  '--disable-features=' + DISABLED_PRELOAD_FEATURES,
+  '--disable-crash-reporter',
+  '--disable-breakpad',
+  '--disable-gpu-watchdog',
+  '--ignore-gpu-blocklist',
+  '--enable-logging=stderr',
+  '--log-level=0',
+  '--ohcode-startup-build=' + STARTUP_BUILD_STAMP
+];
 
 class WindowXComponentController extends XComponentController {
   onSurfaceCreated(surfaceId: string): void {
@@ -68,7 +108,12 @@ class WindowNodeController extends NodeController {
         LogUtil.info(TAG, 'onLoad xComponentId:' + this.config.xComponentId);
         this.setDefaultBounds();
         let vec_args = this.buildArgs();
+        LogUtil.info(TAG, 'electron PLT hook=' + JSON.stringify(getV8PoolHook().installElectronPltHooks()));
         this.config.nativeContext.runBrowser(vec_args);
+        LogUtil.info(TAG, 'electron PLT hook after runBrowser=' + JSON.stringify(getV8PoolHook().getElectronPltHookStats()));
+        setTimeout(() => {
+          LogUtil.info(TAG, 'electron PLT hook delayed=' + JSON.stringify(getV8PoolHook().getElectronPltHookStats()));
+        }, 500);
       })
     node.appendChild(this.xComponent);
     return node;
@@ -107,8 +152,28 @@ class WindowNodeController extends NodeController {
       default_uri = this.config.uri;
     }
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
-    let vec_args = [override_ua, resDir, default_uri];
+    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --regexp-interpret-all';
+    let vec_args = [override_ua, resDir, jsFlags, default_uri];
+    this.appendMissingSwitches(vec_args, CHROMIUM_PROCESS_FLAGS);
     return vec_args;
+  }
+
+  private appendMissingSwitches(vec_args: string[], switches: string[]): void {
+    switches.forEach((switchName: string) => {
+      if (!this.hasSwitch(vec_args, switchName)) {
+        vec_args.push(switchName);
+      }
+    });
+  }
+
+  private hasSwitch(vec_args: string[], switchName: string): boolean {
+    for (let i = 0; i < vec_args.length; i++) {
+      const arg = vec_args[i];
+      if (arg === switchName || arg.indexOf(switchName + '=') === 0) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 

@@ -574,7 +574,7 @@ static napi_value CreateRunResult(napi_env env, const WasiRunResult& result)
 
 static napi_value StartWasmer(napi_env env, napi_callback_info info)
 {
-    setenv("HOME", "/storage/Users/currentUser", 1);
+    setenv("HOME", "/data/storage/el2/base/files", 1);
     setenv("TMPDIR", "/data/storage/el2/base/cache", 1);
 
     bool ok = LoadWasmer();

@@ -18,6 +18,8 @@ export interface V8PoolHook {
   hasIsolate(windowId: string): boolean;
   getPoolStats(): PoolStats;
   clearPool(): PoolOperationResult;
+  installElectronPltHooks(): ElectronPltHookInstallResult;
+  getElectronPltHookStats(): ElectronPltHookStats;
 }
 
 export interface PoolStats {
@@ -29,11 +31,87 @@ export interface PoolStats {
 export interface PoolOperationResult {
   success: boolean;
   cleared?: number;
-  [key: string]: any;
+  message?: string;
+}
+
+export interface ElectronPltHookInstallResult {
+  installed: boolean;
+  monitorStarted: boolean;
+  electronPreloadAttempted?: boolean;
+  electronPreloadSucceeded?: boolean;
+  attempts: number;
+  patchedSlots: number;
+  failures: number;
+  runs: number;
+  v8InitializeCalls?: number;
+  v8InitializeTargetHits?: number;
+  v8InitializeSerializedCalls?: number;
+  v8InitializeFailures?: number;
+  nodeInitializeContextSlots?: number;
+  nodeInitializeContextInlineInstalled?: boolean;
+  nodeInitializeContextInlineEntrypoints?: number;
+  nodeInitializeContextInlineFailures?: number;
+  nodePlatformForIsolateInlineInstalled?: boolean;
+  nodePlatformForIsolateInlineEntrypoints?: number;
+  nodePlatformForIsolateInlineFailures?: number;
+  nodePlatformForIsolateCalls?: number;
+  nodePlatformHookEnabled?: boolean;
+  nodePlatformResolveFailed?: boolean;
+  nodeInitializeContextCalls?: number;
+  nodePlatformRegisterAttempts?: number;
+  nodePlatformRegisterSuccesses?: number;
+  nodePlatformRegisterDuplicateSkips?: number;
+  nodePlatformRegisterMissingVtable?: number;
+  lastNodePlatformRegisterAddress?: number;
+  adapterChildProcessSlots?: number;
+  adapterChildProcessCalls?: number;
+  adapterChildProcessPassThrough?: number;
+  adapterCrashpadBlocks?: number;
+  message?: string;
+}
+
+export interface ElectronPltHookStats extends ElectronPltHookInstallResult {
+  epollWaitSlots: number;
+  v8InitializeSlots: number;
+  snapshotDecompressSlots: number;
+  arrayNothrowNewSlots: number;
+  scalarNothrowNewSlots: number;
+  arrayDeleteSlots: number;
+  scalarDeleteSlots: number;
+  nodeInitializeContextSlots?: number;
+  nodeInitializeContextInlineInstalled?: boolean;
+  nodeInitializeContextInlineEntrypoints?: number;
+  nodeInitializeContextInlineFailures?: number;
+  nodePlatformHookEnabled?: boolean;
+  nodePlatformResolveFailed?: boolean;
+  nodeInitializeContextCalls?: number;
+  nodePlatformRegisterAttempts?: number;
+  nodePlatformRegisterSuccesses?: number;
+  nodePlatformRegisterDuplicateSkips?: number;
+  nodePlatformRegisterMissingVtable?: number;
+  lastNodePlatformIsolate?: number;
+  lastNodePlatformAddress?: number;
+  lastNodePlatformRegisterAddress?: number;
+  adapterChildProcessSlots?: number;
+  adapterChildProcessCalls?: number;
+  adapterChildProcessPassThrough?: number;
+  adapterCrashpadBlocks?: number;
+}
+
+interface NativeV8PoolHookModule {
+  registerIsolate: (windowId: string, isolatePtr: number) => void;
+  poolIsolate: (windowId: string) => PoolOperationResult;
+  unregisterIsolate: (windowId: string) => PoolOperationResult;
+  getPooledIsolate: (windowId: string) => number | null;
+  hasIsolate: (windowId: string) => boolean;
+  getPoolStats: () => PoolStats;
+  clearPool: () => PoolOperationResult;
+  installElectronPltHooks: () => ElectronPltHookInstallResult;
+  getElectronPltHookStats: () => ElectronPltHookStats;
 }
 
 class V8PoolHookImpl implements V8PoolHook {
-  private nativeModule: any = undefined;
+  private nativeModule: NativeV8PoolHookModule | undefined = undefined;
   private isReady: boolean = false;
 
   constructor() {
@@ -43,7 +121,7 @@ class V8PoolHookImpl implements V8PoolHook {
   private loadNativeModule(): void {
     try {
       // The v8poolhook module is built into libentry.so
-      this.nativeModule = entry;
+      this.nativeModule = entry as NativeV8PoolHookModule;
       if (this.nativeModule) {
         this.isReady = true;
         LogUtil.info(TAG, 'V8 Pool Hook module loaded');
@@ -60,7 +138,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   registerIsolate(windowId: string, isolatePtr: number): void {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       LogUtil.warn(TAG, 'Module not ready for registerIsolate');
       return;
     }
@@ -75,7 +153,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   poolIsolate(windowId: string): PoolOperationResult {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       return { success: false, message: 'Module not ready' };
     }
 
@@ -90,7 +168,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   unregisterIsolate(windowId: string): PoolOperationResult {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       return { success: false, message: 'Module not ready' };
     }
 
@@ -105,7 +183,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   getPooledIsolate(windowId: string): number | null {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       return null;
     }
 
@@ -123,7 +201,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   hasIsolate(windowId: string): boolean {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       return false;
     }
 
@@ -136,7 +214,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   getPoolStats(): PoolStats {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       return { active: 0, pooled: 0, total: 0 };
     }
 
@@ -150,7 +228,7 @@ class V8PoolHookImpl implements V8PoolHook {
   }
 
   clearPool(): PoolOperationResult {
-    if (!this.ready()) {
+    if (!this.ready() || this.nativeModule === undefined) {
       return { success: false, message: 'Module not ready' };
     }
 
@@ -161,6 +239,101 @@ class V8PoolHookImpl implements V8PoolHook {
     } catch (e) {
       LogUtil.error(TAG, `clearPool failed: ${JSON.stringify(e)}`);
       return { success: false, message: `Exception: ${JSON.stringify(e)}` };
+    }
+  }
+
+  installElectronPltHooks(): ElectronPltHookInstallResult {
+    if (!this.ready() || this.nativeModule === undefined) {
+      return {
+        installed: false,
+        monitorStarted: false,
+        attempts: 0,
+        patchedSlots: 0,
+        failures: 0,
+        runs: 0,
+        message: 'Module not ready'
+      };
+    }
+
+    try {
+      const result = this.nativeModule.installElectronPltHooks();
+      LogUtil.info(TAG, `installElectronPltHooks: ${JSON.stringify(result)}`);
+      return result || {
+        installed: false,
+        monitorStarted: false,
+        attempts: 0,
+        patchedSlots: 0,
+        failures: 0,
+        runs: 0,
+        message: 'No result'
+      };
+    } catch (e) {
+      LogUtil.error(TAG, `installElectronPltHooks failed: ${JSON.stringify(e)}`);
+      return {
+        installed: false,
+        monitorStarted: false,
+        attempts: 0,
+        patchedSlots: 0,
+        failures: 0,
+        runs: 0,
+        message: `Exception: ${JSON.stringify(e)}`
+      };
+    }
+  }
+
+  getElectronPltHookStats(): ElectronPltHookStats {
+    if (!this.ready() || this.nativeModule === undefined) {
+      return {
+        installed: false,
+        monitorStarted: false,
+        attempts: 0,
+        patchedSlots: 0,
+        failures: 0,
+        runs: 0,
+        epollWaitSlots: 0,
+        v8InitializeSlots: 0,
+        snapshotDecompressSlots: 0,
+        arrayNothrowNewSlots: 0,
+        scalarNothrowNewSlots: 0,
+        arrayDeleteSlots: 0,
+        scalarDeleteSlots: 0
+      };
+    }
+
+    try {
+      const result = this.nativeModule.getElectronPltHookStats();
+      return result || {
+        installed: false,
+        monitorStarted: false,
+        attempts: 0,
+        patchedSlots: 0,
+        failures: 0,
+        runs: 0,
+        epollWaitSlots: 0,
+        v8InitializeSlots: 0,
+        snapshotDecompressSlots: 0,
+        arrayNothrowNewSlots: 0,
+        scalarNothrowNewSlots: 0,
+        arrayDeleteSlots: 0,
+        scalarDeleteSlots: 0
+      };
+    } catch (e) {
+      LogUtil.error(TAG, `getElectronPltHookStats failed: ${JSON.stringify(e)}`);
+      return {
+        installed: false,
+        monitorStarted: false,
+        attempts: 0,
+        patchedSlots: 0,
+        failures: 0,
+        runs: 0,
+        epollWaitSlots: 0,
+        v8InitializeSlots: 0,
+        snapshotDecompressSlots: 0,
+        arrayNothrowNewSlots: 0,
+        scalarNothrowNewSlots: 0,
+        arrayDeleteSlots: 0,
+        scalarDeleteSlots: 0
+      };
     }
   }
 }

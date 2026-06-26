@@ -9,6 +9,7 @@ import picker from '@ohos.file.picker';
 
 import { AbilityManager } from '../common/AbilityManager';
 import { BaseAdapter } from '../common/BaseAdapter';
+import { ConfigData } from '../common/Constants';
 import { BusinessError } from '@ohos.base';
 import { image } from '@kit.ImageKit';
 import { inject, injectable } from 'inversify';
@@ -83,10 +84,51 @@ export class DialogAdapter extends BaseAdapter {
       callback: callback
     };
     LogUtil.error(TAG, 'parentId ' + boxSettings.parent_id);
-    let parentId = boxSettings.parent_id === -1 ? 1 : boxSettings.parent_id;
+    let parentId: string | number = boxSettings.parent_id === -1 ? ConfigData.DEFAULT_WINDOW_ID : boxSettings.parent_id;
     let messageBoxManager: MessageBoxData | undefined = this.abilityManager.getMessageBox(parentId);
-    messageBoxManager?.setMessageBoxParams(params);
-    messageBoxManager?.dialogController.open();
+    if (messageBoxManager !== undefined) {
+      messageBoxManager.setMessageBoxParams(params);
+      messageBoxManager.dialogController.open();
+      return;
+    }
+
+    this.showFallbackMessageBox(params);
+  }
+
+  private showFallbackMessageBox(params: IMessageBoxParams): void {
+    const settings = params.messageBoxSettings;
+    if (settings === undefined) {
+      params.callback(0, false);
+      return;
+    }
+
+    const buttons = settings.buttons && settings.buttons.length > 0 ? settings.buttons : ['OK'];
+    const defaultButtonId = settings.default_id >= 0 && settings.default_id < buttons.length ? settings.default_id : 0;
+    let clicked = false;
+    const complete = (buttonId: number) => {
+      if (clicked) {
+        return;
+      }
+      clicked = true;
+      params.callback(buttonId, settings.checkbox_checked);
+    };
+
+    LogUtil.warn(TAG, 'showMessageBox fallback AlertDialog for parentId ' + settings.parent_id);
+    AlertDialog.show({
+      title: settings.title,
+      message: settings.detail && settings.detail.length > 0 ? `${settings.message}\n\n${settings.detail}` : settings.message,
+      autoCancel: false,
+      cancel: () => {
+        complete(settings.cancel_id >= 0 ? settings.cancel_id : defaultButtonId);
+      },
+      primaryButton: {
+        value: buttons[defaultButtonId],
+        style: DialogButtonStyle.HIGHLIGHT,
+        action: () => {
+          complete(defaultButtonId);
+        },
+      }
+    });
   }
 
   @LogMethod

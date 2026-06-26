@@ -1,0 +1,21 @@
+{
+  "name": "ohcode-splash",
+  "displayName": "OHcode Splash Ready",
+  "description": "Signals the HarmonyOS splash overlay when the local VS Code extension host starts.",
+  "version": "0.0.1",
+  "publisher": "ohcode",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "api": "none",
+  "main": "./extension.js"
+}

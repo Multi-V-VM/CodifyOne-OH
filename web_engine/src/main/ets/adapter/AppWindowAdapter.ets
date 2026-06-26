@@ -27,6 +27,12 @@ import promptAction from '@ohos.promptAction';
 import { WebProxy } from '../interface/WebProxy';
 
 const TAG: string = 'AppWindow';
+const PHONE_UNSUPPORTED_WINDOW_CAPABILITIES: string[] = [
+  'setWindowTitleMoveEnabled',
+  'setWindowTitleButtonVisible',
+  'setWindowTopmost',
+  'setWindowModal'
+];
 
 /**
  * Window limit configuration to prevent V8 OOM crashes
@@ -88,11 +94,22 @@ export class AppWindowAdapter extends BaseAdapter {
   }
 
   private applyWindowCapability(name: string, action: () => void): void {
+    if (this.isPhoneUnsupportedWindowCapability(name)) {
+      LogUtil.info(TAG, `Window capability ${name} skipped on phone`);
+      return;
+    }
     try {
       action();
     } catch (exception) {
       LogUtil.warn(TAG, `Window capability ${name} is unavailable: ${JSON.stringify(exception)}`);
     }
+  }
+
+  private isPhoneUnsupportedWindowCapability(name: string): boolean {
+    if (deviceInfo.deviceType !== 'phone') {
+      return false;
+    }
+    return PHONE_UNSUPPORTED_WINDOW_CAPABILITIES.indexOf(name) >= 0;
   }
 
   private setTitleButtonVisible(windowClass: window.Window | undefined, preferences: WindowPreferences): void {
@@ -390,6 +407,11 @@ export class AppWindowAdapter extends BaseAdapter {
 
   @LogMethod
   showWindow(id: number) {
+    if (deviceInfo.deviceType === 'phone') {
+      LogUtil.info(TAG, 'showAbility skipped on phone; foreground ability is already system-managed');
+      return;
+    }
+
     let context = this.abilityManager.getProxy(id)?.getWindowContext() as common.UIAbilityContext;
     context?.showAbility().then(() => {
       LogUtil.info(TAG, `showAbility success`);
@@ -400,6 +422,11 @@ export class AppWindowAdapter extends BaseAdapter {
 
   @LogMethod
   hideWindow(id: number) {
+    if (deviceInfo.deviceType === 'phone') {
+      LogUtil.info(TAG, 'hideAbility skipped on phone; foreground ability is system-managed');
+      return;
+    }
+
     let context = this.abilityManager.getProxy(id)?.getWindowContext() as common.UIAbilityContext;
     context?.hideAbility().then(() => {
       LogUtil.info(TAG, `hideAbility success`);
@@ -471,6 +498,12 @@ export class AppWindowAdapter extends BaseAdapter {
             hasFrame: boolean,
             bounds: WindowBound,
             callback: () => void) {
+    if (deviceInfo.deviceType === 'phone') {
+      LogUtil.info(TAG, 'setBounds skipped on phone; top-level window bounds are system-managed');
+      callback && callback();
+      return;
+    }
+
     let windowClass = this.getWindow(id);
     if (!windowClass) {
       LogUtil.error(TAG, 'setBounds failed to obtain the main window.');
@@ -488,11 +521,9 @@ export class AppWindowAdapter extends BaseAdapter {
     bounds.height = bounds.height + topBorder + leftBorder;
 
     windowClass.moveWindowToAsync(bounds.left, bounds.top)
+      .then(() => windowClass?.resizeAsync(bounds.width, bounds.height))
       .then(() => {
-        windowClass?.resizeAsync(bounds.width, bounds.height)
-          .then(() => {
-            callback && callback();
-          })
+        callback && callback();
       })
       .catch((err: BusinessError) => {
         LogUtil.error(TAG, 'Failed to set the window bounds. Cause:' + JSON.stringify(err));
@@ -625,12 +656,12 @@ export class AppWindowAdapter extends BaseAdapter {
   @LogMethod
   setUseNativeFrame(id: number, useNativeFrame: boolean) {
     let windowClass = this.getWindow(id);
-    try {
+    this.applyWindowCapability('setWindowDecorVisible', () => {
       windowClass?.setWindowDecorVisible(useNativeFrame);
+    });
+    this.applyWindowCapability('setWindowTitleMoveEnabled', () => {
       windowClass?.setWindowTitleMoveEnabled(useNativeFrame);
-    } catch (exception) {
-      LogUtil.error(TAG, `Failed to set the visibility of window decor. Cause code: ${exception.code}, message: ${exception.message}`);
-    }
+    });
   }
 
   @LogMethod
@@ -678,11 +709,9 @@ export class AppWindowAdapter extends BaseAdapter {
   @LogMethod
   setMovable(id: number, movable: boolean) {
     let windowClass = this.getWindow(id);
-    try {
+    this.applyWindowCapability('setWindowTitleMoveEnabled', () => {
       windowClass?.setWindowTitleMoveEnabled(movable);
-    } catch (exception) {
-      LogUtil.error(TAG, `Failed to set the window Movable. Cause code: ${exception.code}, message: ${exception.message}`);
-    }
+    });
   }
 
   @LogMethod
@@ -748,7 +777,9 @@ export class AppWindowAdapter extends BaseAdapter {
   @LogMethod
   setWindowModal(modal: boolean, id: number) {
     let windowStage = this.abilityManager.getProxy(id)?.getWindowStage();
-    windowStage?.setWindowModal(modal);
+    this.applyWindowCapability('setWindowModal', () => {
+      windowStage?.setWindowModal(modal);
+    });
   }
 
   @LogMethod

@@ -86,6 +86,18 @@ function stageHnpPath(modulePath: string, buildRoot: string, targetName: string)
     return stagedRoot;
 }
 
+function patchAppAsarMinimist(context: any): void {
+    const modulePath = context.modulePath.toString();
+    const projectRoot = path.resolve(modulePath, '..');
+    const patchScript = path.join(projectRoot, 'scripts', 'patch-app-asar-minimist.js');
+    requirePath('app.asar minimist patch script', patchScript);
+
+    execFileSync(process.execPath, [patchScript, projectRoot], {
+        cwd: projectRoot,
+        stdio: 'inherit'
+    });
+}
+
 function repackHapWithHnp(context: any): void {
     const modulePath = context.modulePath.toString();
     const projectRoot = path.resolve(modulePath, '..');
@@ -139,6 +151,19 @@ function repackHapWithHnp(context: any): void {
     });
 }
 
+const patchAppAsarMinimistPlugin = {
+    pluginId: 'ohcode.patch-app-asar-minimist',
+    apply(node: any) {
+        node.registerTask({
+            name: 'PatchAppAsarMinimist',
+            postDependencies: ['default@CompileResource'],
+            run: (context: any) => {
+                patchAppAsarMinimist(context);
+            }
+        });
+    }
+};
+
 const repackHapWithHnpPlugin = {
     pluginId: 'ohcode.repack-hap-with-hnp',
     apply(node: any) {
@@ -155,5 +180,5 @@ const repackHapWithHnpPlugin = {
 
 export default {
     system: hapTasks,  /* Built-in plugin of Hvigor. It cannot be modified. */
-    plugins:[repackHapWithHnpPlugin]         /* Custom plugin to extend the functionality of Hvigor. */
+    plugins:[patchAppAsarMinimistPlugin, repackHapWithHnpPlugin]         /* Custom plugin to extend the functionality of Hvigor. */
 }

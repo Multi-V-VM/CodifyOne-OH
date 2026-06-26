@@ -1,0 +1,5 @@
+{
+  "name": "@vscode/sqlite3",
+  "version": "0.0.0-ohos",
+  "main": "index.js"
+}
