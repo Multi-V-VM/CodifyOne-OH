@@ -13,7 +13,7 @@ import { MultiInputAdapter } from '../adapter/MultiInputAdapter';
 import { DragParamManager } from '../common/DragParamManager';
 import { UIExtensionContentSession } from '@kit.AbilityKit';
 
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-incrmark1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-fncache1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -141,6 +141,7 @@ export struct WebEmbeddedWindow {
         if (this.xComponentId === ConfigData.DEFAULT_WINDOW_ID) {
           this.setDefaultBounds();
           let vec_args = this.buildArgs();
+          LogUtil.info(WebEmbeddedWindow.TAG, 'node environment sanitized=' + JSON.stringify(getV8PoolHook().sanitizeNodeEnvironment()));
           LogUtil.info(WebEmbeddedWindow.TAG, 'electron PLT hook=' + JSON.stringify(getV8PoolHook().installElectronPltHooks()));
           this.nativeContext.runBrowser(vec_args);
           LogUtil.info(WebEmbeddedWindow.TAG, 'electron PLT hook after runBrowser=' + JSON.stringify(getV8PoolHook().getElectronPltHookStats()));

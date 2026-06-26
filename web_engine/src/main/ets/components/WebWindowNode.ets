@@ -23,7 +23,7 @@ interface ComponentConfig {
 }
 
 const TAG: string = 'WebWindowNode';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-incrmark1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-fncache1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -108,6 +108,7 @@ class WindowNodeController extends NodeController {
         LogUtil.info(TAG, 'onLoad xComponentId:' + this.config.xComponentId);
         this.setDefaultBounds();
         let vec_args = this.buildArgs();
+        LogUtil.info(TAG, 'node environment sanitized=' + JSON.stringify(getV8PoolHook().sanitizeNodeEnvironment()));
         LogUtil.info(TAG, 'electron PLT hook=' + JSON.stringify(getV8PoolHook().installElectronPltHooks()));
         this.config.nativeContext.runBrowser(vec_args);
         LogUtil.info(TAG, 'electron PLT hook after runBrowser=' + JSON.stringify(getV8PoolHook().getElectronPltHookStats()));

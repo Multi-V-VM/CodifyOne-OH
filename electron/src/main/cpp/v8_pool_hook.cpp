@@ -3022,6 +3022,39 @@ static napi_value ClearPool(napi_env env, napi_callback_info info) {
     return result;
 }
 
+static napi_value SanitizeNodeEnvironment(napi_env env,
+                                          napi_callback_info info) {
+    const char* blocked[] = {
+        "NODE_OPTIONS",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_REPL_EXTERNAL_MODULE",
+    };
+
+    uint32_t cleared = 0;
+    std::string clearedNames;
+    for (const char* name : blocked) {
+        if (getenv(name) == nullptr) {
+            continue;
+        }
+        if (unsetenv(name) == 0) {
+            if (!clearedNames.empty()) {
+                clearedNames += ",";
+            }
+            clearedNames += name;
+            ++cleared;
+        } else {
+            Log("WARNING: unsetenv(%s) failed: errno=%d", name, errno);
+        }
+    }
+
+    napi_value result;
+    napi_create_object(env, &result);
+    SetBool(env, result, "success", true);
+    SetUint32(env, result, "cleared", cleared);
+    SetString(env, result, "clearedVariables", clearedNames);
+    return result;
+}
+
 // Module initialization
 EXTERN_C_START
 
@@ -3041,7 +3074,8 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"getV8InitializeHookStats", nullptr, GetV8InitializeHookStats, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"resetV8InitializeHookStats", nullptr, ResetV8InitializeHookStats, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"installElectronPltHooks", nullptr, InstallElectronPltHooksWrapper, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"getElectronPltHookStats", nullptr, GetElectronPltHookStats, nullptr, nullptr, nullptr, napi_default, nullptr}
+        {"getElectronPltHookStats", nullptr, GetElectronPltHookStats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"sanitizeNodeEnvironment", nullptr, SanitizeNodeEnvironment, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
 
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);

@@ -22,7 +22,7 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-incrmark1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-fncache1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -143,6 +143,8 @@ class WindowNodeController extends NodeController {
         this.writeStartupStatus('xcomponent onLoad');
         this.setDefaultBounds();
         let vec_args = this.buildArgs();
+        const envResult = getV8PoolHook().sanitizeNodeEnvironment();
+        this.writeStartupStatus('node environment sanitized=' + JSON.stringify(envResult));
         const hookResult = getV8PoolHook().installElectronPltHooks();
         this.writeStartupStatus('electron PLT hook=' + JSON.stringify(hookResult));
         this.writeStartupStatus('calling runBrowser args=' + JSON.stringify(vec_args));

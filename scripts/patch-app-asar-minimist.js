@@ -16,6 +16,18 @@ const vscodeSqlite3PatchDir = path.join(patchRoot, "vscode-sqlite3");
 const moduleDir = path.join(appDir, "node_modules", "minimist");
 const filesToInstall = [
   ["out/main.js", path.join(appDir, "out", "main.js")],
+  [
+    "out/vs/base/parts/sandbox/electron-sandbox/preload.js",
+    path.join(appDir, "out", "vs", "base", "parts", "sandbox", "electron-sandbox", "preload.js")
+  ],
+  [
+    "out/vs/base/parts/sandbox/electron-sandbox/preload-aux.js",
+    path.join(appDir, "out", "vs", "base", "parts", "sandbox", "electron-sandbox", "preload-aux.js")
+  ],
+  [
+    "out/vs/code/electron-main/main.js",
+    path.join(appDir, "out", "vs", "code", "electron-main", "main.js")
+  ],
   ["node_modules/minimist/index.js", path.join(minimistPatchDir, "index.js")],
   ["node_modules/minimist/package.json", path.join(minimistPatchDir, "package.json")],
   ["node_modules/graceful-fs/index.js", path.join(gracefulFsPatchDir, "index.js")],

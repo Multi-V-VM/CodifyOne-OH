@@ -58,6 +58,12 @@ export interface V8InitializeHookStats extends V8InitializeHookConfig {
   lastSnapshotAllocCallerOffset: number;
 }
 
+export interface NodeEnvironmentSanitizeResult {
+  success: boolean;
+  cleared: number;
+  clearedVariables: string;
+}
+
 export interface ElectronPltHookInstallResult {
   installed: boolean;
   monitorStarted: boolean;
@@ -96,3 +102,4 @@ export const getV8InitializeHookStats: () => V8InitializeHookStats;
 export const resetV8InitializeHookStats: () => { success: boolean };
 export const installElectronPltHooks: () => ElectronPltHookInstallResult;
 export const getElectronPltHookStats: () => ElectronPltHookStats;
+export const sanitizeNodeEnvironment: () => NodeEnvironmentSanitizeResult;

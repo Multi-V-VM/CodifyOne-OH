@@ -18,6 +18,7 @@ export interface V8PoolHook {
   hasIsolate(windowId: string): boolean;
   getPoolStats(): PoolStats;
   clearPool(): PoolOperationResult;
+  sanitizeNodeEnvironment(): NodeEnvironmentSanitizeResult;
   installElectronPltHooks(): ElectronPltHookInstallResult;
   getElectronPltHookStats(): ElectronPltHookStats;
 }
@@ -31,6 +32,13 @@ export interface PoolStats {
 export interface PoolOperationResult {
   success: boolean;
   cleared?: number;
+  message?: string;
+}
+
+export interface NodeEnvironmentSanitizeResult {
+  success: boolean;
+  cleared: number;
+  clearedVariables: string;
   message?: string;
 }
 
@@ -119,6 +127,7 @@ interface NativeV8PoolHookModule {
   hasIsolate: (windowId: string) => boolean;
   getPoolStats: () => PoolStats;
   clearPool: () => PoolOperationResult;
+  sanitizeNodeEnvironment: () => NodeEnvironmentSanitizeResult;
   installElectronPltHooks: () => ElectronPltHookInstallResult;
   getElectronPltHookStats: () => ElectronPltHookStats;
 }
@@ -252,6 +261,36 @@ class V8PoolHookImpl implements V8PoolHook {
     } catch (e) {
       LogUtil.error(TAG, `clearPool failed: ${JSON.stringify(e)}`);
       return { success: false, message: `Exception: ${JSON.stringify(e)}` };
+    }
+  }
+
+  sanitizeNodeEnvironment(): NodeEnvironmentSanitizeResult {
+    if (!this.ready() || this.nativeModule === undefined) {
+      return {
+        success: false,
+        cleared: 0,
+        clearedVariables: '',
+        message: 'Module not ready'
+      };
+    }
+
+    try {
+      const result = this.nativeModule.sanitizeNodeEnvironment();
+      LogUtil.info(TAG, `sanitizeNodeEnvironment: ${JSON.stringify(result)}`);
+      return result || {
+        success: false,
+        cleared: 0,
+        clearedVariables: '',
+        message: 'No result'
+      };
+    } catch (e) {
+      LogUtil.error(TAG, `sanitizeNodeEnvironment failed: ${JSON.stringify(e)}`);
+      return {
+        success: false,
+        cleared: 0,
+        clearedVariables: '',
+        message: `Exception: ${JSON.stringify(e)}`
+      };
     }
   }
 
