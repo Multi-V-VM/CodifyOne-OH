@@ -23,7 +23,7 @@ interface ComponentConfig {
 }
 
 const TAG: string = 'WebWindowNode';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-snapnull1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-forceok1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +

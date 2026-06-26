@@ -22,7 +22,7 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-snapnull1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-forceok1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -218,6 +218,15 @@ class WindowNodeController extends NodeController {
           ' v8InitializeExternalStartupDataCalls=' + hookStats.v8InitializeExternalStartupDataCalls +
           ' v8InitializeExternalStartupDataFromFileCalls=' + hookStats.v8InitializeExternalStartupDataFromFileCalls +
           ' lastV8ExternalStartupDataPath=' + hookStats.lastV8ExternalStartupDataPath +
+          ' v8InitWithSnapshotSlots=' + hookStats.v8InitWithSnapshotSlots +
+          ' v8InitWithSnapshotCalls=' + hookStats.v8InitWithSnapshotCalls +
+          ' v8InitWithSnapshotFailures=' + hookStats.v8InitWithSnapshotFailures +
+          ' lastV8InitWithSnapshotCallerOffset=' + hookStats.lastV8InitWithSnapshotCallerOffset +
+          ' lastV8InitWithSnapshotReadOnlyLength=' + hookStats.lastV8InitWithSnapshotReadOnlyLength +
+          ' lastV8InitWithSnapshotSharedLength=' + hookStats.lastV8InitWithSnapshotSharedLength +
+          ' lastV8InitWithSnapshotStartupLength=' + hookStats.lastV8InitWithSnapshotStartupLength +
+          ' lastV8InitWithSnapshotCanRehash=' + hookStats.lastV8InitWithSnapshotCanRehash +
+          ' lastV8InitWithSnapshotResult=' + hookStats.lastV8InitWithSnapshotResult +
           ' snapshotBlobClears=' + hookStats.snapshotBlobClears +
           ' lastSnapshotBlobAddress=' + hookStats.lastSnapshotBlobAddress +
           ' snapshotDecompressCalls=' + hookStats.snapshotDecompressCalls +

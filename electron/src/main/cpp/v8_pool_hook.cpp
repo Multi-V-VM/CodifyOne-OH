@@ -22,6 +22,13 @@
 #include <vector>
 #include <unistd.h>
 
+#if __has_include(<hilog/log.h>)
+#include <hilog/log.h>
+#define OHCODE_HAS_HILOG 1
+#else
+#define OHCODE_HAS_HILOG 0
+#endif
+
 extern "C" uint32_t
 _ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void* context);
 
@@ -135,6 +142,8 @@ using V8IsolateInitializeFn = bool (*)(void*, const void*);
 using V8SetFlagsFromStringFn = void (*)(const char*);
 using V8SetSnapshotDataBlobFn = void (*)(void*);
 using V8InitializeExternalStartupDataFn = void (*)(const char*);
+using V8InternalInitWithSnapshotFn =
+    bool (*)(void*, void*, void*, void*, bool);
 using NothrowNewFn = void* (*)(size_t, const void*) noexcept;
 using DeleteFn = void (*)(void*) noexcept;
 using NodeInitializeContextFn = uint32_t (*)(void*);
@@ -172,6 +181,17 @@ struct V8StartupDataView {
     int raw_size;
 };
 
+struct V8SnapshotDataView {
+    void* vtable;
+    const uint8_t* data;
+    uint32_t length;
+    uint8_t ownsData;
+    uint8_t padding[3];
+};
+
+static_assert(sizeof(V8SnapshotDataView) == 24,
+              "V8SnapshotDataView layout must match the disassembly");
+
 static std::once_flag g_epollConfigOnce;
 static std::once_flag g_realEpollWaitOnce;
 static EpollWaitFn g_realEpollWait = nullptr;
@@ -193,6 +213,7 @@ static std::once_flag g_v8FlagsOnce;
 static std::once_flag g_realV8SetSnapshotDataBlobOnce;
 static std::once_flag g_realV8InitializeExternalStartupDataOnce;
 static std::once_flag g_realV8InitializeExternalStartupDataFromFileOnce;
+static std::once_flag g_realV8InternalInitWithSnapshotOnce;
 static std::once_flag g_baseStartupBlobOnce;
 static V8IsolateInitializeFn g_realV8IsolateInitialize = nullptr;
 static V8SetSnapshotDataBlobFn g_realV8SetSnapshotDataBlob = nullptr;
@@ -200,6 +221,7 @@ static V8InitializeExternalStartupDataFn g_realV8InitializeExternalStartupData =
     nullptr;
 static V8InitializeExternalStartupDataFn
     g_realV8InitializeExternalStartupDataFromFile = nullptr;
+static V8InternalInitWithSnapshotFn g_realV8InternalInitWithSnapshot = nullptr;
 static std::mutex g_v8InitializeMutex;
 static std::mutex g_v8FlagsMutex;
 static std::string g_v8StartupFlags;
@@ -222,8 +244,8 @@ static std::atomic<int32_t> g_lastV8SnapshotDataBlobRawSize{0};
 static std::atomic<uintptr_t> g_lastEffectiveV8SnapshotDataBlobAddress{0};
 static std::atomic<uintptr_t> g_lastEffectiveV8SnapshotDataBlobDataAddress{0};
 static std::atomic<int32_t> g_lastEffectiveV8SnapshotDataBlobRawSize{0};
-static std::atomic<bool> g_replaceContextSnapshotWithStartup{true};
-static std::atomic<bool> g_skipV8SnapshotDataBlob{true};
+static std::atomic<bool> g_replaceContextSnapshotWithStartup{false};
+static std::atomic<bool> g_skipV8SnapshotDataBlob{false};
 static std::atomic<uint64_t> g_snapshotBlobSkips{0};
 static std::atomic<uint64_t> g_snapshotBlobReplacementAttempts{0};
 static std::atomic<uint64_t> g_snapshotBlobReplacements{0};
@@ -237,6 +259,22 @@ static std::atomic<uint64_t> g_v8InitializeExternalStartupDataCalls{0};
 static std::atomic<uint64_t> g_v8InitializeExternalStartupDataFromFileCalls{0};
 static std::mutex g_v8ExternalStartupDataPathMutex;
 static std::string g_lastV8ExternalStartupDataPath;
+static std::atomic<uint64_t> g_v8InitWithSnapshotCalls{0};
+static std::atomic<uint64_t> g_v8InitWithSnapshotSuccesses{0};
+static std::atomic<uint64_t> g_v8InitWithSnapshotFailures{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotCallerOffset{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotIsolate{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotReadOnlyAddress{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotReadOnlyDataAddress{0};
+static std::atomic<uint32_t> g_lastV8InitWithSnapshotReadOnlyLength{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotSharedAddress{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotSharedDataAddress{0};
+static std::atomic<uint32_t> g_lastV8InitWithSnapshotSharedLength{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotStartupAddress{0};
+static std::atomic<uintptr_t> g_lastV8InitWithSnapshotStartupDataAddress{0};
+static std::atomic<uint32_t> g_lastV8InitWithSnapshotStartupLength{0};
+static std::atomic<bool> g_lastV8InitWithSnapshotCanRehash{false};
+static std::atomic<bool> g_lastV8InitWithSnapshotResult{false};
 static std::atomic<uint64_t> g_v8InitializeCalls{0};
 static std::atomic<uint64_t> g_v8InitializeTargetHits{0};
 static std::atomic<uint64_t> g_v8InitializeSerializedCalls{0};
@@ -303,6 +341,7 @@ static std::atomic<void*> g_gotRealV8SetSnapshotDataBlob{nullptr};
 static std::atomic<void*> g_gotRealV8InitializeExternalStartupData{nullptr};
 static std::atomic<void*> g_gotRealV8InitializeExternalStartupDataFromFile{
     nullptr};
+static std::atomic<void*> g_gotRealV8InternalInitWithSnapshot{nullptr};
 static std::atomic<void*> g_gotRealSnapshotDecompress{nullptr};
 static std::atomic<void*> g_gotRealArrayNothrowNew{nullptr};
 static std::atomic<void*> g_gotRealScalarNothrowNew{nullptr};
@@ -377,6 +416,7 @@ static std::atomic<uint32_t> g_patchedV8SetSnapshotDataBlobSlots{0};
 static std::atomic<uint32_t> g_patchedV8InitializeExternalStartupDataSlots{0};
 static std::atomic<uint32_t>
     g_patchedV8InitializeExternalStartupDataFromFileSlots{0};
+static std::atomic<uint32_t> g_patchedV8InternalInitWithSnapshotSlots{0};
 static std::atomic<uint32_t> g_patchedSnapshotDecompressSlots{0};
 static std::atomic<uint32_t> g_patchedArrayNothrowNewSlots{0};
 static std::atomic<uint32_t> g_patchedScalarNothrowNewSlots{0};
@@ -394,12 +434,18 @@ static thread_local bool g_insideNodePlatformForIsolateHook = false;
 
 // Logging
 void Log(const char* fmt, ...) {
+    char message[2048];
     va_list args;
     va_start(args, fmt);
-    fprintf(stderr, "[V8PoolHook] ");
-    vfprintf(stderr, fmt, args);
-    fprintf(stderr, "\n");
+    vsnprintf(message, sizeof(message), fmt, args);
     va_end(args);
+
+    fprintf(stderr, "[V8PoolHook] %s", message);
+    fprintf(stderr, "\n");
+#if OHCODE_HAS_HILOG
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0x0000, "V8PoolHook", "%{public}s",
+                 message);
+#endif
 }
 
 static bool ReadEnvBool(const char* name, bool default_value) {
@@ -467,7 +513,7 @@ static void InitV8InitializeHookConfig() {
         ReadEnvBool("V8_POOL_HOOK_SERIALIZE_ISOLATE_INIT", true),
         std::memory_order_relaxed);
     g_forceV8InitializeSuccess.store(
-        ReadEnvBool("V8_POOL_HOOK_FORCE_ISOLATE_INIT_SUCCESS", false),
+        ReadEnvBool("V8_POOL_HOOK_FORCE_ISOLATE_INIT_SUCCESS", true),
         std::memory_order_relaxed);
     g_disableNodeStartupSnapshot.store(
         ReadEnvBool("V8_POOL_HOOK_DISABLE_NODE_STARTUP_SNAPSHOT", false),
@@ -477,7 +523,7 @@ static void InitV8InitializeHookConfig() {
                     false),
         std::memory_order_relaxed);
     g_skipV8SnapshotDataBlob.store(
-        ReadEnvBool("V8_POOL_HOOK_SKIP_SNAPSHOT_BLOB", true),
+        ReadEnvBool("V8_POOL_HOOK_SKIP_SNAPSHOT_BLOB", false),
         std::memory_order_relaxed);
 
     const char* flags = getenv("V8_POOL_HOOK_V8_FLAGS");
@@ -606,6 +652,24 @@ GetRealV8InitializeExternalStartupDataFromFile() {
         }
     });
     return g_realV8InitializeExternalStartupDataFromFile;
+}
+
+static V8InternalInitWithSnapshotFn GetRealV8InternalInitWithSnapshot() {
+    if (void* gotReal =
+            g_gotRealV8InternalInitWithSnapshot.load(
+                std::memory_order_acquire)) {
+        return reinterpret_cast<V8InternalInitWithSnapshotFn>(gotReal);
+    }
+    std::call_once(g_realV8InternalInitWithSnapshotOnce, []() {
+        g_realV8InternalInitWithSnapshot =
+            reinterpret_cast<V8InternalInitWithSnapshotFn>(dlsym(
+                RTLD_NEXT,
+                "_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b"));
+        if (!g_realV8InternalInitWithSnapshot) {
+            Log("WARNING: v8::internal::Isolate::InitWithSnapshot real symbol not found");
+        }
+    });
+    return g_realV8InternalInitWithSnapshot;
 }
 
 static NothrowNewFn GetRealArrayNothrowNew() {
@@ -1482,13 +1546,34 @@ static bool CallRealV8IsolateInitialize(V8IsolateInitializeFn realInitialize,
     const bool ok = realInitialize(isolate, params);
     if (!ok) {
         g_v8InitializeFailures.fetch_add(1, std::memory_order_relaxed);
-        if (g_forceV8InitializeSuccess.load(std::memory_order_relaxed)) {
+        const bool sameSnapshotIsolate =
+            g_lastV8InitWithSnapshotIsolate.load(
+                std::memory_order_relaxed) ==
+            reinterpret_cast<uintptr_t>(isolate);
+        const bool snapshotInitSucceeded =
+            sameSnapshotIsolate &&
+            g_lastV8InitWithSnapshotResult.load(
+                std::memory_order_relaxed);
+        if (g_forceV8InitializeSuccess.load(std::memory_order_relaxed) &&
+            snapshotInitSucceeded) {
             g_v8InitializeForcedSuccesses.fetch_add(
                 1, std::memory_order_relaxed);
             Log("v8::Isolate::Initialize returned false; forcing success "
-                "isolate=%p params=%p",
+                "after successful InitWithSnapshot isolate=%p params=%p",
                 isolate, params);
             return true;
+        }
+        if (g_forceV8InitializeSuccess.load(std::memory_order_relaxed)) {
+            Log("v8::Isolate::Initialize returned false; not forcing because "
+                "InitWithSnapshot did not succeed for this isolate "
+                "isolate=%p params=%p lastSnapshotIsolate=%p "
+                "lastSnapshotResult=%d",
+                isolate, params,
+                reinterpret_cast<void*>(
+                    g_lastV8InitWithSnapshotIsolate.load(
+                        std::memory_order_relaxed)),
+                g_lastV8InitWithSnapshotResult.load(
+                    std::memory_order_relaxed) ? 1 : 0);
         }
         Log("v8::Isolate::Initialize returned false; returning failure "
             "isolate=%p params=%p",
@@ -1677,6 +1762,73 @@ static void RecordEffectiveV8SnapshotDataBlob(void* blob) {
         startupData->raw_size, std::memory_order_relaxed);
 }
 
+static void RecordV8InitWithSnapshotCaller(void* raw_return_address) {
+    if (!raw_return_address) {
+        g_lastV8InitWithSnapshotCallerOffset.store(
+            0, std::memory_order_relaxed);
+        return;
+    }
+
+    void* extracted = __builtin_extract_return_addr(raw_return_address);
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase ||
+        !strstr(info.dli_fname, "libelectron.so")) {
+        g_lastV8InitWithSnapshotCallerOffset.store(
+            0, std::memory_order_relaxed);
+        return;
+    }
+
+    g_lastV8InitWithSnapshotCallerOffset.store(
+        reinterpret_cast<uintptr_t>(extracted) -
+            reinterpret_cast<uintptr_t>(info.dli_fbase),
+        std::memory_order_relaxed);
+}
+
+static void RecordSnapshotDataView(
+    void* snapshotData,
+    std::atomic<uintptr_t>* objectAddress,
+    std::atomic<uintptr_t>* dataAddress,
+    std::atomic<uint32_t>* length) {
+    objectAddress->store(reinterpret_cast<uintptr_t>(snapshotData),
+                         std::memory_order_relaxed);
+    if (!snapshotData) {
+        dataAddress->store(0, std::memory_order_relaxed);
+        length->store(0, std::memory_order_relaxed);
+        return;
+    }
+
+    auto* view = reinterpret_cast<V8SnapshotDataView*>(snapshotData);
+    dataAddress->store(reinterpret_cast<uintptr_t>(view->data),
+                       std::memory_order_relaxed);
+    length->store(view->length, std::memory_order_relaxed);
+}
+
+static void RecordV8InitWithSnapshotArgs(void* isolate,
+                                         void* readOnlySnapshot,
+                                         void* sharedSnapshot,
+                                         void* startupSnapshot,
+                                         bool canRehash,
+                                         void* returnAddress) {
+    g_lastV8InitWithSnapshotIsolate.store(
+        reinterpret_cast<uintptr_t>(isolate), std::memory_order_relaxed);
+    RecordSnapshotDataView(readOnlySnapshot,
+                           &g_lastV8InitWithSnapshotReadOnlyAddress,
+                           &g_lastV8InitWithSnapshotReadOnlyDataAddress,
+                           &g_lastV8InitWithSnapshotReadOnlyLength);
+    RecordSnapshotDataView(sharedSnapshot,
+                           &g_lastV8InitWithSnapshotSharedAddress,
+                           &g_lastV8InitWithSnapshotSharedDataAddress,
+                           &g_lastV8InitWithSnapshotSharedLength);
+    RecordSnapshotDataView(startupSnapshot,
+                           &g_lastV8InitWithSnapshotStartupAddress,
+                           &g_lastV8InitWithSnapshotStartupDataAddress,
+                           &g_lastV8InitWithSnapshotStartupLength);
+    g_lastV8InitWithSnapshotCanRehash.store(canRehash,
+                                            std::memory_order_relaxed);
+    RecordV8InitWithSnapshotCaller(returnAddress);
+}
+
 static void* MaybeReplaceContextSnapshotBlob(void* blob) {
     if (!g_replaceContextSnapshotWithStartup.load(std::memory_order_relaxed) ||
         !blob) {
@@ -1830,6 +1982,52 @@ static void AppendV8StartupDataStats(napi_env env, napi_value result) {
                   std::memory_order_relaxed));
     SetString(env, result, "lastV8ExternalStartupDataPath",
               GetV8ExternalStartupDataPath());
+    SetUint64(env, result, "v8InitWithSnapshotCalls",
+              g_v8InitWithSnapshotCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "v8InitWithSnapshotSuccesses",
+              g_v8InitWithSnapshotSuccesses.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "v8InitWithSnapshotFailures",
+              g_v8InitWithSnapshotFailures.load(std::memory_order_relaxed));
+    SetUint32(env, result, "lastV8InitWithSnapshotCallerOffset",
+              static_cast<uint32_t>(
+                  g_lastV8InitWithSnapshotCallerOffset.load(
+                      std::memory_order_relaxed)));
+    SetUint64(env, result, "lastV8InitWithSnapshotIsolate",
+              g_lastV8InitWithSnapshotIsolate.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastV8InitWithSnapshotReadOnlyAddress",
+              g_lastV8InitWithSnapshotReadOnlyAddress.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastV8InitWithSnapshotReadOnlyDataAddress",
+              g_lastV8InitWithSnapshotReadOnlyDataAddress.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "lastV8InitWithSnapshotReadOnlyLength",
+              g_lastV8InitWithSnapshotReadOnlyLength.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastV8InitWithSnapshotSharedAddress",
+              g_lastV8InitWithSnapshotSharedAddress.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastV8InitWithSnapshotSharedDataAddress",
+              g_lastV8InitWithSnapshotSharedDataAddress.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "lastV8InitWithSnapshotSharedLength",
+              g_lastV8InitWithSnapshotSharedLength.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastV8InitWithSnapshotStartupAddress",
+              g_lastV8InitWithSnapshotStartupAddress.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastV8InitWithSnapshotStartupDataAddress",
+              g_lastV8InitWithSnapshotStartupDataAddress.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "lastV8InitWithSnapshotStartupLength",
+              g_lastV8InitWithSnapshotStartupLength.load(
+                  std::memory_order_relaxed));
+    SetBool(env, result, "lastV8InitWithSnapshotCanRehash",
+            g_lastV8InitWithSnapshotCanRehash.load(
+                std::memory_order_relaxed));
+    SetBool(env, result, "lastV8InitWithSnapshotResult",
+            g_lastV8InitWithSnapshotResult.load(std::memory_order_relaxed));
 }
 
 }  // namespace
@@ -2058,6 +2256,66 @@ extern "C" void _ZN2v82V837InitializeExternalStartupDataFromFileEPKc(
         return;
     }
     realInitializeExternalStartupDataFromFile(snapshotBlobPath);
+}
+
+extern "C" bool
+_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b(
+    void* isolate,
+    void* readOnlySnapshot,
+    void* sharedSnapshot,
+    void* startupSnapshot,
+    bool canRehash) {
+    g_v8InitWithSnapshotCalls.fetch_add(1, std::memory_order_relaxed);
+    RecordV8InitWithSnapshotArgs(isolate, readOnlySnapshot, sharedSnapshot,
+                                 startupSnapshot, canRehash,
+                                 __builtin_return_address(0));
+
+    V8InternalInitWithSnapshotFn realInitWithSnapshot =
+        GetRealV8InternalInitWithSnapshot();
+    if (!realInitWithSnapshot) {
+        g_v8InitWithSnapshotFailures.fetch_add(1,
+                                               std::memory_order_relaxed);
+        g_lastV8InitWithSnapshotResult.store(false,
+                                             std::memory_order_relaxed);
+        return false;
+    }
+
+    const bool ok = realInitWithSnapshot(isolate, readOnlySnapshot,
+                                         sharedSnapshot, startupSnapshot,
+                                         canRehash);
+    g_lastV8InitWithSnapshotResult.store(ok, std::memory_order_relaxed);
+    if (ok) {
+        g_v8InitWithSnapshotSuccesses.fetch_add(
+            1, std::memory_order_relaxed);
+    } else {
+        g_v8InitWithSnapshotFailures.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+
+    Log("InitWithSnapshot result=%d isolate=%p ro=%p/%u shared=%p/%u "
+        "startup=%p/%u canRehash=%d caller=0x%zx",
+        ok ? 1 : 0,
+        isolate,
+        reinterpret_cast<void*>(
+            g_lastV8InitWithSnapshotReadOnlyDataAddress.load(
+                std::memory_order_relaxed)),
+        g_lastV8InitWithSnapshotReadOnlyLength.load(
+            std::memory_order_relaxed),
+        reinterpret_cast<void*>(
+            g_lastV8InitWithSnapshotSharedDataAddress.load(
+                std::memory_order_relaxed)),
+        g_lastV8InitWithSnapshotSharedLength.load(
+            std::memory_order_relaxed),
+        reinterpret_cast<void*>(
+            g_lastV8InitWithSnapshotStartupDataAddress.load(
+                std::memory_order_relaxed)),
+        g_lastV8InitWithSnapshotStartupLength.load(
+            std::memory_order_relaxed),
+        canRehash ? 1 : 0,
+        static_cast<size_t>(
+            g_lastV8InitWithSnapshotCallerOffset.load(
+                std::memory_order_relaxed)));
+    return ok;
 }
 
 extern "C" V8OwnedByteVector
@@ -2526,6 +2784,11 @@ static const PltHookTarget* FindPltHookTarget(const char* symbol) {
          reinterpret_cast<void*>(&_ZN2v82V837InitializeExternalStartupDataFromFileEPKc),
          &g_gotRealV8InitializeExternalStartupDataFromFile,
          &g_patchedV8InitializeExternalStartupDataFromFileSlots},
+        {"_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b",
+         reinterpret_cast<void*>(
+             &_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b),
+         &g_gotRealV8InternalInitWithSnapshot,
+         &g_patchedV8InternalInitWithSnapshotSlots},
         {"_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE",
          reinterpret_cast<void*>(&_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE),
          &g_gotRealSnapshotDecompress, &g_patchedSnapshotDecompressSlots},
@@ -3374,6 +3637,33 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
         std::lock_guard<std::mutex> lock(g_v8ExternalStartupDataPathMutex);
         g_lastV8ExternalStartupDataPath.clear();
     }
+    g_v8InitWithSnapshotCalls.store(0, std::memory_order_relaxed);
+    g_v8InitWithSnapshotSuccesses.store(0, std::memory_order_relaxed);
+    g_v8InitWithSnapshotFailures.store(0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotCallerOffset.store(0,
+                                               std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotIsolate.store(0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotReadOnlyAddress.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotReadOnlyDataAddress.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotReadOnlyLength.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotSharedAddress.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotSharedDataAddress.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotSharedLength.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotStartupAddress.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotStartupDataAddress.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotStartupLength.store(
+        0, std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotCanRehash.store(false,
+                                            std::memory_order_relaxed);
+    g_lastV8InitWithSnapshotResult.store(false, std::memory_order_relaxed);
     g_v8SnapshotBlobClears.store(0, std::memory_order_relaxed);
     g_v8SnapshotBlobNulls.store(0, std::memory_order_relaxed);
     g_lastV8CreateParamsAddress.store(0, std::memory_order_relaxed);
@@ -3694,6 +3984,9 @@ static napi_value GetElectronPltHookStats(napi_env env,
                   std::memory_order_relaxed));
     SetUint32(env, result, "v8InitializeExternalStartupDataFromFileSlots",
               g_patchedV8InitializeExternalStartupDataFromFileSlots.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "v8InitWithSnapshotSlots",
+              g_patchedV8InternalInitWithSnapshotSlots.load(
                   std::memory_order_relaxed));
     SetUint32(env, result, "snapshotDecompressSlots",
               g_patchedSnapshotDecompressSlots.load(std::memory_order_relaxed));
