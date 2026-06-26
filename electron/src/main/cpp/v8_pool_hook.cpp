@@ -31,6 +31,19 @@
 
 extern "C" uint32_t
 _ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void* context);
+extern "C" void*
+_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE(
+    void* isolate, void* objectTemplate);
+extern "C" void*
+_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE(
+    void* isolateData, void* context, void* args, void* execArgs, void* flags,
+    void* threadId, void* inspectorParentHandle);
+extern "C" void*
+_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
+                                                const char* source);
+extern "C" void*
+_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
+    void* environment, void* callback);
 
 #ifndef R_AARCH64_GLOB_DAT
 #define R_AARCH64_GLOB_DAT 1025
@@ -102,6 +115,88 @@ constexpr uintptr_t kElectronV8InitializeReturnOffset =
     kElectronV8InitializeCallOffset + 4;
 constexpr const char* kDefaultV8StartupFlags =
     "--max-old-space-size=512 --max-semi-space-size=16";
+constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
+;(() => {
+  const STAMP = "diag-20260626-loadenvpost1";
+  const TRACE = "/data/storage/el2/base/files/ohcode-main-trace.log";
+  function stringify(value) {
+    try {
+      return JSON.stringify(value);
+    } catch (err) {
+      return String(value);
+    }
+  }
+  function errorText(err) {
+    return String((err && (err.stack || err.message)) || err);
+  }
+  function trace(phase, detail) {
+    try {
+      const fs = require("fs");
+      fs.appendFileSync(
+        TRACE,
+        `${Date.now()} [${STAMP}] [loadenv-post] ${phase}${detail === undefined ? "" : " " + detail}\n`
+      );
+    } catch (err) {
+      try {
+        console.error(`[OHcode][loadenv-post] ${phase} ${errorText(err)}`);
+      } catch (_) {}
+    }
+  }
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    let hidden = {};
+    try {
+      const v8Util = process._linkedBinding("electron_common_v8_util");
+      hidden = {
+        appSearchPaths: v8Util.getHiddenValue(global, "appSearchPaths"),
+        appSearchPathsOnlyLoadASAR: v8Util.getHiddenValue(
+          global,
+          "appSearchPathsOnlyLoadASAR"
+        )
+      };
+    } catch (err) {
+      hidden = { error: errorText(err) };
+    }
+
+    const roots = [
+      process.resourcesPath || "",
+      "/data/storage/el1/bundle/electron/resources/resfile/resources",
+      "/data/storage/el1/bundle/electron/resources/resfile"
+    ].filter(Boolean);
+    const rels = [
+      "app.asar/package.json",
+      "app/package.json",
+      "resources/app/package.json",
+      "app/ohcode-entry-probe.js",
+      "resources/app/ohcode-entry-probe.js"
+    ];
+    const exists = [];
+    for (const root of roots) {
+      for (const rel of rels) {
+        const candidate = path.join(root, rel);
+        exists.push([candidate, fs.existsSync(candidate)]);
+      }
+    }
+
+    trace(
+      "state",
+      stringify({
+        resourcesPath: process.resourcesPath || "",
+        argv: process.argv,
+        execPath: process.execPath || "",
+        cwd: typeof process.cwd === "function" ? process.cwd() : "",
+        appCodeLoadedType: typeof process.appCodeLoaded,
+        electronVersion: (process.versions && process.versions.electron) || "",
+        hidden,
+        exists
+      })
+    );
+  } catch (err) {
+    trace("error", errorText(err));
+  }
+})();
+)OHCODE_JS";
 constexpr size_t kV8CreateParamsSlotDumpCount = 32;
 constexpr int kContextSnapshotReplacementMinBytes = 100000;
 constexpr const char* kDefaultElectronResourceDir =
@@ -175,6 +270,11 @@ static_assert(sizeof(V8OwnedByteVector) == 24,
               "V8OwnedByteVector layout must match the disassembly");
 
 using SnapshotDecompressFn = V8OwnedByteVector (*)(const uint8_t*, size_t);
+using NodeNewContextFn = void* (*)(void*, void*);
+using NodeCreateEnvironmentFn =
+    void* (*)(void*, void*, void*, void*, void*, void*, void*);
+using NodeLoadEnvironmentStringFn = void* (*)(void*, const char*);
+using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*);
 
 struct V8StartupDataView {
     const char* data;
@@ -308,6 +408,10 @@ static std::once_flag g_realArrayDeleteOnce;
 static std::once_flag g_realScalarDeleteOnce;
 static std::once_flag g_realSnapshotDecompressOnce;
 static std::once_flag g_realNodeInitializeContextOnce;
+static std::once_flag g_realNodeNewContextOnce;
+static std::once_flag g_realNodeCreateEnvironmentOnce;
+static std::once_flag g_realNodeLoadEnvironmentStringOnce;
+static std::once_flag g_realNodeLoadEnvironmentCallbackOnce;
 static std::once_flag g_realAdapterStartGpuProcessOnce;
 static std::once_flag g_realAdapterStartLegacyChildProcessOnce;
 static std::once_flag g_realAdapterStartNormalChildProcessOnce;
@@ -321,6 +425,11 @@ static DeleteFn g_realArrayDelete = nullptr;
 static DeleteFn g_realScalarDelete = nullptr;
 static SnapshotDecompressFn g_realSnapshotDecompress = nullptr;
 static NodeInitializeContextFn g_realNodeInitializeContext = nullptr;
+static NodeNewContextFn g_realNodeNewContext = nullptr;
+static NodeCreateEnvironmentFn g_realNodeCreateEnvironment = nullptr;
+static NodeLoadEnvironmentStringFn g_realNodeLoadEnvironmentString = nullptr;
+static NodeLoadEnvironmentCallbackFn g_realNodeLoadEnvironmentCallback =
+    nullptr;
 static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
 static V8GetCurrentPlatformFn g_v8GetCurrentPlatform = nullptr;
 static UvDefaultLoopFn g_uvDefaultLoop = nullptr;
@@ -348,6 +457,10 @@ static std::atomic<void*> g_gotRealScalarNothrowNew{nullptr};
 static std::atomic<void*> g_gotRealArrayDelete{nullptr};
 static std::atomic<void*> g_gotRealScalarDelete{nullptr};
 static std::atomic<void*> g_gotRealNodeInitializeContext{nullptr};
+static std::atomic<void*> g_gotRealNodeNewContext{nullptr};
+static std::atomic<void*> g_gotRealNodeCreateEnvironment{nullptr};
+static std::atomic<void*> g_gotRealNodeLoadEnvironmentString{nullptr};
+static std::atomic<void*> g_gotRealNodeLoadEnvironmentCallback{nullptr};
 static std::atomic<void*> g_nodePlatformForIsolateInlineTrampoline{nullptr};
 static std::atomic<void*> g_gotRealAdapterStartGpuProcess{nullptr};
 static std::atomic<void*> g_gotRealAdapterStartLegacyChildProcess{nullptr};
@@ -376,6 +489,16 @@ static std::atomic<uint64_t> g_snapshotMmapBytes{0};
 static std::atomic<uint64_t> g_snapshotDecompressCalls{0};
 static std::atomic<uint64_t> g_snapshotDecompressBytesIn{0};
 static std::atomic<uint64_t> g_nodeInitializeContextCalls{0};
+static std::atomic<uint64_t> g_nodeNewContextCalls{0};
+static std::atomic<uint64_t> g_nodeNewContextNulls{0};
+static std::atomic<uint64_t> g_nodeCreateEnvironmentCalls{0};
+static std::atomic<uint64_t> g_nodeCreateEnvironmentNulls{0};
+static std::atomic<uint64_t> g_nodeLoadEnvironmentStringCalls{0};
+static std::atomic<uint64_t> g_nodeLoadEnvironmentCallbackCalls{0};
+static std::atomic<uint64_t> g_nodeLoadEnvironmentNulls{0};
+static std::atomic<uint64_t> g_nodePostLoadTraceAttempts{0};
+static std::atomic<uint64_t> g_nodePostLoadTraceSuccesses{0};
+static std::atomic<uint64_t> g_nodePostLoadTraceFailures{0};
 static std::atomic<uint64_t> g_nodeInitializeContextInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformForIsolateInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformRegisterAttempts{0};
@@ -397,6 +520,15 @@ static std::atomic<uintptr_t> g_lastNodePlatformIsolate{0};
 static std::atomic<uintptr_t> g_lastNodePlatformAddress{0};
 static std::atomic<uintptr_t> g_lastNodePlatformRegisterAddress{0};
 static std::atomic<uintptr_t> g_lastNodePlatformDataAddress{0};
+static std::atomic<uintptr_t> g_lastNodeNewContextIsolate{0};
+static std::atomic<uintptr_t> g_lastNodeNewContextTemplate{0};
+static std::atomic<uintptr_t> g_lastNodeNewContextResult{0};
+static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentIsolateData{0};
+static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentContext{0};
+static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentResult{0};
+static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentEnv{0};
+static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentSource{0};
+static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentResult{0};
 static std::atomic<void*> g_lastNodePlatformData{nullptr};
 static std::atomic<void*> g_lastNodePlatformDataPlatform{nullptr};
 static std::atomic<uint64_t> g_electronPltPatchAttempts{0};
@@ -423,6 +555,10 @@ static std::atomic<uint32_t> g_patchedScalarNothrowNewSlots{0};
 static std::atomic<uint32_t> g_patchedArrayDeleteSlots{0};
 static std::atomic<uint32_t> g_patchedScalarDeleteSlots{0};
 static std::atomic<uint32_t> g_patchedNodeInitializeContextSlots{0};
+static std::atomic<uint32_t> g_patchedNodeNewContextSlots{0};
+static std::atomic<uint32_t> g_patchedNodeCreateEnvironmentSlots{0};
+static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentStringSlots{0};
+static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentCallbackSlots{0};
 static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
 static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
 static std::atomic<uint32_t> g_patchedAdapterStartGpuProcessSlots{0};
@@ -773,6 +909,102 @@ static NodeInitializeContextFn GetRealNodeInitializeContext() {
         }
     });
     return g_realNodeInitializeContext;
+}
+
+static NodeNewContextFn GetRealNodeNewContext() {
+    if (void* gotReal =
+            g_gotRealNodeNewContext.load(std::memory_order_acquire)) {
+        return reinterpret_cast<NodeNewContextFn>(gotReal);
+    }
+    std::call_once(g_realNodeNewContextOnce, []() {
+        g_realNodeNewContext = reinterpret_cast<NodeNewContextFn>(dlsym(
+            RTLD_NEXT,
+            "_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE"));
+        if (!g_realNodeNewContext) {
+            Log("WARNING: node::NewContext real symbol not found");
+        }
+    });
+    return g_realNodeNewContext;
+}
+
+static NodeCreateEnvironmentFn GetRealNodeCreateEnvironment() {
+    if (void* gotReal =
+            g_gotRealNodeCreateEnvironment.load(std::memory_order_acquire)) {
+        return reinterpret_cast<NodeCreateEnvironmentFn>(gotReal);
+    }
+    std::call_once(g_realNodeCreateEnvironmentOnce, []() {
+        g_realNodeCreateEnvironment =
+            reinterpret_cast<NodeCreateEnvironmentFn>(dlsym(
+                RTLD_NEXT,
+                "_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE"));
+        if (!g_realNodeCreateEnvironment) {
+            Log("WARNING: node::CreateEnvironment real symbol not found");
+        }
+    });
+    return g_realNodeCreateEnvironment;
+}
+
+static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
+    if (void* gotReal =
+            g_gotRealNodeLoadEnvironmentString.load(
+                std::memory_order_acquire)) {
+        return reinterpret_cast<NodeLoadEnvironmentStringFn>(gotReal);
+    }
+    std::call_once(g_realNodeLoadEnvironmentStringOnce, []() {
+        g_realNodeLoadEnvironmentString =
+            reinterpret_cast<NodeLoadEnvironmentStringFn>(dlsym(
+                RTLD_NEXT,
+                "_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc"));
+        if (!g_realNodeLoadEnvironmentString) {
+            Log("WARNING: node::LoadEnvironment(string) real symbol not found");
+        }
+    });
+    return g_realNodeLoadEnvironmentString;
+}
+
+static NodeLoadEnvironmentCallbackFn GetRealNodeLoadEnvironmentCallback() {
+    if (void* gotReal =
+            g_gotRealNodeLoadEnvironmentCallback.load(
+                std::memory_order_acquire)) {
+        return reinterpret_cast<NodeLoadEnvironmentCallbackFn>(gotReal);
+    }
+    std::call_once(g_realNodeLoadEnvironmentCallbackOnce, []() {
+        g_realNodeLoadEnvironmentCallback =
+            reinterpret_cast<NodeLoadEnvironmentCallbackFn>(dlsym(
+                RTLD_NEXT,
+                "_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE"));
+        if (!g_realNodeLoadEnvironmentCallback) {
+            Log("WARNING: node::LoadEnvironment(callback) real symbol not found");
+        }
+    });
+    return g_realNodeLoadEnvironmentCallback;
+}
+
+static void MaybeRunNodePostLoadTrace(void* environment,
+                                      uint64_t callbackCallIndex) {
+    if (!environment || callbackCallIndex != 1) {
+        return;
+    }
+
+    NodeLoadEnvironmentStringFn realLoadEnvironmentString =
+        GetRealNodeLoadEnvironmentString();
+    if (!realLoadEnvironmentString) {
+        g_nodePostLoadTraceFailures.fetch_add(1, std::memory_order_relaxed);
+        Log("node post-load trace skipped: LoadEnvironment(string) missing");
+        return;
+    }
+
+    g_nodePostLoadTraceAttempts.fetch_add(1, std::memory_order_relaxed);
+    void* value =
+        realLoadEnvironmentString(environment, kNodePostLoadTraceScript);
+    if (!value) {
+        g_nodePostLoadTraceFailures.fetch_add(1, std::memory_order_relaxed);
+        Log("node post-load trace returned empty env=%p", environment);
+        return;
+    }
+
+    g_nodePostLoadTraceSuccesses.fetch_add(1, std::memory_order_relaxed);
+    Log("node post-load trace returned value=%p env=%p", value, environment);
 }
 
 static NodePlatformForIsolateFn GetRealNodePlatformForIsolate() {
@@ -2030,6 +2262,66 @@ static void AppendV8StartupDataStats(napi_env env, napi_value result) {
             g_lastV8InitWithSnapshotResult.load(std::memory_order_relaxed));
 }
 
+static void AppendNodeStartupStats(napi_env env, napi_value result) {
+    SetUint32(env, result, "nodeNewContextSlots",
+              g_patchedNodeNewContextSlots.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodeNewContextCalls",
+              g_nodeNewContextCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodeNewContextNulls",
+              g_nodeNewContextNulls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeNewContextIsolate",
+              g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeNewContextTemplate",
+              g_lastNodeNewContextTemplate.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeNewContextResult",
+              g_lastNodeNewContextResult.load(std::memory_order_relaxed));
+    SetUint32(env, result, "nodeCreateEnvironmentSlots",
+              g_patchedNodeCreateEnvironmentSlots.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "nodeCreateEnvironmentCalls",
+              g_nodeCreateEnvironmentCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodeCreateEnvironmentNulls",
+              g_nodeCreateEnvironmentNulls.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeCreateEnvironmentIsolateData",
+              g_lastNodeCreateEnvironmentIsolateData.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeCreateEnvironmentContext",
+              g_lastNodeCreateEnvironmentContext.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeCreateEnvironmentResult",
+              g_lastNodeCreateEnvironmentResult.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "nodeLoadEnvironmentStringSlots",
+              g_patchedNodeLoadEnvironmentStringSlots.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "nodeLoadEnvironmentCallbackSlots",
+              g_patchedNodeLoadEnvironmentCallbackSlots.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "nodeLoadEnvironmentStringCalls",
+              g_nodeLoadEnvironmentStringCalls.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "nodeLoadEnvironmentCallbackCalls",
+              g_nodeLoadEnvironmentCallbackCalls.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "nodeLoadEnvironmentNulls",
+              g_nodeLoadEnvironmentNulls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePostLoadTraceAttempts",
+              g_nodePostLoadTraceAttempts.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePostLoadTraceSuccesses",
+              g_nodePostLoadTraceSuccesses.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePostLoadTraceFailures",
+              g_nodePostLoadTraceFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeLoadEnvironmentEnv",
+              g_lastNodeLoadEnvironmentEnv.load(std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeLoadEnvironmentSource",
+              g_lastNodeLoadEnvironmentSource.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "lastNodeLoadEnvironmentResult",
+              g_lastNodeLoadEnvironmentResult.load(
+                  std::memory_order_relaxed));
+}
+
 }  // namespace
 
 extern "C" int epoll_wait(int epfd, struct epoll_event* events, int maxevents,
@@ -2133,6 +2425,138 @@ _ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void* context) {
     }
 
     return realInitializeContext(context);
+}
+
+extern "C" void*
+_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE(
+    void* isolate, void* objectTemplate) {
+    NodeNewContextFn realNewContext = GetRealNodeNewContext();
+    if (!realNewContext) {
+        g_nodeNewContextNulls.fetch_add(1, std::memory_order_relaxed);
+        return nullptr;
+    }
+
+    const uint64_t callIndex =
+        g_nodeNewContextCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    g_lastNodeNewContextIsolate.store(reinterpret_cast<uintptr_t>(isolate),
+                                      std::memory_order_relaxed);
+    g_lastNodeNewContextTemplate.store(
+        reinterpret_cast<uintptr_t>(objectTemplate), std::memory_order_relaxed);
+
+    void* context = realNewContext(isolate, objectTemplate);
+    g_lastNodeNewContextResult.store(reinterpret_cast<uintptr_t>(context),
+                                     std::memory_order_relaxed);
+    if (!context) {
+        g_nodeNewContextNulls.fetch_add(1, std::memory_order_relaxed);
+        Log("node::NewContext returned null isolate=%p template=%p",
+            isolate, objectTemplate);
+    } else if (callIndex <= 5) {
+        Log("node::NewContext returned context=%p isolate=%p template=%p",
+            context, isolate, objectTemplate);
+    }
+    return context;
+}
+
+extern "C" void*
+_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE(
+    void* isolateData, void* context, void* args, void* execArgs, void* flags,
+    void* threadId, void* inspectorParentHandle) {
+    NodeCreateEnvironmentFn realCreateEnvironment =
+        GetRealNodeCreateEnvironment();
+    if (!realCreateEnvironment) {
+        g_nodeCreateEnvironmentNulls.fetch_add(1,
+                                               std::memory_order_relaxed);
+        return nullptr;
+    }
+
+    const uint64_t callIndex =
+        g_nodeCreateEnvironmentCalls.fetch_add(1, std::memory_order_relaxed) +
+        1;
+    g_lastNodeCreateEnvironmentIsolateData.store(
+        reinterpret_cast<uintptr_t>(isolateData), std::memory_order_relaxed);
+    g_lastNodeCreateEnvironmentContext.store(
+        reinterpret_cast<uintptr_t>(context), std::memory_order_relaxed);
+    void* environment =
+        realCreateEnvironment(isolateData, context, args, execArgs, flags,
+                              threadId, inspectorParentHandle);
+    g_lastNodeCreateEnvironmentResult.store(
+        reinterpret_cast<uintptr_t>(environment), std::memory_order_relaxed);
+    if (!environment) {
+        g_nodeCreateEnvironmentNulls.fetch_add(1,
+                                               std::memory_order_relaxed);
+        Log("node::CreateEnvironment returned null isolateData=%p context=%p",
+            isolateData, context);
+    } else if (callIndex <= 5) {
+        Log("node::CreateEnvironment returned env=%p isolateData=%p context=%p",
+            environment, isolateData, context);
+    }
+    return environment;
+}
+
+extern "C" void*
+_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
+                                                const char* source) {
+    NodeLoadEnvironmentStringFn realLoadEnvironment =
+        GetRealNodeLoadEnvironmentString();
+    if (!realLoadEnvironment) {
+        g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
+        return nullptr;
+    }
+
+    const uint64_t callIndex =
+        g_nodeLoadEnvironmentStringCalls.fetch_add(
+            1, std::memory_order_relaxed) +
+        1;
+    g_lastNodeLoadEnvironmentEnv.store(
+        reinterpret_cast<uintptr_t>(environment), std::memory_order_relaxed);
+    g_lastNodeLoadEnvironmentSource.store(
+        reinterpret_cast<uintptr_t>(source), std::memory_order_relaxed);
+    void* value = realLoadEnvironment(environment, source);
+    g_lastNodeLoadEnvironmentResult.store(reinterpret_cast<uintptr_t>(value),
+                                          std::memory_order_relaxed);
+    if (!value) {
+        g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
+        Log("node::LoadEnvironment(string) returned empty env=%p source=%p",
+            environment, source);
+    } else if (callIndex <= 5) {
+        Log("node::LoadEnvironment(string) returned value=%p env=%p source=%p",
+            value, environment, source);
+    }
+    return value;
+}
+
+extern "C" void*
+_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
+    void* environment, void* callback) {
+    NodeLoadEnvironmentCallbackFn realLoadEnvironment =
+        GetRealNodeLoadEnvironmentCallback();
+    if (!realLoadEnvironment) {
+        g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
+        return nullptr;
+    }
+
+    const uint64_t callIndex =
+        g_nodeLoadEnvironmentCallbackCalls.fetch_add(
+            1, std::memory_order_relaxed) +
+        1;
+    g_lastNodeLoadEnvironmentEnv.store(
+        reinterpret_cast<uintptr_t>(environment), std::memory_order_relaxed);
+    g_lastNodeLoadEnvironmentSource.store(
+        reinterpret_cast<uintptr_t>(callback), std::memory_order_relaxed);
+    void* value = realLoadEnvironment(environment, callback);
+    g_lastNodeLoadEnvironmentResult.store(reinterpret_cast<uintptr_t>(value),
+                                          std::memory_order_relaxed);
+    MaybeRunNodePostLoadTrace(environment, callIndex);
+    if (!value) {
+        g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
+        Log("node::LoadEnvironment(callback) returned empty env=%p callback=%p",
+            environment, callback);
+    } else if (callIndex <= 5) {
+        Log("node::LoadEnvironment(callback) returned value=%p env=%p "
+            "callback=%p",
+            value, environment, callback);
+    }
+    return value;
 }
 
 extern "C" int
@@ -2796,6 +3220,26 @@ static const PltHookTarget* FindPltHookTarget(const char* symbol) {
          reinterpret_cast<void*>(&_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE),
          &g_gotRealNodeInitializeContext,
          &g_patchedNodeInitializeContextSlots},
+        {"_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE",
+         reinterpret_cast<void*>(
+             &_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE),
+         &g_gotRealNodeNewContext,
+         &g_patchedNodeNewContextSlots},
+        {"_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE",
+         reinterpret_cast<void*>(
+             &_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE),
+         &g_gotRealNodeCreateEnvironment,
+         &g_patchedNodeCreateEnvironmentSlots},
+        {"_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc",
+         reinterpret_cast<void*>(
+             &_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc),
+         &g_gotRealNodeLoadEnvironmentString,
+         &g_patchedNodeLoadEnvironmentStringSlots},
+        {"_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE",
+         reinterpret_cast<void*>(
+             &_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE),
+         &g_gotRealNodeLoadEnvironmentCallback,
+         &g_patchedNodeLoadEnvironmentCallbackSlots},
         {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
          reinterpret_cast<void*>(
              &_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
@@ -3783,6 +4227,7 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
     SetUint64(env, result, "v8StartupFlagsEmptySkips",
               g_v8StartupFlagsEmptySkips.load(std::memory_order_relaxed));
     AppendV8StartupDataStats(env, result);
+    AppendNodeStartupStats(env, result);
     SetUint64(env, result, "snapshotNothrowNewCalls",
               g_snapshotNothrowNewCalls.load(std::memory_order_relaxed));
     SetUint64(env, result, "snapshotNothrowNewFailures",
@@ -3951,6 +4396,7 @@ static napi_value GetElectronPltHookStats(napi_env env,
     SetUint64(env, result, "v8StartupFlagsEmptySkips",
               g_v8StartupFlagsEmptySkips.load(std::memory_order_relaxed));
     AppendV8StartupDataStats(env, result);
+    AppendNodeStartupStats(env, result);
     SetUint64(env, result, "snapshotNothrowNewCalls",
               g_snapshotNothrowNewCalls.load(std::memory_order_relaxed));
     SetUint64(env, result, "snapshotNothrowNewFailures",

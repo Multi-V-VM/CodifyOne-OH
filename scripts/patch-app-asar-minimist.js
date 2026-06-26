@@ -15,6 +15,8 @@ const nativeKeymapPatchDir = path.join(patchRoot, "native-keymap");
 const vscodeSqlite3PatchDir = path.join(patchRoot, "vscode-sqlite3");
 const moduleDir = path.join(appDir, "node_modules", "minimist");
 const filesToInstall = [
+  ["package.json", path.join(appDir, "package.json")],
+  ["ohcode-entry-probe.js", path.join(appDir, "ohcode-entry-probe.js")],
   ["out/main.js", path.join(appDir, "out", "main.js")],
   [
     "out/vs/base/parts/sandbox/electron-sandbox/preload.js",

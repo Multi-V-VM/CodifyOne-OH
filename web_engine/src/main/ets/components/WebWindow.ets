@@ -22,7 +22,8 @@ import { typeNode as TypedNode, NodeController, FrameNode } from '@ohos.arkui.no
 
 const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-forceok1';
+const STARTUP_MAIN_TRACE_FILE: string = '/data/storage/el2/base/files/ohcode-main-trace.log';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-loadenvpost1';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -125,6 +126,21 @@ class WindowNodeController extends NodeController {
     LogUtil.info(TAG, 'startup status: [' + STARTUP_BUILD_STAMP + '] ' + status);
   }
 
+  private readStartupMainTraceTail(maxChars: number): string {
+    try {
+      if (!fileIo.accessSync(STARTUP_MAIN_TRACE_FILE)) {
+        return '<missing>';
+      }
+      const traceText: string = fileIo.readTextSync(STARTUP_MAIN_TRACE_FILE);
+      if (traceText.length <= maxChars) {
+        return traceText.replace(/\n/g, ' | ');
+      }
+      return traceText.substring(traceText.length - maxChars).replace(/\n/g, ' | ');
+    } catch (err) {
+      return '<read failed ' + JSON.stringify(err) + '>';
+    }
+  }
+
   makeNode(uiContext: UIContext): FrameNode | null {
     this.writeStartupStatus('makeNode');
     let node = new FrameNode(uiContext);
@@ -197,6 +213,9 @@ class WindowNodeController extends NodeController {
           return;
         }
         const hookStats = getV8PoolHook().getElectronPltHookStats();
+        if (i === 3 || i === 7 || i === 15 || i === 30) {
+          this.writeStartupStatus('main trace tail watch ' + i + ' ' + this.readStartupMainTraceTail(1800));
+        }
         this.writeStartupStatus('native startup watch ' + i + ' destroyed=' + destroyed +
           ' v8InitializeCalls=' + hookStats.v8InitializeCalls +
           ' v8InitializeFailures=' + hookStats.v8InitializeFailures +
@@ -227,13 +246,35 @@ class WindowNodeController extends NodeController {
           ' lastV8InitWithSnapshotStartupLength=' + hookStats.lastV8InitWithSnapshotStartupLength +
           ' lastV8InitWithSnapshotCanRehash=' + hookStats.lastV8InitWithSnapshotCanRehash +
           ' lastV8InitWithSnapshotResult=' + hookStats.lastV8InitWithSnapshotResult +
+          ' nodeNewContextSlots=' + hookStats.nodeNewContextSlots +
+          ' nodeNewContextCalls=' + hookStats.nodeNewContextCalls +
+          ' nodeNewContextNulls=' + hookStats.nodeNewContextNulls +
+          ' lastNodeNewContextResult=' + hookStats.lastNodeNewContextResult +
+          ' nodeInitializeContextCalls=' + hookStats.nodeInitializeContextCalls +
+          ' nodeCreateEnvironmentSlots=' + hookStats.nodeCreateEnvironmentSlots +
+          ' nodeCreateEnvironmentCalls=' + hookStats.nodeCreateEnvironmentCalls +
+          ' nodeCreateEnvironmentNulls=' + hookStats.nodeCreateEnvironmentNulls +
+          ' lastNodeCreateEnvironmentResult=' + hookStats.lastNodeCreateEnvironmentResult +
+          ' nodeLoadEnvironmentStringCalls=' + hookStats.nodeLoadEnvironmentStringCalls +
+          ' nodeLoadEnvironmentCallbackCalls=' + hookStats.nodeLoadEnvironmentCallbackCalls +
+          ' nodeLoadEnvironmentNulls=' + hookStats.nodeLoadEnvironmentNulls +
+          ' nodePostLoadTraceAttempts=' + hookStats.nodePostLoadTraceAttempts +
+          ' nodePostLoadTraceSuccesses=' + hookStats.nodePostLoadTraceSuccesses +
+          ' nodePostLoadTraceFailures=' + hookStats.nodePostLoadTraceFailures +
+          ' lastNodeLoadEnvironmentResult=' + hookStats.lastNodeLoadEnvironmentResult +
+          ' nodePlatformForIsolateCalls=' + hookStats.nodePlatformForIsolateCalls +
+          ' nodePlatformLookupHits=' + hookStats.nodePlatformLookupHits +
+          ' nodePlatformLookupMisses=' + hookStats.nodePlatformLookupMisses +
+          ' nodePlatformLookupFakeFallbacks=' + hookStats.nodePlatformLookupFakeFallbacks +
           ' snapshotBlobClears=' + hookStats.snapshotBlobClears +
           ' lastSnapshotBlobAddress=' + hookStats.lastSnapshotBlobAddress +
           ' snapshotDecompressCalls=' + hookStats.snapshotDecompressCalls +
           ' lastSnapshotCompressedSize=' + hookStats.lastSnapshotCompressedSize +
           ' lastSnapshotDecompressedSize=' + hookStats.lastSnapshotDecompressedSize +
           ' snapshotMmapFallbacks=' + hookStats.snapshotMmapFallbacks +
-          ' adapterChildProcessCalls=' + hookStats.adapterChildProcessCalls);
+          ' adapterChildProcessCalls=' + hookStats.adapterChildProcessCalls +
+          ' adapterChildProcessPassThrough=' + hookStats.adapterChildProcessPassThrough +
+          ' adapterCrashpadBlocks=' + hookStats.adapterCrashpadBlocks);
       }, i * 1000);
     }
   }
