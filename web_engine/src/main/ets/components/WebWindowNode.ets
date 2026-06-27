@@ -23,7 +23,7 @@ interface ComponentConfig {
 }
 
 const TAG: string = 'WebWindowNode';
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch4';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch10';
 const ELECTRON_APP_PATH: string = '--app-path=/data/storage/el1/bundle/electron/resources/resfile/resources/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +

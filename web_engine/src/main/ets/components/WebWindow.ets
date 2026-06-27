@@ -27,7 +27,7 @@ const STARTUP_MAIN_TRACE_FILES: string[] = [
   '/data/storage/el1/base/files/ohcode-main-trace.log',
   '/tmp/ohcode-main-trace.log'
 ];
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch4';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch10';
 const ELECTRON_APP_PATH: string = '--app-path=/data/storage/el1/bundle/electron/resources/resfile/resources/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
@@ -276,20 +276,38 @@ class WindowNodeController extends NodeController {
           ' nodePostLoadTraceAttempts=' + hookStats.nodePostLoadTraceAttempts +
           ' nodePostLoadTraceSuccesses=' + hookStats.nodePostLoadTraceSuccesses +
           ' nodePostLoadTraceFailures=' + hookStats.nodePostLoadTraceFailures +
+          ' nodePostLoadTraceResultReads=' + hookStats.nodePostLoadTraceResultReads +
+          ' nodePostLoadTraceResultReadFailures=' +
+            hookStats.nodePostLoadTraceResultReadFailures +
+          ' lastNodePostLoadTraceResult=' + hookStats.lastNodePostLoadTraceResult +
+          ' postLoadEnvResult=' + hookStats.postLoadEnvResult +
+          ' entryProbeEnvResult=' + hookStats.entryProbeEnvResult +
           ' lastNodeLoadEnvironmentPreload=' + hookStats.lastNodeLoadEnvironmentPreload +
           ' lastNodeLoadEnvironmentResult=' + hookStats.lastNodeLoadEnvironmentResult +
           ' v8ObjectSetPrivateSlots=' + hookStats.v8ObjectSetPrivateSlots +
           ' v8ObjectSetPrivateCalls=' + hookStats.v8ObjectSetPrivateCalls +
+          ' v8ObjectDefineOwnPropertySlots=' + hookStats.v8ObjectDefineOwnPropertySlots +
+          ' v8ObjectDefineOwnPropertyCalls=' + hookStats.v8ObjectDefineOwnPropertyCalls +
+          ' v8ObjectDefineOwnPropertyNameReadFailures=' +
+            hookStats.v8ObjectDefineOwnPropertyNameReadFailures +
+          ' v8DefineResourcesPathPatches=' + hookStats.v8DefineResourcesPathPatches +
+          ' lastDefinedResourcesPath=' + hookStats.lastDefinedResourcesPath +
+          ' v8ObjectDefineOwnPropertyNames=' + hookStats.v8ObjectDefineOwnPropertyNames +
           ' browserAppSearchPathPatchAttempts=' + hookStats.browserAppSearchPathPatchAttempts +
           ' browserAppSearchPathPatches=' + hookStats.browserAppSearchPathPatches +
           ' browserAppSearchPathPatchFailures=' + hookStats.browserAppSearchPathPatchFailures +
           ' browserAppSearchPathAsarOnlyPatches=' + hookStats.browserAppSearchPathAsarOnlyPatches +
+          ' browserAppSearchPathAsarOnlyFallbackPatches=' +
+            hookStats.browserAppSearchPathAsarOnlyFallbackPatches +
           ' browserAppSearchPathNameReadFailures=' + hookStats.browserAppSearchPathNameReadFailures +
+          ' v8ObjectSetPrivateNames=' + hookStats.v8ObjectSetPrivateNames +
           ' entryPathProbeSlots=' + hookStats.entryPathProbeOpenSlots + '/' +
             hookStats.entryPathProbeFopenSlots + '/' +
             hookStats.entryPathProbeAccessSlots + '/' +
             hookStats.entryPathProbeStatSlots + '/' +
             hookStats.entryPathProbeLstatSlots +
+          ' ohcodeWriteSlots=' + hookStats.ohcodeWriteSlots + '/' +
+            hookStats.ohcodeWritevSlots +
           ' entryPathProbeHits=' + hookStats.entryPathProbeHits +
           ' entryPathProbePackageJsonHits=' + hookStats.entryPathProbePackageJsonHits +
           ' entryPathProbeEntryJsHits=' + hookStats.entryPathProbeEntryJsHits +
@@ -298,6 +316,9 @@ class WindowNodeController extends NodeController {
           ' entryPathProbeNullSlotPatches=' + hookStats.entryPathProbeNullSlotPatches +
           ' lastEntryPathProbeOp=' + hookStats.lastEntryPathProbeOp +
           ' lastEntryPathProbePath=' + hookStats.lastEntryPathProbePath +
+          ' ohcodeWriteTraceCalls=' + hookStats.ohcodeWriteTraceCalls +
+          ' ohcodeWriteTraceBytes=' + hookStats.ohcodeWriteTraceBytes +
+          ' lastOhcodeWriteTrace=' + hookStats.lastOhcodeWriteTrace +
           ' nodePlatformForIsolateCalls=' + hookStats.nodePlatformForIsolateCalls +
           ' nodePlatformLookupHits=' + hookStats.nodePlatformLookupHits +
           ' nodePlatformLookupMisses=' + hookStats.nodePlatformLookupMisses +

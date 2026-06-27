@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <utility>
 #include <vector>
 #include <unistd.h>
@@ -49,6 +50,11 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
 extern "C" uint32_t
 _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE(
     void* object, void* context, void* key, void* value);
+extern "C" uint32_t
+_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE(
+    void* object, void* context, void* key, void* value, int attributes);
+extern "C" ssize_t write(int fd, const void* buffer, size_t count);
+extern "C" ssize_t writev(int fd, const struct iovec* iov, int iovcnt);
 
 #ifndef R_AARCH64_GLOB_DAT
 #define R_AARCH64_GLOB_DAT 1025
@@ -122,7 +128,7 @@ constexpr const char* kDefaultV8StartupFlags =
     "--max-old-space-size=512 --max-semi-space-size=16";
 constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
-  const STAMP = "diag-20260626-appsearch4";
+  const STAMP = "diag-20260626-appsearch10";
   const TRACE_PATHS = [
     "/data/storage/el2/base/files/ohcode-main-trace.log",
     "/data/storage/el1/base/files/ohcode-main-trace.log",
@@ -138,7 +144,41 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
   function errorText(err) {
     return String((err && (err.stack || err.message)) || err);
   }
+  let markIndex = 0;
+  const resultParts = [];
+  function remember(phase, detail) {
+    try {
+      let text = `${phase}`;
+      if (detail !== undefined) {
+        let detailText = String(detail);
+        if (detailText.length > 360) {
+          detailText = detailText.slice(0, 360);
+        }
+        text += ` ${detailText}`;
+      }
+      resultParts.push(text);
+      if (resultParts.length > 32) {
+        resultParts.shift();
+      }
+      try {
+        if (process && process.env) {
+          process.env.OHCODE_POSTLOAD_RESULT =
+            resultParts.join(" || ").slice(0, 1800);
+        }
+      } catch (_) {}
+    } catch (_) {}
+  }
+  function mark(phase) {
+    try {
+      const v8Util = process._linkedBinding("electron_common_v8_util");
+      if (v8Util && typeof v8Util.setHiddenValue === "function") {
+        const key = `ohcodePostLoad:${++markIndex}:${phase}`.slice(0, 88);
+        v8Util.setHiddenValue(global, key, true);
+      }
+    } catch (_) {}
+  }
   function trace(phase, detail) {
+    remember(phase, detail);
     const line =
       `${Date.now()} [${STAMP}] [loadenv-post] ${phase}${detail === undefined ? "" : " " + detail}`;
     try {
@@ -175,11 +215,14 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
       } catch (_) {}
     }
   }
+  mark("script-start");
+  trace("script-start");
   try {
     const fs = require("fs");
     const path = require("path");
+    mark("core-ready");
     const enableRescue =
-      !!(process.env && process.env.OHCODE_POSTLOAD_RESCUE === "1");
+      !(process.env && process.env.OHCODE_POSTLOAD_RESCUE === "0");
     let hidden = {};
     try {
       const v8Util = process._linkedBinding("electron_common_v8_util");
@@ -232,6 +275,7 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
         exists
       })
     );
+    mark("state-traced");
 
     const appDirs = [
       process.resourcesPath
@@ -261,16 +305,30 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
       );
     }
     if (!enableRescue) {
+      mark("rescue-disabled");
       trace("rescue disabled", stringify(candidates));
+    } else if (
+      globalThis.__ohcodeEntryProbeLoaded ||
+      process.__ohcodeEntryProbeLoaded
+    ) {
+      mark("rescue-already");
+      trace("rescue skipped already loaded", stringify(candidates));
     } else {
       const candidate = candidates.find((item) => item.entryExists);
       if (!candidate) {
+        mark("rescue-missing");
         trace("rescue missing", stringify(candidates));
       } else {
-        const schedule =
-          typeof setImmediate === "function" ? setImmediate : setTimeout;
-        trace("rescue scheduled", candidate.entry);
-        schedule(() => {
+        function runRescue(mode) {
+          if (
+            globalThis.__ohcodeEntryProbeLoaded ||
+            process.__ohcodeEntryProbeLoaded
+          ) {
+            mark(`${mode}-already`);
+            trace(`rescue ${mode} skipped already loaded`, candidate.entry);
+            return true;
+          }
+          mark(`${mode}-start`);
           try {
             const electron = require("electron");
             if (
@@ -279,23 +337,42 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
               typeof electron.app.setAppPath === "function"
             ) {
               electron.app.setAppPath(candidate.appDir);
-              trace("rescue setAppPath", candidate.appDir);
+              mark(`${mode}-app-path`);
+              trace(`rescue ${mode} setAppPath`, candidate.appDir);
             }
           } catch (err) {
-            trace("rescue setAppPath failed", errorText(err));
+            mark(`${mode}-app-path-fail`);
+            trace(`rescue ${mode} setAppPath failed`, errorText(err));
           }
           try {
             require(candidate.entry);
-            trace("rescue loaded", candidate.entry);
+            mark(`${mode}-loaded`);
+            trace(`rescue ${mode} loaded`, candidate.entry);
+            return true;
           } catch (err) {
-            trace("rescue load failed", errorText(err));
+            mark(`${mode}-load-fail`);
+            trace(`rescue ${mode} load failed`, errorText(err));
+            return false;
           }
-        }, 0);
+        }
+        mark("rescue-candidate");
+        trace("rescue candidate selected", candidate.entry);
+        if (!runRescue("sync")) {
+          const schedule =
+            typeof setImmediate === "function" ? setImmediate : setTimeout;
+          mark("async-scheduled");
+          trace("rescue async scheduled", candidate.entry);
+          schedule(() => {
+            runRescue("async");
+          }, 0);
+        }
       }
     }
   } catch (err) {
+    mark("script-error");
     trace("error", errorText(err));
   }
+  return resultParts.join(" || ").slice(0, 1800);
 })();
 )OHCODE_JS";
 constexpr size_t kV8CreateParamsSlotDumpCount = 32;
@@ -358,6 +435,8 @@ using AdapterStartChildProcess2Fn =
 using AdapterStartChildProcess3Fn =
     int (*)(void*, const AdapterArgVector&, const AdapterFdVector&,
             const std::string&);
+using WriteFn = ssize_t (*)(int, const void*, size_t);
+using WritevFn = ssize_t (*)(int, const struct iovec*, int);
 
 struct V8OwnedByteVector {
     void* vtable;
@@ -377,6 +456,8 @@ using NodeCreateEnvironmentFn =
 using NodeLoadEnvironmentStringFn = void* (*)(void*, const char*);
 using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*, void*);
 using V8ObjectSetPrivateFn = uint32_t (*)(void*, void*, void*, void*);
+using V8ObjectDefineOwnPropertyFn =
+    uint32_t (*)(void*, void*, void*, void*, int);
 using OpenFn = int (*)(const char*, int, ...);
 using FopenFn = FILE* (*)(const char*, const char*);
 using AccessFn = int (*)(const char*, int);
@@ -527,11 +608,14 @@ static std::once_flag g_realNodeCreateEnvironmentOnce;
 static std::once_flag g_realNodeLoadEnvironmentStringOnce;
 static std::once_flag g_realNodeLoadEnvironmentCallbackOnce;
 static std::once_flag g_realV8ObjectSetPrivateOnce;
+static std::once_flag g_realV8ObjectDefineOwnPropertyOnce;
 static std::once_flag g_realOpenOnce;
 static std::once_flag g_realFopenOnce;
 static std::once_flag g_realAccessOnce;
 static std::once_flag g_realStatOnce;
 static std::once_flag g_realLstatOnce;
+static std::once_flag g_realWriteOnce;
+static std::once_flag g_realWritevOnce;
 static std::once_flag g_v8AppSearchPathSymbolsOnce;
 static std::once_flag g_realAdapterStartGpuProcessOnce;
 static std::once_flag g_realAdapterStartLegacyChildProcessOnce;
@@ -552,11 +636,14 @@ static NodeLoadEnvironmentStringFn g_realNodeLoadEnvironmentString = nullptr;
 static NodeLoadEnvironmentCallbackFn g_realNodeLoadEnvironmentCallback =
     nullptr;
 static V8ObjectSetPrivateFn g_realV8ObjectSetPrivate = nullptr;
+static V8ObjectDefineOwnPropertyFn g_realV8ObjectDefineOwnProperty = nullptr;
 static OpenFn g_realOpen = nullptr;
 static FopenFn g_realFopen = nullptr;
 static AccessFn g_realAccess = nullptr;
 static StatFn g_realStat = nullptr;
 static StatFn g_realLstat = nullptr;
+static WriteFn g_realWrite = nullptr;
+static WritevFn g_realWritev = nullptr;
 static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
 static V8PrivateNameFn g_v8PrivateName = nullptr;
 static V8ValueIsStringFn g_v8ValueIsString = nullptr;
@@ -596,11 +683,14 @@ static std::atomic<void*> g_gotRealNodeCreateEnvironment{nullptr};
 static std::atomic<void*> g_gotRealNodeLoadEnvironmentString{nullptr};
 static std::atomic<void*> g_gotRealNodeLoadEnvironmentCallback{nullptr};
 static std::atomic<void*> g_gotRealV8ObjectSetPrivate{nullptr};
+static std::atomic<void*> g_gotRealV8ObjectDefineOwnProperty{nullptr};
 static std::atomic<void*> g_gotRealOpen{nullptr};
 static std::atomic<void*> g_gotRealFopen{nullptr};
 static std::atomic<void*> g_gotRealAccess{nullptr};
 static std::atomic<void*> g_gotRealStat{nullptr};
 static std::atomic<void*> g_gotRealLstat{nullptr};
+static std::atomic<void*> g_gotRealWrite{nullptr};
+static std::atomic<void*> g_gotRealWritev{nullptr};
 static std::atomic<void*> g_nodePlatformForIsolateInlineTrampoline{nullptr};
 static std::atomic<void*> g_gotRealAdapterStartGpuProcess{nullptr};
 static std::atomic<void*> g_gotRealAdapterStartLegacyChildProcess{nullptr};
@@ -639,18 +729,28 @@ static std::atomic<uint64_t> g_nodeLoadEnvironmentNulls{0};
 static std::atomic<uint64_t> g_nodePostLoadTraceAttempts{0};
 static std::atomic<uint64_t> g_nodePostLoadTraceSuccesses{0};
 static std::atomic<uint64_t> g_nodePostLoadTraceFailures{0};
+static std::atomic<uint64_t> g_nodePostLoadTraceResultReads{0};
+static std::atomic<uint64_t> g_nodePostLoadTraceResultReadFailures{0};
 static std::atomic<uint64_t> g_v8ObjectSetPrivateCalls{0};
+static std::atomic<uint64_t> g_v8ObjectDefineOwnPropertyCalls{0};
+static std::atomic<uint64_t> g_v8ObjectDefineOwnPropertyNameReadFailures{0};
+static std::atomic<uint64_t> g_v8DefineResourcesPathPatches{0};
 static std::atomic<uint64_t> g_browserAppSearchPathPatchAttempts{0};
 static std::atomic<uint64_t> g_browserAppSearchPathPatches{0};
 static std::atomic<uint64_t> g_browserAppSearchPathPatchFailures{0};
 static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyPatches{0};
+static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyFallbackPatches{0};
 static std::atomic<uint64_t> g_browserAppSearchPathNameReadFailures{0};
+static std::atomic<uint32_t> g_v8ObjectSetPrivateNameTraceCount{0};
+static std::atomic<uint32_t> g_v8ObjectDefineOwnPropertyNameTraceCount{0};
 static std::atomic<uint64_t> g_entryPathProbeHits{0};
 static std::atomic<uint64_t> g_entryPathProbePackageJsonHits{0};
 static std::atomic<uint64_t> g_entryPathProbeEntryJsHits{0};
 static std::atomic<uint64_t> g_entryPathProbeOutMainHits{0};
 static std::atomic<uint64_t> g_entryPathProbeElectronMainHits{0};
 static std::atomic<uint64_t> g_entryPathProbeNullSlotPatches{0};
+static std::atomic<uint64_t> g_ohcodeWriteTraceCalls{0};
+static std::atomic<uint64_t> g_ohcodeWriteTraceBytes{0};
 static std::atomic<uint64_t> g_nodeInitializeContextInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformForIsolateInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformRegisterAttempts{0};
@@ -713,11 +813,14 @@ static std::atomic<uint32_t> g_patchedNodeCreateEnvironmentSlots{0};
 static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentStringSlots{0};
 static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentCallbackSlots{0};
 static std::atomic<uint32_t> g_patchedV8ObjectSetPrivateSlots{0};
+static std::atomic<uint32_t> g_patchedV8ObjectDefineOwnPropertySlots{0};
 static std::atomic<uint32_t> g_patchedOpenSlots{0};
 static std::atomic<uint32_t> g_patchedFopenSlots{0};
 static std::atomic<uint32_t> g_patchedAccessSlots{0};
 static std::atomic<uint32_t> g_patchedStatSlots{0};
 static std::atomic<uint32_t> g_patchedLstatSlots{0};
+static std::atomic<uint32_t> g_patchedWriteSlots{0};
+static std::atomic<uint32_t> g_patchedWritevSlots{0};
 static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
 static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
 static std::atomic<uint32_t> g_patchedAdapterStartGpuProcessSlots{0};
@@ -729,6 +832,16 @@ static thread_local bool g_insideNodePlatformForIsolateHook = false;
 static std::mutex g_entryPathProbeMutex;
 static std::string g_lastEntryPathProbeOp;
 static std::string g_lastEntryPathProbePath;
+static std::mutex g_ohcodeWriteTraceMutex;
+static std::string g_lastOhcodeWriteTrace;
+static std::mutex g_nodePostLoadTraceResultMutex;
+static std::string g_lastNodePostLoadTraceResult;
+static std::mutex g_v8ObjectSetPrivateTraceMutex;
+static std::string g_v8ObjectSetPrivateNames;
+static std::mutex g_v8ObjectDefineOwnPropertyTraceMutex;
+static std::string g_v8ObjectDefineOwnPropertyNames;
+static std::mutex g_resourcesPathTraceMutex;
+static std::string g_lastDefinedResourcesPath;
 
 // Logging
 void Log(const char* fmt, ...) {
@@ -1166,6 +1279,25 @@ static V8ObjectSetPrivateFn GetRealV8ObjectSetPrivate() {
     return g_realV8ObjectSetPrivate;
 }
 
+static V8ObjectDefineOwnPropertyFn GetRealV8ObjectDefineOwnProperty() {
+    if (void* gotReal = g_gotRealV8ObjectDefineOwnProperty.load(
+            std::memory_order_acquire)) {
+        return reinterpret_cast<V8ObjectDefineOwnPropertyFn>(gotReal);
+    }
+    std::call_once(g_realV8ObjectDefineOwnPropertyOnce, []() {
+        g_realV8ObjectDefineOwnProperty =
+            reinterpret_cast<V8ObjectDefineOwnPropertyFn>(
+                ResolveElectronExport(
+                    "_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE",
+                    reinterpret_cast<void*>(
+                        &_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE)));
+        if (!g_realV8ObjectDefineOwnProperty) {
+            Log("WARNING: v8::Object::DefineOwnProperty real symbol not found");
+        }
+    });
+    return g_realV8ObjectDefineOwnProperty;
+}
+
 static void ResolveV8AppSearchPathSymbols() {
     if (!g_v8ContextGetIsolate) {
         g_v8ContextGetIsolate = reinterpret_cast<V8ContextGetIsolateFn>(
@@ -1369,6 +1501,32 @@ static StatFn GetRealLstat() {
     return g_realLstat;
 }
 
+static WriteFn GetRealWrite() {
+    if (void* gotReal = g_gotRealWrite.load(std::memory_order_acquire)) {
+        return reinterpret_cast<WriteFn>(gotReal);
+    }
+    std::call_once(g_realWriteOnce, []() {
+        g_realWrite = reinterpret_cast<WriteFn>(dlsym(RTLD_NEXT, "write"));
+        if (!g_realWrite) {
+            Log("WARNING: write real symbol not found");
+        }
+    });
+    return g_realWrite;
+}
+
+static WritevFn GetRealWritev() {
+    if (void* gotReal = g_gotRealWritev.load(std::memory_order_acquire)) {
+        return reinterpret_cast<WritevFn>(gotReal);
+    }
+    std::call_once(g_realWritevOnce, []() {
+        g_realWritev = reinterpret_cast<WritevFn>(dlsym(RTLD_NEXT, "writev"));
+        if (!g_realWritev) {
+            Log("WARNING: writev real symbol not found");
+        }
+    });
+    return g_realWritev;
+}
+
 static bool PathContains(const char* path, const char* needle) {
     return path && needle && strstr(path, needle) != nullptr;
 }
@@ -1425,6 +1583,137 @@ static std::string GetLastEntryPathProbeOp() {
 static std::string GetLastEntryPathProbePath() {
     std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
     return g_lastEntryPathProbePath;
+}
+
+static bool BufferContains(const char* data, size_t size,
+                           const char* needle) {
+    if (!data || !needle) {
+        return false;
+    }
+    const size_t needleSize = strlen(needle);
+    if (needleSize == 0 || size < needleSize) {
+        return false;
+    }
+    for (size_t i = 0; i + needleSize <= size; ++i) {
+        if (memcmp(data + i, needle, needleSize) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void CaptureOhcodeWriteTrace(const void* buffer, size_t count) {
+    if (!buffer || count == 0) {
+        return;
+    }
+    const char* data = reinterpret_cast<const char*>(buffer);
+    if (!BufferContains(data, count, "[OHcode]")) {
+        return;
+    }
+
+    size_t start = 0;
+    for (; start < count; ++start) {
+        if (start + 8 <= count && memcmp(data + start, "[OHcode]", 8) == 0) {
+            break;
+        }
+    }
+    if (start >= count) {
+        start = 0;
+    }
+
+    size_t end = start;
+    while (end < count && data[end] != '\n' && data[end] != '\r') {
+        ++end;
+    }
+    if (end <= start) {
+        end = count;
+    }
+    if (end - start > 768) {
+        end = start + 768;
+    }
+
+    std::string line(data + start, data + end);
+    for (char& ch : line) {
+        if (ch == '\n' || ch == '\r' || ch == '\t') {
+            ch = ' ';
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_ohcodeWriteTraceMutex);
+        g_lastOhcodeWriteTrace = std::move(line);
+    }
+    g_ohcodeWriteTraceCalls.fetch_add(1, std::memory_order_relaxed);
+    g_ohcodeWriteTraceBytes.fetch_add(count, std::memory_order_relaxed);
+}
+
+static std::string GetLastOhcodeWriteTrace() {
+    std::lock_guard<std::mutex> lock(g_ohcodeWriteTraceMutex);
+    return g_lastOhcodeWriteTrace;
+}
+
+static bool ReadV8StringValue(void* context, void* value, char* buffer,
+                              size_t bufferSize) {
+    if (!context || !value || !buffer || bufferSize == 0) {
+        return false;
+    }
+    std::call_once(g_v8AppSearchPathSymbolsOnce,
+                   ResolveV8AppSearchPathSymbols);
+    if (!g_v8ContextGetIsolate || !g_v8ValueIsString ||
+        !g_v8StringWriteUtf8) {
+        return false;
+    }
+
+    void* isolate = g_v8ContextGetIsolate(context);
+    if (!isolate || !g_v8ValueIsString(value)) {
+        return false;
+    }
+
+    buffer[0] = '\0';
+    int charsWritten = 0;
+    const int bytesWritten = g_v8StringWriteUtf8(
+        value, isolate, buffer, static_cast<int>(bufferSize - 1),
+        &charsWritten, 0);
+    if (bytesWritten <= 0) {
+        buffer[0] = '\0';
+        return false;
+    }
+    const size_t clamped =
+        static_cast<size_t>(bytesWritten) < bufferSize
+            ? static_cast<size_t>(bytesWritten)
+            : bufferSize - 1;
+    buffer[clamped] = '\0';
+    return true;
+}
+
+static void RecordNodePostLoadTraceResult(void* value) {
+    void* context = reinterpret_cast<void*>(
+        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+    if (!context) {
+        context = reinterpret_cast<void*>(
+            g_lastNodeNewContextResult.load(std::memory_order_relaxed));
+    }
+
+    char result[2048];
+    if (ReadV8StringValue(context, value, result, sizeof(result))) {
+        {
+            std::lock_guard<std::mutex> lock(
+                g_nodePostLoadTraceResultMutex);
+            g_lastNodePostLoadTraceResult = result;
+        }
+        g_nodePostLoadTraceResultReads.fetch_add(
+            1, std::memory_order_relaxed);
+        Log("node post-load trace result=%s", result);
+    } else {
+        g_nodePostLoadTraceResultReadFailures.fetch_add(
+            1, std::memory_order_relaxed);
+        Log("node post-load trace result unreadable value=%p context=%p",
+            value, context);
+    }
+}
+
+static std::string GetLastNodePostLoadTraceResult() {
+    std::lock_guard<std::mutex> lock(g_nodePostLoadTraceResultMutex);
+    return g_lastNodePostLoadTraceResult;
 }
 
 static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
@@ -1488,6 +1777,7 @@ static void MaybeRunNodePostLoadTrace(void* environment,
     }
 
     g_nodePostLoadTraceSuccesses.fetch_add(1, std::memory_order_relaxed);
+    RecordNodePostLoadTraceResult(value);
     Log("node post-load trace returned value=%p env=%p", value, environment);
 }
 
@@ -1614,6 +1904,110 @@ static void* ResolveElectronOffset(uintptr_t offset) {
     ElectronOffsetLookup lookup = {offset, 0};
     dl_iterate_phdr(ResolveElectronOffsetCallback, &lookup);
     return reinterpret_cast<void*>(lookup.address);
+}
+
+static uintptr_t GetElectronCallerOffset(void* raw_return_address) {
+    if (!raw_return_address) {
+        return 0;
+    }
+
+    void* extracted = __builtin_extract_return_addr(raw_return_address);
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase ||
+        !strstr(info.dli_fname, "libelectron.so")) {
+        return 0;
+    }
+    return reinterpret_cast<uintptr_t>(extracted) -
+           reinterpret_cast<uintptr_t>(info.dli_fbase);
+}
+
+static void TraceV8ObjectSetPrivateName(const char* privateName,
+                                        uintptr_t callerOffset) {
+    const uint32_t index = g_v8ObjectSetPrivateNameTraceCount.fetch_add(
+                               1, std::memory_order_relaxed) +
+                           1;
+    if (index > 16) {
+        return;
+    }
+
+    char item[192];
+    snprintf(item, sizeof(item), "%u:%s@0x%llx", index,
+             privateName ? privateName : "<null>",
+             static_cast<unsigned long long>(callerOffset));
+    {
+        std::lock_guard<std::mutex> lock(g_v8ObjectSetPrivateTraceMutex);
+        if (!g_v8ObjectSetPrivateNames.empty()) {
+            g_v8ObjectSetPrivateNames += ";";
+        }
+        g_v8ObjectSetPrivateNames += item;
+    }
+
+    if (index <= 8) {
+        Log("v8::Object::SetPrivate key[%u]=%s caller=0x%llx", index,
+            privateName ? privateName : "<null>",
+            static_cast<unsigned long long>(callerOffset));
+    }
+}
+
+static std::string GetV8ObjectSetPrivateNames() {
+    std::lock_guard<std::mutex> lock(g_v8ObjectSetPrivateTraceMutex);
+    return g_v8ObjectSetPrivateNames;
+}
+
+static void TraceV8ObjectDefineOwnPropertyName(const char* name,
+                                               const char* value,
+                                               int attributes,
+                                               uintptr_t callerOffset) {
+    const uint32_t index =
+        g_v8ObjectDefineOwnPropertyNameTraceCount.fetch_add(
+            1, std::memory_order_relaxed) +
+        1;
+    if (index > 24) {
+        return;
+    }
+
+    char safeValue[160];
+    if (value && value[0] != '\0') {
+        snprintf(safeValue, sizeof(safeValue), "=%s", value);
+    } else {
+        safeValue[0] = '\0';
+    }
+
+    char item[320];
+    snprintf(item, sizeof(item), "%u:%s%s attr=%d@0x%llx", index,
+             name ? name : "<null>", safeValue, attributes,
+             static_cast<unsigned long long>(callerOffset));
+    {
+        std::lock_guard<std::mutex> lock(
+            g_v8ObjectDefineOwnPropertyTraceMutex);
+        if (!g_v8ObjectDefineOwnPropertyNames.empty()) {
+            g_v8ObjectDefineOwnPropertyNames += ";";
+        }
+        g_v8ObjectDefineOwnPropertyNames += item;
+    }
+
+    if (index <= 12) {
+        Log("v8::Object::DefineOwnProperty key[%u]=%s%s attr=%d caller=0x%llx",
+            index, name ? name : "<null>", safeValue, attributes,
+            static_cast<unsigned long long>(callerOffset));
+    }
+}
+
+static std::string GetV8ObjectDefineOwnPropertyNames() {
+    std::lock_guard<std::mutex> lock(
+        g_v8ObjectDefineOwnPropertyTraceMutex);
+    return g_v8ObjectDefineOwnPropertyNames;
+}
+
+static void RecordDefinedResourcesPath(const char* path) {
+    std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
+    g_lastDefinedResourcesPath = path ? path : "";
+}
+
+static std::string GetLastDefinedResourcesPath() {
+    std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
+    return g_lastDefinedResourcesPath;
 }
 
 static void ResolveNodePlatformHookSymbols() {
@@ -2652,6 +3046,18 @@ static void SetString(napi_env env, napi_value object, const char* key,
     napi_set_named_property(env, object, key, jsValue);
 }
 
+static std::string GetClampedEnvString(const char* name) {
+    const char* value = name ? getenv(name) : nullptr;
+    if (!value) {
+        return "";
+    }
+    std::string result(value);
+    if (result.size() > 1800) {
+        result.resize(1800);
+    }
+    return result;
+}
+
 static void AppendV8StartupDataStats(napi_env env, napi_value result) {
     SetUint64(env, result, "v8SetSnapshotDataBlobCalls",
               g_v8SetSnapshotDataBlobCalls.load(std::memory_order_relaxed));
@@ -2796,6 +3202,18 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
               g_nodePostLoadTraceSuccesses.load(std::memory_order_relaxed));
     SetUint64(env, result, "nodePostLoadTraceFailures",
               g_nodePostLoadTraceFailures.load(std::memory_order_relaxed));
+    SetUint64(env, result, "nodePostLoadTraceResultReads",
+              g_nodePostLoadTraceResultReads.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "nodePostLoadTraceResultReadFailures",
+              g_nodePostLoadTraceResultReadFailures.load(
+                  std::memory_order_relaxed));
+    SetString(env, result, "lastNodePostLoadTraceResult",
+              GetLastNodePostLoadTraceResult());
+    SetString(env, result, "postLoadEnvResult",
+              GetClampedEnvString("OHCODE_POSTLOAD_RESULT"));
+    SetString(env, result, "entryProbeEnvResult",
+              GetClampedEnvString("OHCODE_ENTRY_PROBE_RESULT"));
     SetUint64(env, result, "lastNodeLoadEnvironmentEnv",
               g_lastNodeLoadEnvironmentEnv.load(std::memory_order_relaxed));
     SetUint64(env, result, "lastNodeLoadEnvironmentSource",
@@ -2812,6 +3230,22 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
                   std::memory_order_relaxed));
     SetUint64(env, result, "v8ObjectSetPrivateCalls",
               g_v8ObjectSetPrivateCalls.load(std::memory_order_relaxed));
+    SetUint32(env, result, "v8ObjectDefineOwnPropertySlots",
+              g_patchedV8ObjectDefineOwnPropertySlots.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "v8ObjectDefineOwnPropertyCalls",
+              g_v8ObjectDefineOwnPropertyCalls.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "v8ObjectDefineOwnPropertyNameReadFailures",
+              g_v8ObjectDefineOwnPropertyNameReadFailures.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "v8DefineResourcesPathPatches",
+              g_v8DefineResourcesPathPatches.load(
+                  std::memory_order_relaxed));
+    SetString(env, result, "v8ObjectDefineOwnPropertyNames",
+              GetV8ObjectDefineOwnPropertyNames());
+    SetString(env, result, "lastDefinedResourcesPath",
+              GetLastDefinedResourcesPath());
     SetUint64(env, result, "browserAppSearchPathPatchAttempts",
               g_browserAppSearchPathPatchAttempts.load(
                   std::memory_order_relaxed));
@@ -2823,9 +3257,14 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
     SetUint64(env, result, "browserAppSearchPathAsarOnlyPatches",
               g_browserAppSearchPathAsarOnlyPatches.load(
                   std::memory_order_relaxed));
+    SetUint64(env, result, "browserAppSearchPathAsarOnlyFallbackPatches",
+              g_browserAppSearchPathAsarOnlyFallbackPatches.load(
+                  std::memory_order_relaxed));
     SetUint64(env, result, "browserAppSearchPathNameReadFailures",
               g_browserAppSearchPathNameReadFailures.load(
                   std::memory_order_relaxed));
+    SetString(env, result, "v8ObjectSetPrivateNames",
+              GetV8ObjectSetPrivateNames());
     SetUint32(env, result, "entryPathProbeOpenSlots",
               g_patchedOpenSlots.load(std::memory_order_relaxed));
     SetUint32(env, result, "entryPathProbeFopenSlots",
@@ -2836,6 +3275,10 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
               g_patchedStatSlots.load(std::memory_order_relaxed));
     SetUint32(env, result, "entryPathProbeLstatSlots",
               g_patchedLstatSlots.load(std::memory_order_relaxed));
+    SetUint32(env, result, "ohcodeWriteSlots",
+              g_patchedWriteSlots.load(std::memory_order_relaxed));
+    SetUint32(env, result, "ohcodeWritevSlots",
+              g_patchedWritevSlots.load(std::memory_order_relaxed));
     SetUint64(env, result, "entryPathProbeHits",
               g_entryPathProbeHits.load(std::memory_order_relaxed));
     SetUint64(env, result, "entryPathProbePackageJsonHits",
@@ -2855,6 +3298,12 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
               GetLastEntryPathProbeOp());
     SetString(env, result, "lastEntryPathProbePath",
               GetLastEntryPathProbePath());
+    SetUint64(env, result, "ohcodeWriteTraceCalls",
+              g_ohcodeWriteTraceCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "ohcodeWriteTraceBytes",
+              g_ohcodeWriteTraceBytes.load(std::memory_order_relaxed));
+    SetString(env, result, "lastOhcodeWriteTrace",
+              GetLastOhcodeWriteTrace());
 }
 
 }  // namespace
@@ -2892,6 +3341,33 @@ extern "C" int epoll_wait(int epfd, struct epoll_event* events, int maxevents,
     return realEpollWait(epfd, events, maxevents, effectiveTimeout);
 }
 
+extern "C" ssize_t write(int fd, const void* buffer, size_t count) {
+    WriteFn realWrite = GetRealWrite();
+    if (!realWrite) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    CaptureOhcodeWriteTrace(buffer, count);
+    return realWrite(fd, buffer, count);
+}
+
+extern "C" ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
+    WritevFn realWritev = GetRealWritev();
+    if (!realWritev) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    if (iov && iovcnt > 0) {
+        const int capped = iovcnt > 32 ? 32 : iovcnt;
+        for (int i = 0; i < capped; ++i) {
+            CaptureOhcodeWriteTrace(iov[i].iov_base, iov[i].iov_len);
+        }
+    }
+    return realWritev(fd, iov, iovcnt);
+}
+
 extern "C" uint32_t
 _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE(
     void* object, void* context, void* key, void* value) {
@@ -2902,13 +3378,17 @@ _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5Va
 
     g_v8ObjectSetPrivateCalls.fetch_add(1, std::memory_order_relaxed);
 
+    const uintptr_t callerOffset =
+        GetElectronCallerOffset(__builtin_return_address(0));
     void* effectiveValue = value;
     char privateName[96];
     if (!ReadV8PrivateName(context, key, privateName, sizeof(privateName))) {
         g_browserAppSearchPathNameReadFailures.fetch_add(
             1, std::memory_order_relaxed);
+        TraceV8ObjectSetPrivateName("<read-failed>", callerOffset);
         return realSetPrivate(object, context, key, effectiveValue);
     }
+    TraceV8ObjectSetPrivateName(privateName, callerOffset);
 
     if (strcmp(privateName, "appSearchPaths") == 0) {
         const uint64_t attempt =
@@ -2956,6 +3436,63 @@ _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5Va
     }
 
     return realSetPrivate(object, context, key, effectiveValue);
+}
+
+extern "C" uint32_t
+_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE(
+    void* object, void* context, void* key, void* value, int attributes) {
+    V8ObjectDefineOwnPropertyFn realDefineOwnProperty =
+        GetRealV8ObjectDefineOwnProperty();
+    if (!realDefineOwnProperty) {
+        return 0;
+    }
+
+    g_v8ObjectDefineOwnPropertyCalls.fetch_add(
+        1, std::memory_order_relaxed);
+
+    const uintptr_t callerOffset =
+        GetElectronCallerOffset(__builtin_return_address(0));
+    void* effectiveValue = value;
+    char name[96];
+    if (!ReadV8StringValue(context, key, name, sizeof(name))) {
+        g_v8ObjectDefineOwnPropertyNameReadFailures.fetch_add(
+            1, std::memory_order_relaxed);
+        TraceV8ObjectDefineOwnPropertyName("<read-failed>", nullptr,
+                                           attributes, callerOffset);
+        return realDefineOwnProperty(object, context, key, effectiveValue,
+                                     attributes);
+    }
+
+    char valueText[256];
+    const bool valueIsString =
+        ReadV8StringValue(context, value, valueText, sizeof(valueText));
+    TraceV8ObjectDefineOwnPropertyName(
+        name, valueIsString ? valueText : nullptr, attributes, callerOffset);
+
+    if (strcmp(name, "resourcesPath") == 0) {
+        if (valueIsString) {
+            RecordDefinedResourcesPath(valueText);
+        }
+
+        constexpr const char* kForcedResourcesPath =
+            "/data/storage/el1/bundle/electron/resources/resfile/resources";
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        void* isolate = g_v8ContextGetIsolate ? g_v8ContextGetIsolate(context)
+                                              : nullptr;
+        void* replacement = NewV8Utf8String(isolate, kForcedResourcesPath);
+        if (replacement) {
+            effectiveValue = replacement;
+            g_v8DefineResourcesPathPatches.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("patched process.resourcesPath original=%s replacement=%s",
+                valueIsString ? valueText : "<non-string>",
+                kForcedResourcesPath);
+        }
+    }
+
+    return realDefineOwnProperty(object, context, key, effectiveValue,
+                                 attributes);
 }
 
 extern "C" int open(const char* path, int flags, ...) {
@@ -3929,6 +4466,11 @@ static const PltHookTarget* FindPltHookTarget(const char* symbol) {
              &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE),
          &g_gotRealV8ObjectSetPrivate,
          &g_patchedV8ObjectSetPrivateSlots},
+        {"_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE",
+         reinterpret_cast<void*>(
+             &_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE),
+         &g_gotRealV8ObjectDefineOwnProperty,
+         &g_patchedV8ObjectDefineOwnPropertySlots},
         {"open", reinterpret_cast<void*>(&open), &g_gotRealOpen,
          &g_patchedOpenSlots},
         {"fopen", reinterpret_cast<void*>(&fopen), &g_gotRealFopen,
@@ -3939,6 +4481,10 @@ static const PltHookTarget* FindPltHookTarget(const char* symbol) {
          &g_patchedStatSlots},
         {"lstat", reinterpret_cast<void*>(&lstat), &g_gotRealLstat,
          &g_patchedLstatSlots},
+        {"write", reinterpret_cast<void*>(&write), &g_gotRealWrite,
+         &g_patchedWriteSlots},
+        {"writev", reinterpret_cast<void*>(&writev), &g_gotRealWritev,
+         &g_patchedWritevSlots},
         {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
          reinterpret_cast<void*>(
              &_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
@@ -4837,13 +5383,35 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
     g_lastSnapshotDecompressedSize.store(0, std::memory_order_relaxed);
     g_lastSnapshotAllocCallerOffset.store(0, std::memory_order_relaxed);
     g_v8ObjectSetPrivateCalls.store(0, std::memory_order_relaxed);
+    g_v8ObjectDefineOwnPropertyCalls.store(0, std::memory_order_relaxed);
+    g_v8ObjectDefineOwnPropertyNameReadFailures.store(
+        0, std::memory_order_relaxed);
+    g_v8DefineResourcesPathPatches.store(0, std::memory_order_relaxed);
     g_browserAppSearchPathPatchAttempts.store(0, std::memory_order_relaxed);
     g_browserAppSearchPathPatches.store(0, std::memory_order_relaxed);
     g_browserAppSearchPathPatchFailures.store(0, std::memory_order_relaxed);
     g_browserAppSearchPathAsarOnlyPatches.store(0,
                                                 std::memory_order_relaxed);
+    g_browserAppSearchPathAsarOnlyFallbackPatches.store(
+        0, std::memory_order_relaxed);
     g_browserAppSearchPathNameReadFailures.store(0,
                                                  std::memory_order_relaxed);
+    g_v8ObjectSetPrivateNameTraceCount.store(0, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(g_v8ObjectSetPrivateTraceMutex);
+        g_v8ObjectSetPrivateNames.clear();
+    }
+    g_v8ObjectDefineOwnPropertyNameTraceCount.store(
+        0, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(
+            g_v8ObjectDefineOwnPropertyTraceMutex);
+        g_v8ObjectDefineOwnPropertyNames.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
+        g_lastDefinedResourcesPath.clear();
+    }
     g_entryPathProbeHits.store(0, std::memory_order_relaxed);
     g_entryPathProbePackageJsonHits.store(0, std::memory_order_relaxed);
     g_entryPathProbeEntryJsHits.store(0, std::memory_order_relaxed);
