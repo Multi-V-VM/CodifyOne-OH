@@ -27,8 +27,8 @@ const STARTUP_MAIN_TRACE_FILES: string[] = [
   '/data/storage/el1/base/files/ohcode-main-trace.log',
   '/tmp/ohcode-main-trace.log'
 ];
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-tracefanout1';
-const ELECTRON_APP_PATH: string = '--app-path=../../electron/resources/resfile/app';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch4';
+const ELECTRON_APP_PATH: string = '--app-path=/data/storage/el1/bundle/electron/resources/resfile/resources/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
@@ -198,16 +198,20 @@ class WindowNodeController extends NodeController {
 
   private schedulePostRunHookProbe(): void {
     let probeDone: boolean = false;
-    for (let i = 1; i <= 20; i++) {
-      const delayMs: number = i * 5;
+    for (let i = 1; i <= 100; i++) {
+      const delayMs: number = i * 20;
       setTimeout(() => {
         if (probeDone) {
           return;
         }
         const probe = getV8PoolHook().getElectronPltHookStats();
-        if (probe.installed || i === 20) {
+        const hasNativeActivity: boolean =
+          (probe.nodeLoadEnvironmentCallbackCalls !== undefined && probe.nodeLoadEnvironmentCallbackCalls > 0) ||
+          (probe.v8ObjectSetPrivateCalls !== undefined && probe.v8ObjectSetPrivateCalls > 0) ||
+          (probe.entryPathProbeHits !== undefined && probe.entryPathProbeHits > 0);
+        if (hasNativeActivity || i === 100) {
           probeDone = true;
-          this.writeStartupStatus('electron PLT hook probe=' + JSON.stringify(probe));
+          this.writeStartupStatus('electron PLT hook probe post-startup=' + JSON.stringify(probe));
         }
       }, delayMs);
     }
@@ -274,6 +278,26 @@ class WindowNodeController extends NodeController {
           ' nodePostLoadTraceFailures=' + hookStats.nodePostLoadTraceFailures +
           ' lastNodeLoadEnvironmentPreload=' + hookStats.lastNodeLoadEnvironmentPreload +
           ' lastNodeLoadEnvironmentResult=' + hookStats.lastNodeLoadEnvironmentResult +
+          ' v8ObjectSetPrivateSlots=' + hookStats.v8ObjectSetPrivateSlots +
+          ' v8ObjectSetPrivateCalls=' + hookStats.v8ObjectSetPrivateCalls +
+          ' browserAppSearchPathPatchAttempts=' + hookStats.browserAppSearchPathPatchAttempts +
+          ' browserAppSearchPathPatches=' + hookStats.browserAppSearchPathPatches +
+          ' browserAppSearchPathPatchFailures=' + hookStats.browserAppSearchPathPatchFailures +
+          ' browserAppSearchPathAsarOnlyPatches=' + hookStats.browserAppSearchPathAsarOnlyPatches +
+          ' browserAppSearchPathNameReadFailures=' + hookStats.browserAppSearchPathNameReadFailures +
+          ' entryPathProbeSlots=' + hookStats.entryPathProbeOpenSlots + '/' +
+            hookStats.entryPathProbeFopenSlots + '/' +
+            hookStats.entryPathProbeAccessSlots + '/' +
+            hookStats.entryPathProbeStatSlots + '/' +
+            hookStats.entryPathProbeLstatSlots +
+          ' entryPathProbeHits=' + hookStats.entryPathProbeHits +
+          ' entryPathProbePackageJsonHits=' + hookStats.entryPathProbePackageJsonHits +
+          ' entryPathProbeEntryJsHits=' + hookStats.entryPathProbeEntryJsHits +
+          ' entryPathProbeOutMainHits=' + hookStats.entryPathProbeOutMainHits +
+          ' entryPathProbeElectronMainHits=' + hookStats.entryPathProbeElectronMainHits +
+          ' entryPathProbeNullSlotPatches=' + hookStats.entryPathProbeNullSlotPatches +
+          ' lastEntryPathProbeOp=' + hookStats.lastEntryPathProbeOp +
+          ' lastEntryPathProbePath=' + hookStats.lastEntryPathProbePath +
           ' nodePlatformForIsolateCalls=' + hookStats.nodePlatformForIsolateCalls +
           ' nodePlatformLookupHits=' + hookStats.nodePlatformLookupHits +
           ' nodePlatformLookupMisses=' + hookStats.nodePlatformLookupMisses +

@@ -15,9 +15,11 @@
 #include <cstdio>
 #include <dlfcn.h>
 #include <elf.h>
+#include <fcntl.h>
 #include <link.h>
 #include <pthread.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <utility>
 #include <vector>
 #include <unistd.h>
@@ -44,6 +46,9 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
 extern "C" void*
 _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
     void* environment, void* callback, void* preload);
+extern "C" uint32_t
+_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE(
+    void* object, void* context, void* key, void* value);
 
 #ifndef R_AARCH64_GLOB_DAT
 #define R_AARCH64_GLOB_DAT 1025
@@ -117,7 +122,7 @@ constexpr const char* kDefaultV8StartupFlags =
     "--max-old-space-size=512 --max-semi-space-size=16";
 constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
-  const STAMP = "diag-20260626-tracefanout1";
+  const STAMP = "diag-20260626-appsearch4";
   const TRACE_PATHS = [
     "/data/storage/el2/base/files/ohcode-main-trace.log",
     "/data/storage/el1/base/files/ohcode-main-trace.log",
@@ -371,6 +376,19 @@ using NodeCreateEnvironmentFn =
     void* (*)(void*, void*, void*, void*, void*, void*, void*);
 using NodeLoadEnvironmentStringFn = void* (*)(void*, const char*);
 using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*, void*);
+using V8ObjectSetPrivateFn = uint32_t (*)(void*, void*, void*, void*);
+using OpenFn = int (*)(const char*, int, ...);
+using FopenFn = FILE* (*)(const char*, const char*);
+using AccessFn = int (*)(const char*, int);
+using StatFn = int (*)(const char*, struct stat*);
+using V8PrivateNameFn = void* (*)(void*);
+using V8ValueIsStringFn = bool (*)(void*);
+using V8StringWriteUtf8Fn =
+    int (*)(void*, void*, char*, int, int*, int);
+using V8StringNewFromUtf8Fn = void* (*)(void*, const char*, int, int);
+using V8ArrayNewFn = void* (*)(void*, int);
+using V8ObjectSetIndexFn = uint32_t (*)(void*, void*, uint32_t, void*);
+using V8NumberNewFn = void* (*)(void*, double);
 
 struct V8StartupDataView {
     const char* data;
@@ -508,6 +526,13 @@ static std::once_flag g_realNodeNewContextOnce;
 static std::once_flag g_realNodeCreateEnvironmentOnce;
 static std::once_flag g_realNodeLoadEnvironmentStringOnce;
 static std::once_flag g_realNodeLoadEnvironmentCallbackOnce;
+static std::once_flag g_realV8ObjectSetPrivateOnce;
+static std::once_flag g_realOpenOnce;
+static std::once_flag g_realFopenOnce;
+static std::once_flag g_realAccessOnce;
+static std::once_flag g_realStatOnce;
+static std::once_flag g_realLstatOnce;
+static std::once_flag g_v8AppSearchPathSymbolsOnce;
 static std::once_flag g_realAdapterStartGpuProcessOnce;
 static std::once_flag g_realAdapterStartLegacyChildProcessOnce;
 static std::once_flag g_realAdapterStartNormalChildProcessOnce;
@@ -526,7 +551,20 @@ static NodeCreateEnvironmentFn g_realNodeCreateEnvironment = nullptr;
 static NodeLoadEnvironmentStringFn g_realNodeLoadEnvironmentString = nullptr;
 static NodeLoadEnvironmentCallbackFn g_realNodeLoadEnvironmentCallback =
     nullptr;
+static V8ObjectSetPrivateFn g_realV8ObjectSetPrivate = nullptr;
+static OpenFn g_realOpen = nullptr;
+static FopenFn g_realFopen = nullptr;
+static AccessFn g_realAccess = nullptr;
+static StatFn g_realStat = nullptr;
+static StatFn g_realLstat = nullptr;
 static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
+static V8PrivateNameFn g_v8PrivateName = nullptr;
+static V8ValueIsStringFn g_v8ValueIsString = nullptr;
+static V8StringWriteUtf8Fn g_v8StringWriteUtf8 = nullptr;
+static V8StringNewFromUtf8Fn g_v8StringNewFromUtf8 = nullptr;
+static V8ArrayNewFn g_v8ArrayNew = nullptr;
+static V8ObjectSetIndexFn g_v8ObjectSetIndex = nullptr;
+static V8NumberNewFn g_v8NumberNew = nullptr;
 static V8GetCurrentPlatformFn g_v8GetCurrentPlatform = nullptr;
 static UvDefaultLoopFn g_uvDefaultLoop = nullptr;
 static UvMutexFn g_uvMutexLock = nullptr;
@@ -557,6 +595,12 @@ static std::atomic<void*> g_gotRealNodeNewContext{nullptr};
 static std::atomic<void*> g_gotRealNodeCreateEnvironment{nullptr};
 static std::atomic<void*> g_gotRealNodeLoadEnvironmentString{nullptr};
 static std::atomic<void*> g_gotRealNodeLoadEnvironmentCallback{nullptr};
+static std::atomic<void*> g_gotRealV8ObjectSetPrivate{nullptr};
+static std::atomic<void*> g_gotRealOpen{nullptr};
+static std::atomic<void*> g_gotRealFopen{nullptr};
+static std::atomic<void*> g_gotRealAccess{nullptr};
+static std::atomic<void*> g_gotRealStat{nullptr};
+static std::atomic<void*> g_gotRealLstat{nullptr};
 static std::atomic<void*> g_nodePlatformForIsolateInlineTrampoline{nullptr};
 static std::atomic<void*> g_gotRealAdapterStartGpuProcess{nullptr};
 static std::atomic<void*> g_gotRealAdapterStartLegacyChildProcess{nullptr};
@@ -595,6 +639,18 @@ static std::atomic<uint64_t> g_nodeLoadEnvironmentNulls{0};
 static std::atomic<uint64_t> g_nodePostLoadTraceAttempts{0};
 static std::atomic<uint64_t> g_nodePostLoadTraceSuccesses{0};
 static std::atomic<uint64_t> g_nodePostLoadTraceFailures{0};
+static std::atomic<uint64_t> g_v8ObjectSetPrivateCalls{0};
+static std::atomic<uint64_t> g_browserAppSearchPathPatchAttempts{0};
+static std::atomic<uint64_t> g_browserAppSearchPathPatches{0};
+static std::atomic<uint64_t> g_browserAppSearchPathPatchFailures{0};
+static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyPatches{0};
+static std::atomic<uint64_t> g_browserAppSearchPathNameReadFailures{0};
+static std::atomic<uint64_t> g_entryPathProbeHits{0};
+static std::atomic<uint64_t> g_entryPathProbePackageJsonHits{0};
+static std::atomic<uint64_t> g_entryPathProbeEntryJsHits{0};
+static std::atomic<uint64_t> g_entryPathProbeOutMainHits{0};
+static std::atomic<uint64_t> g_entryPathProbeElectronMainHits{0};
+static std::atomic<uint64_t> g_entryPathProbeNullSlotPatches{0};
 static std::atomic<uint64_t> g_nodeInitializeContextInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformForIsolateInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformRegisterAttempts{0};
@@ -656,6 +712,12 @@ static std::atomic<uint32_t> g_patchedNodeNewContextSlots{0};
 static std::atomic<uint32_t> g_patchedNodeCreateEnvironmentSlots{0};
 static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentStringSlots{0};
 static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentCallbackSlots{0};
+static std::atomic<uint32_t> g_patchedV8ObjectSetPrivateSlots{0};
+static std::atomic<uint32_t> g_patchedOpenSlots{0};
+static std::atomic<uint32_t> g_patchedFopenSlots{0};
+static std::atomic<uint32_t> g_patchedAccessSlots{0};
+static std::atomic<uint32_t> g_patchedStatSlots{0};
+static std::atomic<uint32_t> g_patchedLstatSlots{0};
 static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
 static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
 static std::atomic<uint32_t> g_patchedAdapterStartGpuProcessSlots{0};
@@ -664,6 +726,9 @@ static std::atomic<uint32_t> g_patchedAdapterStartNormalChildProcessSlots{0};
 static std::atomic<uint32_t> g_patchedAdapterStartIsolateChildProcessSlots{0};
 static thread_local bool g_insideNodeInitializeContextHook = false;
 static thread_local bool g_insideNodePlatformForIsolateHook = false;
+static std::mutex g_entryPathProbeMutex;
+static std::string g_lastEntryPathProbeOp;
+static std::string g_lastEntryPathProbePath;
 
 // Logging
 void Log(const char* fmt, ...) {
@@ -1081,6 +1146,285 @@ static void* ResolveElectronExport(const char* symbolName,
     }
 
     return symbol;
+}
+
+static V8ObjectSetPrivateFn GetRealV8ObjectSetPrivate() {
+    if (void* gotReal =
+            g_gotRealV8ObjectSetPrivate.load(std::memory_order_acquire)) {
+        return reinterpret_cast<V8ObjectSetPrivateFn>(gotReal);
+    }
+    std::call_once(g_realV8ObjectSetPrivateOnce, []() {
+        g_realV8ObjectSetPrivate =
+            reinterpret_cast<V8ObjectSetPrivateFn>(ResolveElectronExport(
+                "_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
+                reinterpret_cast<const void*>(
+                    &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE)));
+        if (!g_realV8ObjectSetPrivate) {
+            Log("WARNING: v8::Object::SetPrivate real symbol not found");
+        }
+    });
+    return g_realV8ObjectSetPrivate;
+}
+
+static void ResolveV8AppSearchPathSymbols() {
+    if (!g_v8ContextGetIsolate) {
+        g_v8ContextGetIsolate = reinterpret_cast<V8ContextGetIsolateFn>(
+            ResolveElectronExport("_ZN2v87Context10GetIsolateEv", nullptr));
+    }
+    g_v8PrivateName = reinterpret_cast<V8PrivateNameFn>(
+        ResolveElectronExport("_ZNK2v87Private4NameEv", nullptr));
+    g_v8ValueIsString = reinterpret_cast<V8ValueIsStringFn>(
+        ResolveElectronExport("_ZNK2v85Value12FullIsStringEv", nullptr));
+    g_v8StringWriteUtf8 = reinterpret_cast<V8StringWriteUtf8Fn>(
+        ResolveElectronExport("_ZNK2v86String9WriteUtf8EPNS_7IsolateEPciPii",
+                              nullptr));
+    g_v8StringNewFromUtf8 = reinterpret_cast<V8StringNewFromUtf8Fn>(
+        ResolveElectronExport(
+            "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
+            nullptr));
+    g_v8ArrayNew = reinterpret_cast<V8ArrayNewFn>(
+        ResolveElectronExport("_ZN2v85Array3NewEPNS_7IsolateEi", nullptr));
+    g_v8ObjectSetIndex = reinterpret_cast<V8ObjectSetIndexFn>(
+        ResolveElectronExport(
+            "_ZN2v86Object3SetENS_5LocalINS_7ContextEEEjNS1_INS_5ValueEEE",
+            nullptr));
+    g_v8NumberNew = reinterpret_cast<V8NumberNewFn>(
+        ResolveElectronExport("_ZN2v86Number3NewEPNS_7IsolateEd", nullptr));
+
+    if (!g_v8ContextGetIsolate || !g_v8PrivateName ||
+        !g_v8ValueIsString || !g_v8StringWriteUtf8 || !g_v8StringNewFromUtf8 ||
+        !g_v8ArrayNew || !g_v8ObjectSetIndex || !g_v8NumberNew) {
+        Log("WARNING: appSearchPaths V8 symbols missing: contextGetIsolate=%p "
+            "privateName=%p valueIsString=%p writeUtf8=%p newString=%p "
+            "arrayNew=%p setIndex=%p numberNew=%p",
+            reinterpret_cast<void*>(g_v8ContextGetIsolate),
+            reinterpret_cast<void*>(g_v8PrivateName),
+            reinterpret_cast<void*>(g_v8ValueIsString),
+            reinterpret_cast<void*>(g_v8StringWriteUtf8),
+            reinterpret_cast<void*>(g_v8StringNewFromUtf8),
+            reinterpret_cast<void*>(g_v8ArrayNew),
+            reinterpret_cast<void*>(g_v8ObjectSetIndex),
+            reinterpret_cast<void*>(g_v8NumberNew));
+    }
+}
+
+static bool ReadV8PrivateName(void* context, void* key, char* buffer,
+                              size_t bufferSize) {
+    if (!context || !key || !buffer || bufferSize == 0) {
+        return false;
+    }
+    std::call_once(g_v8AppSearchPathSymbolsOnce,
+                   ResolveV8AppSearchPathSymbols);
+    if (!g_v8ContextGetIsolate || !g_v8PrivateName ||
+        !g_v8ValueIsString || !g_v8StringWriteUtf8) {
+        return false;
+    }
+
+    void* isolate = g_v8ContextGetIsolate(context);
+    void* name = g_v8PrivateName(key);
+    if (!isolate || !name) {
+        return false;
+    }
+    if (!g_v8ValueIsString(name)) {
+        return false;
+    }
+
+    buffer[0] = '\0';
+    int charsWritten = 0;
+    const int bytesWritten = g_v8StringWriteUtf8(
+        name, isolate, buffer, static_cast<int>(bufferSize - 1),
+        &charsWritten, 0);
+    if (bytesWritten <= 0) {
+        buffer[0] = '\0';
+        return false;
+    }
+    const size_t clamped =
+        static_cast<size_t>(bytesWritten) < bufferSize
+            ? static_cast<size_t>(bytesWritten)
+            : bufferSize - 1;
+    buffer[clamped] = '\0';
+    return true;
+}
+
+static void* NewV8Utf8String(void* isolate, const char* value) {
+    if (!isolate || !value || !g_v8StringNewFromUtf8) {
+        return nullptr;
+    }
+    return g_v8StringNewFromUtf8(isolate, value, 0, -1);
+}
+
+static void* BuildBrowserAppSearchPathsArray(void* context) {
+    std::call_once(g_v8AppSearchPathSymbolsOnce,
+                   ResolveV8AppSearchPathSymbols);
+    if (!context || !g_v8ContextGetIsolate || !g_v8StringNewFromUtf8 ||
+        !g_v8ArrayNew || !g_v8ObjectSetIndex) {
+        return nullptr;
+    }
+
+    void* isolate = g_v8ContextGetIsolate(context);
+    if (!isolate) {
+        return nullptr;
+    }
+
+    constexpr const char* kSearchPaths[] = {
+        "app",
+        "resources/app",
+        "app.asar",
+        "resources/app.asar",
+        "default_app.asar",
+    };
+    constexpr size_t kSearchPathCount =
+        sizeof(kSearchPaths) / sizeof(kSearchPaths[0]);
+    void* array =
+        g_v8ArrayNew(isolate, static_cast<int>(kSearchPathCount));
+    if (!array) {
+        return nullptr;
+    }
+
+    for (uint32_t i = 0; i < kSearchPathCount; ++i) {
+        void* item = NewV8Utf8String(isolate, kSearchPaths[i]);
+        if (!item) {
+            return nullptr;
+        }
+        g_v8ObjectSetIndex(array, context, i, item);
+    }
+    return array;
+}
+
+static void* BuildV8FalseValue(void* context) {
+    std::call_once(g_v8AppSearchPathSymbolsOnce,
+                   ResolveV8AppSearchPathSymbols);
+    if (!context || !g_v8ContextGetIsolate || !g_v8NumberNew) {
+        return nullptr;
+    }
+    void* isolate = g_v8ContextGetIsolate(context);
+    if (!isolate) {
+        return nullptr;
+    }
+    return g_v8NumberNew(isolate, 0.0);
+}
+
+static OpenFn GetRealOpen() {
+    if (void* gotReal = g_gotRealOpen.load(std::memory_order_acquire)) {
+        return reinterpret_cast<OpenFn>(gotReal);
+    }
+    std::call_once(g_realOpenOnce, []() {
+        g_realOpen = reinterpret_cast<OpenFn>(dlsym(RTLD_NEXT, "open"));
+        if (!g_realOpen) {
+            Log("WARNING: open real symbol not found");
+        }
+    });
+    return g_realOpen;
+}
+
+static FopenFn GetRealFopen() {
+    if (void* gotReal = g_gotRealFopen.load(std::memory_order_acquire)) {
+        return reinterpret_cast<FopenFn>(gotReal);
+    }
+    std::call_once(g_realFopenOnce, []() {
+        g_realFopen = reinterpret_cast<FopenFn>(dlsym(RTLD_NEXT, "fopen"));
+        if (!g_realFopen) {
+            Log("WARNING: fopen real symbol not found");
+        }
+    });
+    return g_realFopen;
+}
+
+static AccessFn GetRealAccess() {
+    if (void* gotReal = g_gotRealAccess.load(std::memory_order_acquire)) {
+        return reinterpret_cast<AccessFn>(gotReal);
+    }
+    std::call_once(g_realAccessOnce, []() {
+        g_realAccess = reinterpret_cast<AccessFn>(dlsym(RTLD_NEXT, "access"));
+        if (!g_realAccess) {
+            Log("WARNING: access real symbol not found");
+        }
+    });
+    return g_realAccess;
+}
+
+static StatFn GetRealStat() {
+    if (void* gotReal = g_gotRealStat.load(std::memory_order_acquire)) {
+        return reinterpret_cast<StatFn>(gotReal);
+    }
+    std::call_once(g_realStatOnce, []() {
+        g_realStat = reinterpret_cast<StatFn>(dlsym(RTLD_NEXT, "stat"));
+        if (!g_realStat) {
+            Log("WARNING: stat real symbol not found");
+        }
+    });
+    return g_realStat;
+}
+
+static StatFn GetRealLstat() {
+    if (void* gotReal = g_gotRealLstat.load(std::memory_order_acquire)) {
+        return reinterpret_cast<StatFn>(gotReal);
+    }
+    std::call_once(g_realLstatOnce, []() {
+        g_realLstat = reinterpret_cast<StatFn>(dlsym(RTLD_NEXT, "lstat"));
+        if (!g_realLstat) {
+            Log("WARNING: lstat real symbol not found");
+        }
+    });
+    return g_realLstat;
+}
+
+static bool PathContains(const char* path, const char* needle) {
+    return path && needle && strstr(path, needle) != nullptr;
+}
+
+static bool ShouldTraceEntryPath(const char* path) {
+    if (!PathContains(path, "resfile")) {
+        return false;
+    }
+    return PathContains(path, "/app/package.json") ||
+           PathContains(path, "/resources/app/package.json") ||
+           PathContains(path, "ohcode-entry-probe.js") ||
+           PathContains(path, "/out/main.js") ||
+           PathContains(path, "/electron-main/main.js");
+}
+
+static void TraceEntryPathProbe(const char* op, const char* path) {
+    if (!ShouldTraceEntryPath(path)) {
+        return;
+    }
+
+    const uint64_t hit =
+        g_entryPathProbeHits.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (PathContains(path, "/package.json")) {
+        g_entryPathProbePackageJsonHits.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+    if (PathContains(path, "ohcode-entry-probe.js")) {
+        g_entryPathProbeEntryJsHits.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (PathContains(path, "/out/main.js")) {
+        g_entryPathProbeOutMainHits.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (PathContains(path, "/electron-main/main.js")) {
+        g_entryPathProbeElectronMainHits.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
+        g_lastEntryPathProbeOp = op ? op : "";
+        g_lastEntryPathProbePath = path ? path : "";
+    }
+
+    if (hit <= 30) {
+        Log("entry path probe %s %s", op ? op : "<op>", path);
+    }
+}
+
+static std::string GetLastEntryPathProbeOp() {
+    std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
+    return g_lastEntryPathProbeOp;
+}
+
+static std::string GetLastEntryPathProbePath() {
+    std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
+    return g_lastEntryPathProbePath;
 }
 
 static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
@@ -2463,6 +2807,54 @@ static void AppendNodeStartupStats(napi_env env, napi_value result) {
     SetUint64(env, result, "lastNodeLoadEnvironmentResult",
               g_lastNodeLoadEnvironmentResult.load(
                   std::memory_order_relaxed));
+    SetUint32(env, result, "v8ObjectSetPrivateSlots",
+              g_patchedV8ObjectSetPrivateSlots.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "v8ObjectSetPrivateCalls",
+              g_v8ObjectSetPrivateCalls.load(std::memory_order_relaxed));
+    SetUint64(env, result, "browserAppSearchPathPatchAttempts",
+              g_browserAppSearchPathPatchAttempts.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "browserAppSearchPathPatches",
+              g_browserAppSearchPathPatches.load(std::memory_order_relaxed));
+    SetUint64(env, result, "browserAppSearchPathPatchFailures",
+              g_browserAppSearchPathPatchFailures.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "browserAppSearchPathAsarOnlyPatches",
+              g_browserAppSearchPathAsarOnlyPatches.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "browserAppSearchPathNameReadFailures",
+              g_browserAppSearchPathNameReadFailures.load(
+                  std::memory_order_relaxed));
+    SetUint32(env, result, "entryPathProbeOpenSlots",
+              g_patchedOpenSlots.load(std::memory_order_relaxed));
+    SetUint32(env, result, "entryPathProbeFopenSlots",
+              g_patchedFopenSlots.load(std::memory_order_relaxed));
+    SetUint32(env, result, "entryPathProbeAccessSlots",
+              g_patchedAccessSlots.load(std::memory_order_relaxed));
+    SetUint32(env, result, "entryPathProbeStatSlots",
+              g_patchedStatSlots.load(std::memory_order_relaxed));
+    SetUint32(env, result, "entryPathProbeLstatSlots",
+              g_patchedLstatSlots.load(std::memory_order_relaxed));
+    SetUint64(env, result, "entryPathProbeHits",
+              g_entryPathProbeHits.load(std::memory_order_relaxed));
+    SetUint64(env, result, "entryPathProbePackageJsonHits",
+              g_entryPathProbePackageJsonHits.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "entryPathProbeEntryJsHits",
+              g_entryPathProbeEntryJsHits.load(std::memory_order_relaxed));
+    SetUint64(env, result, "entryPathProbeOutMainHits",
+              g_entryPathProbeOutMainHits.load(std::memory_order_relaxed));
+    SetUint64(env, result, "entryPathProbeElectronMainHits",
+              g_entryPathProbeElectronMainHits.load(
+                  std::memory_order_relaxed));
+    SetUint64(env, result, "entryPathProbeNullSlotPatches",
+              g_entryPathProbeNullSlotPatches.load(
+                  std::memory_order_relaxed));
+    SetString(env, result, "lastEntryPathProbeOp",
+              GetLastEntryPathProbeOp());
+    SetString(env, result, "lastEntryPathProbePath",
+              GetLastEntryPathProbePath());
 }
 
 }  // namespace
@@ -2498,6 +2890,137 @@ extern "C" int epoll_wait(int epfd, struct epoll_event* events, int maxevents,
                                         std::memory_order_relaxed);
 
     return realEpollWait(epfd, events, maxevents, effectiveTimeout);
+}
+
+extern "C" uint32_t
+_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE(
+    void* object, void* context, void* key, void* value) {
+    V8ObjectSetPrivateFn realSetPrivate = GetRealV8ObjectSetPrivate();
+    if (!realSetPrivate) {
+        return 0;
+    }
+
+    g_v8ObjectSetPrivateCalls.fetch_add(1, std::memory_order_relaxed);
+
+    void* effectiveValue = value;
+    char privateName[96];
+    if (!ReadV8PrivateName(context, key, privateName, sizeof(privateName))) {
+        g_browserAppSearchPathNameReadFailures.fetch_add(
+            1, std::memory_order_relaxed);
+        return realSetPrivate(object, context, key, effectiveValue);
+    }
+
+    if (strcmp(privateName, "appSearchPaths") == 0) {
+        const uint64_t attempt =
+            g_browserAppSearchPathPatchAttempts.fetch_add(
+                1, std::memory_order_relaxed) +
+            1;
+        void* replacement = BuildBrowserAppSearchPathsArray(context);
+        if (replacement) {
+            effectiveValue = replacement;
+            g_browserAppSearchPathPatches.fetch_add(
+                1, std::memory_order_relaxed);
+            if (attempt <= 5) {
+                Log("patched Electron appSearchPaths hidden value "
+                    "context=%p value=%p",
+                    context, replacement);
+            }
+        } else {
+            g_browserAppSearchPathPatchFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("failed to build appSearchPaths replacement context=%p",
+                context);
+        }
+    } else if (strcmp(privateName, "appSearchPathsOnlyLoadASAR") == 0) {
+        const uint64_t attempt =
+            g_browserAppSearchPathPatchAttempts.fetch_add(
+                1, std::memory_order_relaxed) +
+            1;
+        void* replacement = BuildV8FalseValue(context);
+        if (replacement) {
+            effectiveValue = replacement;
+            g_browserAppSearchPathAsarOnlyPatches.fetch_add(
+                1, std::memory_order_relaxed);
+            if (attempt <= 5) {
+                Log("patched Electron appSearchPathsOnlyLoadASAR hidden value "
+                    "context=%p value=%p",
+                    context, replacement);
+            }
+        } else {
+            g_browserAppSearchPathPatchFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("failed to build appSearchPathsOnlyLoadASAR replacement "
+                "context=%p",
+                context);
+        }
+    }
+
+    return realSetPrivate(object, context, key, effectiveValue);
+}
+
+extern "C" int open(const char* path, int flags, ...) {
+    OpenFn realOpen = GetRealOpen();
+    if (!realOpen) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    TraceEntryPathProbe("open", path);
+
+    mode_t mode = 0;
+    const bool hasMode = (flags & O_CREAT) != 0;
+    if (hasMode) {
+        va_list args;
+        va_start(args, flags);
+        mode = static_cast<mode_t>(va_arg(args, int));
+        va_end(args);
+        return realOpen(path, flags, mode);
+    }
+    return realOpen(path, flags);
+}
+
+extern "C" FILE* fopen(const char* path, const char* mode) {
+    FopenFn realFopen = GetRealFopen();
+    if (!realFopen) {
+        errno = ENOSYS;
+        return nullptr;
+    }
+
+    TraceEntryPathProbe("fopen", path);
+    return realFopen(path, mode);
+}
+
+extern "C" int access(const char* path, int mode) {
+    AccessFn realAccess = GetRealAccess();
+    if (!realAccess) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    TraceEntryPathProbe("access", path);
+    return realAccess(path, mode);
+}
+
+extern "C" int stat(const char* path, struct stat* buffer) {
+    StatFn realStat = GetRealStat();
+    if (!realStat) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    TraceEntryPathProbe("stat", path);
+    return realStat(path, buffer);
+}
+
+extern "C" int lstat(const char* path, struct stat* buffer) {
+    StatFn realLstat = GetRealLstat();
+    if (!realLstat) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    TraceEntryPathProbe("lstat", path);
+    return realLstat(path, buffer);
 }
 
 extern "C" bool _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
@@ -2980,6 +3503,14 @@ struct PltHookTarget {
     std::atomic<uint32_t>* patchedSlots;
 };
 
+static bool IsEntryPathProbeSymbol(const char* symbol) {
+    return symbol && (strcmp(symbol, "open") == 0 ||
+                      strcmp(symbol, "fopen") == 0 ||
+                      strcmp(symbol, "access") == 0 ||
+                      strcmp(symbol, "stat") == 0 ||
+                      strcmp(symbol, "lstat") == 0);
+}
+
 struct ModuleAddressRange {
     uintptr_t start;
     uintptr_t end;
@@ -3306,13 +3837,16 @@ static bool PatchGotSlot(void** slot, const PltHookTarget& target) {
     if (current == target.replacement) {
         return false;
     }
-    if (current == nullptr) {
+    const bool allowNullSlotPatch = IsEntryPathProbeSymbol(target.symbol);
+    if (current == nullptr && !allowNullSlotPatch) {
         return false;
     }
 
-    void* expected = nullptr;
-    target.original->compare_exchange_strong(expected, current,
-                                             std::memory_order_acq_rel);
+    if (current) {
+        void* expected = nullptr;
+        target.original->compare_exchange_strong(expected, current,
+                                                 std::memory_order_acq_rel);
+    }
 
     size_t pageSize = 0;
     void* pageStart = nullptr;
@@ -3324,6 +3858,10 @@ static bool PatchGotSlot(void** slot, const PltHookTarget& target) {
     }
 
     *slot = target.replacement;
+    if (current == nullptr && allowNullSlotPatch) {
+        g_entryPathProbeNullSlotPatches.fetch_add(
+            1, std::memory_order_relaxed);
+    }
     // Leave the GOT page writable. Some Harmony builds still lazily resolve
     // neighbouring PLT slots after this point, and restoring read-only here can
     // turn a later lazy bind into a crash.
@@ -3386,6 +3924,21 @@ static const PltHookTarget* FindPltHookTarget(const char* symbol) {
              &_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE),
          &g_gotRealNodeLoadEnvironmentCallback,
          &g_patchedNodeLoadEnvironmentCallbackSlots},
+        {"_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
+         reinterpret_cast<void*>(
+             &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE),
+         &g_gotRealV8ObjectSetPrivate,
+         &g_patchedV8ObjectSetPrivateSlots},
+        {"open", reinterpret_cast<void*>(&open), &g_gotRealOpen,
+         &g_patchedOpenSlots},
+        {"fopen", reinterpret_cast<void*>(&fopen), &g_gotRealFopen,
+         &g_patchedFopenSlots},
+        {"access", reinterpret_cast<void*>(&access), &g_gotRealAccess,
+         &g_patchedAccessSlots},
+        {"stat", reinterpret_cast<void*>(&stat), &g_gotRealStat,
+         &g_patchedStatSlots},
+        {"lstat", reinterpret_cast<void*>(&lstat), &g_gotRealLstat,
+         &g_patchedLstatSlots},
         {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
          reinterpret_cast<void*>(
              &_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
@@ -4283,6 +4836,25 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
     g_lastSnapshotCompressedSize.store(0, std::memory_order_relaxed);
     g_lastSnapshotDecompressedSize.store(0, std::memory_order_relaxed);
     g_lastSnapshotAllocCallerOffset.store(0, std::memory_order_relaxed);
+    g_v8ObjectSetPrivateCalls.store(0, std::memory_order_relaxed);
+    g_browserAppSearchPathPatchAttempts.store(0, std::memory_order_relaxed);
+    g_browserAppSearchPathPatches.store(0, std::memory_order_relaxed);
+    g_browserAppSearchPathPatchFailures.store(0, std::memory_order_relaxed);
+    g_browserAppSearchPathAsarOnlyPatches.store(0,
+                                                std::memory_order_relaxed);
+    g_browserAppSearchPathNameReadFailures.store(0,
+                                                 std::memory_order_relaxed);
+    g_entryPathProbeHits.store(0, std::memory_order_relaxed);
+    g_entryPathProbePackageJsonHits.store(0, std::memory_order_relaxed);
+    g_entryPathProbeEntryJsHits.store(0, std::memory_order_relaxed);
+    g_entryPathProbeOutMainHits.store(0, std::memory_order_relaxed);
+    g_entryPathProbeElectronMainHits.store(0, std::memory_order_relaxed);
+    g_entryPathProbeNullSlotPatches.store(0, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
+        g_lastEntryPathProbeOp.clear();
+        g_lastEntryPathProbePath.clear();
+    }
 
     napi_value result;
     napi_create_object(env, &result);

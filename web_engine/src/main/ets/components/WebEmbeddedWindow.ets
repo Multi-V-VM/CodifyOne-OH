@@ -13,8 +13,8 @@ import { MultiInputAdapter } from '../adapter/MultiInputAdapter';
 import { DragParamManager } from '../common/DragParamManager';
 import { UIExtensionContentSession } from '@kit.AbilityKit';
 
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-tracefanout1';
-const ELECTRON_APP_PATH: string = '--app-path=../../electron/resources/resfile/app';
+const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch4';
+const ELECTRON_APP_PATH: string = '--app-path=/data/storage/el1/bundle/electron/resources/resfile/resources/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
   'PreloadingConfig,' +
