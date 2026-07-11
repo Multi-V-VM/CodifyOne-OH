@@ -89,8 +89,20 @@ function stageHnpPath(modulePath: string, buildRoot: string, targetName: string)
 function patchAppAsarMinimist(context: any): void {
     const modulePath = context.modulePath.toString();
     const projectRoot = path.resolve(modulePath, '..');
+    patchElectronBrowserInit(projectRoot);
+
     const patchScript = path.join(projectRoot, 'scripts', 'patch-app-asar-minimist.js');
     requirePath('app.asar minimist patch script', patchScript);
+
+    execFileSync(process.execPath, [patchScript, projectRoot], {
+        cwd: projectRoot,
+        stdio: 'inherit'
+    });
+}
+
+function patchElectronBrowserInit(projectRoot: string): void {
+    const patchScript = path.join(projectRoot, 'scripts', 'patch-libelectron-browser-init.js');
+    requirePath('libelectron browser_init patch script', patchScript);
 
     execFileSync(process.execPath, [patchScript, projectRoot], {
         cwd: projectRoot,
@@ -109,6 +121,8 @@ function repackHapWithHnp(context: any): void {
     const hnpPath = stageHnpPath(modulePath, buildRoot, targetName);
     const outPath = path.join(outputsRoot, `${context.moduleName}-${targetName}-unsigned.hap`);
     const pkgContextPath = path.join(buildRoot, 'intermediates', 'loader', targetName, 'pkgContextInfo.json');
+
+    patchElectronBrowserInit(projectRoot);
 
     const requiredPaths = [
         path.join(buildRoot, 'intermediates', 'stripped_native_libs', targetName),

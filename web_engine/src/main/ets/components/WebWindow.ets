@@ -27,7 +27,7 @@ const STARTUP_MAIN_TRACE_FILES: string[] = [
   '/data/storage/el1/base/files/ohcode-main-trace.log',
   '/tmp/ohcode-main-trace.log'
 ];
-const STARTUP_BUILD_STAMP: string = 'diag-20260626-appsearch10';
+const STARTUP_BUILD_STAMP: string = 'diag-20260711-barrierrelease1';
 const ELECTRON_APP_PATH: string = '--app-path=/data/storage/el1/bundle/electron/resources/resfile/resources/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +
@@ -230,6 +230,17 @@ class WindowNodeController extends NodeController {
         const hookStats = getV8PoolHook().getElectronPltHookStats();
         if (i === 3 || i === 7 || i === 15 || i === 30) {
           this.writeStartupStatus('main trace tail watch ' + i + ' ' + this.readStartupMainTraceTail(1800));
+          const compileSequence: string = hookStats.v8CompileFunctionSourceSequence ?? '';
+          this.writeStartupStatus('compile function capture watch ' + i +
+            ' rescueStage=' + hookStats.lastNodePostLoadStage +
+            ' calls=' + hookStats.v8CompileFunctionCalls +
+            ' reads=' + hookStats.v8CompileFunctionSourceReads +
+            ' failures=' + hookStats.v8CompileFunctionSourceReadFailures +
+            ' markerHits=' + hookStats.v8CompileFunctionMarkerHits +
+            ' resetSearchPathHits=' + hookStats.v8CompileFunctionResetSearchPathHits +
+            ' first=' + hookStats.firstV8CompileFunctionSource +
+            ' interesting=' + hookStats.interestingV8CompileFunctionSource +
+            ' sequence=' + compileSequence.substring(0, 1800));
         }
         this.writeStartupStatus('native startup watch ' + i + ' destroyed=' + destroyed +
           ' v8InitializeCalls=' + hookStats.v8InitializeCalls +
@@ -270,9 +281,27 @@ class WindowNodeController extends NodeController {
           ' nodeCreateEnvironmentCalls=' + hookStats.nodeCreateEnvironmentCalls +
           ' nodeCreateEnvironmentNulls=' + hookStats.nodeCreateEnvironmentNulls +
           ' lastNodeCreateEnvironmentResult=' + hookStats.lastNodeCreateEnvironmentResult +
+          ' nodeCreateEnvironmentArgTraceFailures=' +
+            hookStats.nodeCreateEnvironmentArgTraceFailures +
+          ' lastNodeCreateEnvironmentInitScript=' +
+            hookStats.lastNodeCreateEnvironmentInitScript +
+          ' lastNodeCreateEnvironmentArgs=' + hookStats.lastNodeCreateEnvironmentArgs +
+          ' lastNodeCreateEnvironmentExecArgs=' +
+            hookStats.lastNodeCreateEnvironmentExecArgs +
           ' nodeLoadEnvironmentStringCalls=' + hookStats.nodeLoadEnvironmentStringCalls +
           ' nodeLoadEnvironmentCallbackCalls=' + hookStats.nodeLoadEnvironmentCallbackCalls +
           ' nodeLoadEnvironmentNulls=' + hookStats.nodeLoadEnvironmentNulls +
+          ' nodePreLoadProbeAttempts=' + hookStats.nodePreLoadProbeAttempts +
+          ' nodePreLoadProbeSuccesses=' + hookStats.nodePreLoadProbeSuccesses +
+          ' nodePreLoadProbeFailures=' + hookStats.nodePreLoadProbeFailures +
+          ' nodePreLoadProbeResultReads=' + hookStats.nodePreLoadProbeResultReads +
+          ' nodePreLoadProbeResultReadFailures=' +
+            hookStats.nodePreLoadProbeResultReadFailures +
+          ' nodePreLoadProbeHiddenWrites=' + hookStats.nodePreLoadProbeHiddenWrites +
+          ' lastNodePreLoadProbeResult=' + hookStats.lastNodePreLoadProbeResult +
+          ' lastNodePreLoadProbeHiddenValue=' +
+            hookStats.lastNodePreLoadProbeHiddenValue +
+          ' preLoadEnvResult=' + hookStats.preLoadEnvResult +
           ' nodePostLoadTraceAttempts=' + hookStats.nodePostLoadTraceAttempts +
           ' nodePostLoadTraceSuccesses=' + hookStats.nodePostLoadTraceSuccesses +
           ' nodePostLoadTraceFailures=' + hookStats.nodePostLoadTraceFailures +
@@ -280,10 +309,47 @@ class WindowNodeController extends NodeController {
           ' nodePostLoadTraceResultReadFailures=' +
             hookStats.nodePostLoadTraceResultReadFailures +
           ' lastNodePostLoadTraceResult=' + hookStats.lastNodePostLoadTraceResult +
+          ' lastNodePostLoadStage=' + hookStats.lastNodePostLoadStage +
           ' postLoadEnvResult=' + hookStats.postLoadEnvResult +
           ' entryProbeEnvResult=' + hookStats.entryProbeEnvResult +
+          ' browserInitEnvO=' + hookStats.browserInitEnvO +
+          ' browserInitDefineOCalls=' + hookStats.browserInitDefineOCalls +
+          ' browserInitDefineO=' + hookStats.browserInitDefineO +
+          ' browserInitStageDefineCalls=' + hookStats.browserInitStageDefineCalls +
+          ' browserInitStageDefines=' + hookStats.browserInitStageDefines +
           ' lastNodeLoadEnvironmentPreload=' + hookStats.lastNodeLoadEnvironmentPreload +
           ' lastNodeLoadEnvironmentResult=' + hookStats.lastNodeLoadEnvironmentResult +
+          ' v8CompileFunctionSlots=' + hookStats.v8CompileFunctionSlots +
+          ' v8CompileFunctionInlineInstalled=' +
+            hookStats.v8CompileFunctionInlineInstalled +
+          ' v8CompileFunctionInlineEntrypoints=' +
+            hookStats.v8CompileFunctionInlineEntrypoints +
+          ' v8CompileFunctionInlineFailures=' +
+            hookStats.v8CompileFunctionInlineFailures +
+          ' v8CompileFunctionCalls=' + hookStats.v8CompileFunctionCalls +
+          ' v8CompileFunctionSourceReads=' +
+            hookStats.v8CompileFunctionSourceReads +
+          ' v8CompileFunctionSourceReadFailures=' +
+            hookStats.v8CompileFunctionSourceReadFailures +
+          ' v8CompileFunctionMarkerHits=' + hookStats.v8CompileFunctionMarkerHits +
+          ' v8CompileFunctionResetSearchPathHits=' +
+            hookStats.v8CompileFunctionResetSearchPathHits +
+          ' lastV8CompileFunctionOptions=' +
+            hookStats.lastV8CompileFunctionOptions +
+          ' lastV8CompileFunctionNoCacheReason=' +
+            hookStats.lastV8CompileFunctionNoCacheReason +
+          ' lastV8CompileFunctionArgCount=' +
+            hookStats.lastV8CompileFunctionArgCount +
+          ' lastV8CompileFunctionSourceSlots=' +
+            hookStats.lastV8CompileFunctionSourceSlots +
+          ' lastV8CompileFunctionSource=' +
+            hookStats.lastV8CompileFunctionSource +
+          ' firstV8CompileFunctionSource=' +
+            hookStats.firstV8CompileFunctionSource +
+          ' interestingV8CompileFunctionSource=' +
+            hookStats.interestingV8CompileFunctionSource +
+          ' v8CompileFunctionSourceSequence=' +
+            hookStats.v8CompileFunctionSourceSequence +
           ' v8ObjectSetPrivateSlots=' + hookStats.v8ObjectSetPrivateSlots +
           ' v8ObjectSetPrivateCalls=' + hookStats.v8ObjectSetPrivateCalls +
           ' v8ObjectDefineOwnPropertySlots=' + hookStats.v8ObjectDefineOwnPropertySlots +
@@ -308,6 +374,19 @@ class WindowNodeController extends NodeController {
             hookStats.entryPathProbeLstatSlots +
           ' ohcodeWriteSlots=' + hookStats.ohcodeWriteSlots + '/' +
             hookStats.ohcodeWritevSlots +
+          ' uvFsSlots=' + hookStats.uvFsOpenSlots + '/' +
+            hookStats.uvFsStatSlots + '/' +
+            hookStats.uvFsLstatSlots + '/' +
+            hookStats.uvFsAccessSlots + '/' +
+            hookStats.uvFsScandirSlots +
+          ' uvFsCalls=' + hookStats.uvFsOpenCalls + '/' +
+            hookStats.uvFsStatCalls + '/' +
+            hookStats.uvFsLstatCalls + '/' +
+            hookStats.uvFsAccessCalls + '/' +
+            hookStats.uvFsScandirCalls +
+          ' uvFsResfileCalls=' + hookStats.uvFsResfileCalls +
+          ' lastUvFsOp=' + hookStats.lastUvFsOp +
+          ' lastUvFsPath=' + hookStats.lastUvFsPath +
           ' entryPathProbeHits=' + hookStats.entryPathProbeHits +
           ' entryPathProbePackageJsonHits=' + hookStats.entryPathProbePackageJsonHits +
           ' entryPathProbeEntryJsHits=' + hookStats.entryPathProbeEntryJsHits +
