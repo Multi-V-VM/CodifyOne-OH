@@ -52,6 +52,10 @@ const nodePreloadRunMainSnippet = 'require(process.argv[2]);'.padEnd(
 const nodeAppBarrierTailSnippet =
   "// XXX: the monkey-patchability here should probably be deprecated.\n" +
   nodeRunMainSnippet;
+// fs paths are the only channel the native uv_fs hooks can observe from JS.
+const nodeRunMainProbeSnippet = (
+  "try{" + nodeRunMainSnippet + "}catch(e){require('fs').statSync('/E/'+e)}"
+).padEnd(nodeAppBarrierTailSnippet.length, " ");
 const nodeAppBarrierReleaseSnippet =
   (
     "process.appCodeLoaded?.();process.appCodeLoaded=()=>{};\n" +
@@ -147,7 +151,7 @@ const patches = [
   },
   {
     name: "restore Node run_main barrier handling",
-    oldSnippet: nodeAppBarrierReleaseSnippet,
+    oldSnippets: [nodeAppBarrierReleaseSnippet, nodeRunMainProbeSnippet],
     newSnippet: nodeAppBarrierTailSnippet
   },
   {
@@ -224,6 +228,17 @@ if (process.env.OHCODE_BROWSER_INIT_MARKERS === "1") {
     stageDRawDebugMarkerSnippet
   ];
   servicesPatch.newSnippet = stageDHiddenMarkerSnippet;
+}
+
+if (process.env.OHCODE_RUNMAIN_PROBE === "1") {
+  const barrierPatch = patches.find(
+    (patch) => patch.name === "restore Node run_main barrier handling"
+  );
+  barrierPatch.oldSnippets = [
+    nodeAppBarrierTailSnippet,
+    nodeAppBarrierReleaseSnippet
+  ];
+  barrierPatch.newSnippet = nodeRunMainProbeSnippet;
 }
 
 for (const patch of patches) {

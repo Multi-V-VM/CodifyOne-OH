@@ -780,6 +780,9 @@ Module.runMain(electronMain);
     using UvFsOpenFn = int (*)(void *, void *, const char *, int, int, void *);
     using UvFsPathFlagsFn = int (*)(void *, void *, const char *, int, void *);
     using UvFsPathFn = int (*)(void *, void *, const char *, void *);
+    using V8StringNewFromOneByteFn = void *(*)(void *, const uint8_t *, int,
+                                               int);
+    using V8FunctionCallFn = void *(*)(void *, void *, void *, int, void **);
 
     struct V8OwnedByteVector
     {
@@ -1085,6 +1088,15 @@ Module.runMain(electronMain);
     static std::atomic<void *> g_gotRealUvFsLstat{nullptr};
     static std::atomic<void *> g_gotRealUvFsAccess{nullptr};
     static std::atomic<void *> g_gotRealUvFsScandir{nullptr};
+    static std::atomic<void *> g_gotRealV8StringNewFromOneByte{nullptr};
+    static std::once_flag g_realV8StringNewFromOneByteOnce;
+    static V8StringNewFromOneByteFn g_realV8StringNewFromOneByte = nullptr;
+    static std::atomic<uint64_t> g_v8StringNewFromOneByteCalls{0};
+    static std::atomic<void *> g_gotRealV8FunctionCall{nullptr};
+    static std::once_flag g_realV8FunctionCallOnce;
+    static V8FunctionCallFn g_realV8FunctionCall = nullptr;
+    static std::atomic<uint64_t> g_v8FunctionCallCalls{0};
+    static std::atomic<uint64_t> g_v8FunctionCallEmpty{0};
     static std::atomic<void *> g_nodePlatformForIsolateInlineTrampoline{nullptr};
     static std::atomic<void *> g_v8CompileFunctionInlineTrampoline{nullptr};
     static std::atomic<void *> g_gotRealAdapterStartGpuProcess{nullptr};
@@ -1254,6 +1266,8 @@ Module.runMain(electronMain);
     static std::atomic<uint32_t> g_patchedUvFsLstatSlots{0};
     static std::atomic<uint32_t> g_patchedUvFsAccessSlots{0};
     static std::atomic<uint32_t> g_patchedUvFsScandirSlots{0};
+    static std::atomic<uint32_t> g_patchedV8StringNewFromOneByteSlots{0};
+    static std::atomic<uint32_t> g_patchedV8FunctionCallSlots{0};
     static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
     static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
     static std::atomic<uint32_t> g_patchedV8CompileFunctionInlineEntrypoints{0};
@@ -2250,6 +2264,38 @@ Module.runMain(electronMain);
             Log("WARNING: uv_fs_scandir real symbol not found");
         } });
         return g_realUvFsScandir;
+    }
+
+    static V8StringNewFromOneByteFn GetRealV8StringNewFromOneByte()
+    {
+        if (void *gotReal = g_gotRealV8StringNewFromOneByte.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8StringNewFromOneByteFn>(gotReal);
+        }
+        std::call_once(g_realV8StringNewFromOneByteOnce, []()
+                       { g_realV8StringNewFromOneByte =
+                             reinterpret_cast<V8StringNewFromOneByteFn>(dlsym(
+                                 RTLD_NEXT,
+                                 "_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKh"
+                                 "NS_13NewStringTypeEi")); });
+        return g_realV8StringNewFromOneByte;
+    }
+
+    static V8FunctionCallFn GetRealV8FunctionCall()
+    {
+        if (void *gotReal = g_gotRealV8FunctionCall.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8FunctionCallFn>(gotReal);
+        }
+        std::call_once(g_realV8FunctionCallOnce, []()
+                       { g_realV8FunctionCall =
+                             reinterpret_cast<V8FunctionCallFn>(dlsym(
+                                 RTLD_NEXT,
+                                 "_ZN2v88Function4CallENS_5LocalINS_7ContextEEE"
+                                 "NS1_INS_5ValueEEEiPS5_")); });
+        return g_realV8FunctionCall;
     }
 
     static bool PathContains(const char *path, const char *needle)
@@ -5620,6 +5666,90 @@ extern "C" int uv_fs_scandir(void *loop, void *req, const char *path,
     return realUvFsScandir(loop, req, path, flags, cb);
 }
 
+extern "C" void *
+_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi(
+    void *isolate, const uint8_t *data, int type, int length)
+{
+    V8StringNewFromOneByteFn realNewFromOneByte =
+        GetRealV8StringNewFromOneByte();
+    if (!realNewFromOneByte)
+    {
+        return nullptr;
+    }
+
+    const uint64_t callIndex =
+        g_v8StringNewFromOneByteCalls.fetch_add(1, std::memory_order_relaxed) +
+        1;
+    if (data)
+    {
+        char preview[81];
+        const int copy = length < 0 || length > 80 ? 80 : length;
+        memcpy(preview, data, static_cast<size_t>(copy));
+        preview[copy] = '\0';
+        for (int i = 0; i < copy; ++i)
+        {
+            if (preview[i] == '\n' || preview[i] == '\r')
+            {
+                preview[i] = ' ';
+            }
+        }
+        const bool interesting =
+            strstr(preview, "embedder_main") != nullptr ||
+            strstr(preview, "internal/main") != nullptr ||
+            strstr(preview, "browser_init") != nullptr || length > 4096;
+        // Raise to trace every builtin V8 sees; 0 logs only the hits below.
+        constexpr uint64_t kV8StringTraceLimit = 0;
+        if (interesting || callIndex <= kV8StringTraceLimit)
+        {
+            Log("v8::String::NewFromOneByte[%llu]%s len=%d caller=0x%llx "
+                "text=%s",
+                static_cast<unsigned long long>(callIndex),
+                interesting ? " HIT" : "", length,
+                static_cast<unsigned long long>(
+                    reinterpret_cast<uintptr_t>(__builtin_return_address(0))),
+                preview);
+        }
+    }
+
+    return realNewFromOneByte(isolate, data, type, length);
+}
+
+extern "C" void *
+_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_(
+    void *self, void *context, void *recv, int argc, void **argv)
+{
+    V8FunctionCallFn realFunctionCall = GetRealV8FunctionCall();
+    if (!realFunctionCall)
+    {
+        return nullptr;
+    }
+
+    const uint64_t callIndex =
+        g_v8FunctionCallCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    void *result = realFunctionCall(self, context, recv, argc, argv);
+    if (!result)
+    {
+        const uint64_t emptyIndex =
+            g_v8FunctionCallEmpty.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (emptyIndex <= 20)
+        {
+            Log("v8::Function::Call THREW call#%llu fn=%p argc=%d "
+                "caller=0x%llx",
+                static_cast<unsigned long long>(callIndex), self, argc,
+                static_cast<unsigned long long>(
+                    reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
+        }
+    }
+    else if (callIndex <= 20)
+    {
+        Log("v8::Function::Call[%llu] ok fn=%p argc=%d caller=0x%llx",
+            static_cast<unsigned long long>(callIndex), self, argc,
+            static_cast<unsigned long long>(
+                reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
+    }
+    return result;
+}
+
 extern "C" void _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
     void *isolate, const void *params)
 {
@@ -6876,6 +7006,15 @@ namespace
              &g_gotRealUvFsAccess, &g_patchedUvFsAccessSlots},
             {"uv_fs_scandir", reinterpret_cast<void *>(&uv_fs_scandir),
              &g_gotRealUvFsScandir, &g_patchedUvFsScandirSlots},
+            {"_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi",
+             reinterpret_cast<void *>(
+                 &_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi),
+             &g_gotRealV8StringNewFromOneByte,
+             &g_patchedV8StringNewFromOneByteSlots},
+            {"_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_",
+             reinterpret_cast<void *>(
+                 &_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_),
+             &g_gotRealV8FunctionCall, &g_patchedV8FunctionCallSlots},
             {"_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
              reinterpret_cast<void *>(
                  &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE),
