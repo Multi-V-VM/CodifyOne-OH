@@ -90,6 +90,7 @@ function patchAppAsarMinimist(context: any): void {
     const modulePath = context.modulePath.toString();
     const projectRoot = path.resolve(modulePath, '..');
     patchElectronBrowserInit(projectRoot);
+    patchLibadapterAsyncCommand(projectRoot);
 
     const patchScript = path.join(projectRoot, 'scripts', 'patch-app-asar-minimist.js');
     requirePath('app.asar minimist patch script', patchScript);
@@ -110,6 +111,16 @@ function patchElectronBrowserInit(projectRoot: string): void {
     });
 }
 
+function patchLibadapterAsyncCommand(projectRoot: string): void {
+    const patchScript = path.join(projectRoot, 'scripts', 'patch-libadapter-async-command.js');
+    requirePath('libadapter async command patch script', patchScript);
+
+    execFileSync(process.execPath, [patchScript, projectRoot], {
+        cwd: projectRoot,
+        stdio: 'inherit'
+    });
+}
+
 function repackHapWithHnp(context: any): void {
     const modulePath = context.modulePath.toString();
     const projectRoot = path.resolve(modulePath, '..');
@@ -123,6 +134,7 @@ function repackHapWithHnp(context: any): void {
     const pkgContextPath = path.join(buildRoot, 'intermediates', 'loader', targetName, 'pkgContextInfo.json');
 
     patchElectronBrowserInit(projectRoot);
+    patchLibadapterAsyncCommand(projectRoot);
 
     const requiredPaths = [
         path.join(buildRoot, 'intermediates', 'stripped_native_libs', targetName),

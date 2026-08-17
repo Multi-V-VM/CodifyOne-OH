@@ -27,7 +27,7 @@ const STARTUP_MAIN_TRACE_FILES: string[] = [
   '/data/storage/el1/base/files/ohcode-main-trace.log',
   '/tmp/ohcode-main-trace.log'
 ];
-const STARTUP_BUILD_STAMP: string = 'diag-20260711-barrierrelease1';
+const STARTUP_BUILD_STAMP: string = 'diag-20260715-directv8main1';
 const ELECTRON_APP_PATH: string = '--app-path=/data/storage/el1/bundle/electron/resources/resfile/resources/app';
 const DISABLED_PRELOAD_FEATURES: string =
   'EnableNetworkPreload,' +

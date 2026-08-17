@@ -29,6 +29,8 @@ const invalidFinalEntryMarkerSnippet =
   'l?(p="ohcode-entry-probe.js",process.env.O=l,i._load(s.join(l,p),i,!0))                     :';
 const finalEntryMarkerSnippet =
   'l?(process.env.O=l,i._load(s.join(l,"ohcode-entry-probe.js"),i,!0))                         :';
+const directMainEntrySnippet =
+  'l?(process.env.O=l,i._load(s.join(l,"out/main.js"),i,!0))                                   :';
 const resetSearchPathsSnippet =
   'process.argv.splice(1,1),__webpack_require__("./lib/common/reset-search-paths.ts")';
 const browserRpcServerSnippet =
@@ -64,6 +66,13 @@ const stageARawDebugMarkerSnippet =
     resetSearchPathsSnippet.length,
     " "
   );
+const stageAAppCodeLoadedOnlySnippet =
+  'process.argv.splice(1,1),process.appCodeLoaded?.()'.padEnd(
+    resetSearchPathsSnippet.length,
+    " "
+  );
+const stageAAppCodeLoadedSnippet =
+  'process.argv.splice(1,1),process.appCodeLoaded?.(),process._rawDebug("[OH] READY")';
 const stageCMarkerSnippet =
   'Object.defineProperty(process,"C",{value:1})'.padEnd(
     browserRpcServerSnippet.length,
@@ -89,11 +98,38 @@ const rawDebugAppFallbackSnippet =
     packageJsonFallbackSnippet.length,
     " "
   );
+const unsafeAppSearchPathsSnippet =
+  'let l=null,c=null;const d=process._linkedBinding("electron_common_v8_util").getHiddenValue(global,"appSearchPaths");';
+const safeAppSearchPathsSnippet =
+  'let l=null,c=null,d=process._linkedBinding("electron_common_v8_util").getHiddenValue(global,"appSearchPaths")||[];  ';
 const binaryPatches = [
   {
-    name: "disable CompileFunction code cache",
+    name: "disable incompatible browser Node startup snapshot",
+    offset: 0x2cfbe94,
+    oldBytes: Buffer.from("160040f9", "hex"),
+    newBytes: Buffer.from("f6031faa", "hex")
+  },
+  {
+    name: "disable broken eager CompileFunction path",
     oldBytes: Buffer.from("e87703d0f403072af503062af60300aa", "hex"),
     newBytes: Buffer.from("e87703d0f403072af5031f2af60300aa", "hex")
+  },
+  {
+    name: "restore Node environment bootstrap failure handling",
+    oldBytes: Buffer.from("5a0100941f2003d5683a45f9", "hex"),
+    newBytes: Buffer.from("5a010094e00300b4683a45f9", "hex")
+  },
+  {
+    name: "restore Node source execution thunk",
+    offset: 0x857fbf0,
+    oldBytes: Buffer.from(
+      "24930d14ffc301d1fd7b04a9f65705a9f44f06a9fd030191080440f9",
+      "hex"
+    ),
+    newBytes: Buffer.from(
+      "7f2303d5ffc301d1fd7b04a9f65705a9f44f06a9fd030191080440f9",
+      "hex"
+    )
   }
 ];
 
@@ -104,30 +140,41 @@ const patches = [
     newSnippet: nodeRunMainSnippet
   },
   {
-    name: "release app-code startup barrier",
-    oldSnippet: nodeAppBarrierTailSnippet,
-    newSnippet: nodeAppBarrierReleaseSnippet
+    name: "restore Node run_main barrier handling",
+    oldSnippet: nodeAppBarrierReleaseSnippet,
+    newSnippet: nodeAppBarrierTailSnippet
   },
   {
-    name: "stage A raw debug marker",
-    oldSnippets: [resetSearchPathsSnippet, stageAMarkerSnippet, stageAHiddenMarkerSnippet],
-    newSnippet: stageARawDebugMarkerSnippet
+    name: "restore Electron search-path initialization",
+    oldSnippets: [
+      stageAMarkerSnippet,
+      stageAHiddenMarkerSnippet,
+      stageARawDebugMarkerSnippet,
+      stageAAppCodeLoadedOnlySnippet,
+      stageAAppCodeLoadedSnippet
+    ],
+    newSnippet: resetSearchPathsSnippet
   },
   {
-    name: "stage D raw debug marker",
-    oldSnippets: [stageDCombinedSnippet, stageDDefineCombinedSnippet, stageDHiddenMarkerSnippet],
-    newSnippet: stageDRawDebugMarkerSnippet
+    name: "restore Electron browser services",
+    oldSnippets: [stageDDefineCombinedSnippet, stageDHiddenMarkerSnippet, stageDRawDebugMarkerSnippet],
+    newSnippet: stageDCombinedSnippet
   },
   {
-    name: "app fallback raw debug marker",
+    name: "use bundled OHcode app fallback",
     oldSnippets: [
       originalAppFallbackSnippet,
       packageJsonFallbackSnippet,
-      forcedAppFallbackSnippet,
       markedAppFallbackSnippet,
-      defineAppFallbackSnippet
+      defineAppFallbackSnippet,
+      rawDebugAppFallbackSnippet
     ],
-    newSnippet: rawDebugAppFallbackSnippet
+    newSnippet: forcedAppFallbackSnippet
+  },
+  {
+    name: "default missing app search paths",
+    oldSnippet: unsafeAppSearchPathsSnippet,
+    newSnippet: safeAppSearchPathsSnippet
   },
   {
     name: "entry probe",
@@ -137,12 +184,13 @@ const patches = [
       'l?(p="ohcode-entry-probe.js",process._firstFileName=s.join(l,p),i._load(s.join(l,p),i,!0))  :'
   },
   {
-    name: "entry marker",
+    name: "load OHcode main directly",
     oldSnippets: [
       'l?(p="ohcode-entry-probe.js",process._firstFileName=s.join(l,p),i._load(s.join(l,p),i,!0))  :',
-      invalidFinalEntryMarkerSnippet
+      invalidFinalEntryMarkerSnippet,
+      finalEntryMarkerSnippet
     ],
-    newSnippet: finalEntryMarkerSnippet
+    newSnippet: directMainEntrySnippet
   }
 ];
 
@@ -203,8 +251,16 @@ for (const candidate of candidates) {
   let candidateAlreadyPatched = 0;
 
   for (const patch of binaryPatches) {
-    const oldIndex = data.indexOf(patch.oldBytes);
-    const patchedIndex = data.indexOf(patch.newBytes);
+    const oldIndex = Number.isInteger(patch.offset)
+      ? data.subarray(patch.offset, patch.offset + patch.oldBytes.length).equals(patch.oldBytes)
+        ? patch.offset
+        : -1
+      : data.indexOf(patch.oldBytes);
+    const patchedIndex = Number.isInteger(patch.offset)
+      ? data.subarray(patch.offset, patch.offset + patch.newBytes.length).equals(patch.newBytes)
+        ? patch.offset
+        : -1
+      : data.indexOf(patch.newBytes);
 
     if (oldIndex === -1) {
       if (patchedIndex !== -1) {
@@ -213,7 +269,10 @@ for (const candidate of candidates) {
       }
       throw new Error(`libelectron ${patch.name} bytes not found in ${candidate}`);
     }
-    if (data.indexOf(patch.oldBytes, oldIndex + patch.oldBytes.length) !== -1) {
+    if (
+      !Number.isInteger(patch.offset) &&
+      data.indexOf(patch.oldBytes, oldIndex + patch.oldBytes.length) !== -1
+    ) {
       throw new Error(`libelectron ${patch.name} bytes are not unique in ${candidate}`);
     }
 
@@ -236,7 +295,8 @@ for (const candidate of candidates) {
       }
       if (
         patch.name === "entry probe" &&
-        (text.indexOf(finalEntryMarkerSnippet) !== -1 ||
+        (text.indexOf(directMainEntrySnippet) !== -1 ||
+          text.indexOf(finalEntryMarkerSnippet) !== -1 ||
           text.indexOf(invalidFinalEntryMarkerSnippet) !== -1)
       ) {
         candidateAlreadyPatched++;

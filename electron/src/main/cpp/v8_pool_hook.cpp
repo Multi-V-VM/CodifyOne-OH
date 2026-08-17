@@ -159,7 +159,7 @@ Module.runMain(electronMain);
 )OHCODE_JS";
 constexpr const char* kNodePreLoadProbeScript = R"OHCODE_JS(
 ;(() => {
-  const STAMP = "diag-20260711-barrierrelease1";
+  const STAMP = "diag-20260715-directv8main1";
   const parts = [];
   function text(value) {
     try {
@@ -386,9 +386,24 @@ constexpr const char* kNodePreLoadProbeScript = R"OHCODE_JS(
   return parts.join(" || ").slice(0, 1800);
 })();
 )OHCODE_JS";
+constexpr const char* kNodeDirectBootstrapScript = R"OHCODE_JS(
+(function(process, require) {
+  try {
+    process._rawDebug(`[OHcodeDirectV8] entered require=${typeof require}`);
+    process.argv[1] = "/data/storage/el1/bundle/electron/resources/resfile/app/ohcode-entry-probe.js";
+    require("module").runMain();
+    return "OHCODE_DIRECT_V8_RUN_MAIN_RETURNED";
+  } catch (err) {
+    return `OHCODE_DIRECT_V8_FAILED:${String((err && (err.stack || err.message)) || err)}`;
+  }
+})
+)OHCODE_JS";
+constexpr const char* kNodeExposeBootstrapGlobalsScript =
+    "globalThis.process=process;globalThis.require=require;"
+    "'OHCODE_NODE_GLOBALS_EXPOSED'";
 constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
-  const STAMP = "diag-20260711-barrierrelease1";
+  const STAMP = "diag-20260715-directv8main1";
   const TRACE_PATHS = [
     "/data/storage/el2/base/files/ohcode-main-trace.log",
     "/data/storage/el1/base/files/ohcode-main-trace.log",
@@ -694,6 +709,10 @@ constexpr int kDefaultSnapshotMmapMinBytes = 1024 * 1024;
 constexpr int kDefaultSnapshotMmapMaxBytes = 768 * 1024 * 1024;
 constexpr size_t kMaxTrackedMmapAllocations = 128;
 constexpr uintptr_t kNodeInitializeContextOffset = 0x857edec;
+constexpr uintptr_t kNodeStartExecutionThunkOffset = 0x857fbf0;
+// node::Realm::BootstrapInternalLoaders(). The stripped Electron binary's
+// normal Node startup can leave builtin_module_require unset on HarmonyOS.
+constexpr uintptr_t kNodeRealmBootstrapInternalLoadersOffset = 0x869a6bc;
 // node::SetIsolateUpForNode calls platform->RegisterIsolate(isolate, loop)
 // through the NodePlatform/MultiIsolatePlatform vtable at byte offset 0xe0.
 // Calling libelectron's internal map-insert helper directly is not ABI-safe.
@@ -730,7 +749,14 @@ using NodeInitializeContextFn = uint32_t (*)(void*);
 using V8ContextGetIsolateFn = void* (*)(void*);
 using V8ContextGlobalFn = void* (*)(void*);
 using V8ContextEnterFn = void (*)(void*);
+using V8ScriptCompileFn = void* (*)(void*, void*, void*);
+using V8ScriptRunFn = void* (*)(void*, void*);
 using V8ObjectGetFn = void* (*)(void*, void*, void*);
+using V8ObjectSetValueFn = uint32_t (*)(void*, void*, void*, void*);
+using V8ValueIsFunctionFn = bool (*)(void*);
+using V8FunctionCallFn = void* (*)(void*, void*, void*, int, void**);
+using V8CreateHandleFn = void* (*)(void*, uintptr_t);
+using NodeRealmBootstrapInternalLoadersFn = void* (*)(void*);
 using V8GetCurrentPlatformFn = void* (*)();
 using UvDefaultLoopFn = void* (*)();
 using UvMutexFn = void (*)(void*);
@@ -767,7 +793,6 @@ using NodeNewContextFn = void* (*)(void*, void*);
 using NodeCreateEnvironmentFn =
     void* (*)(void*, void*, void*, void*, void*, void*, void*);
 using NodeLoadEnvironmentStringFn = void* (*)(void*, const char*);
-using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*, void*);
 using V8ObjectSetPrivateFn = uint32_t (*)(void*, void*, void*, void*);
 using V8ObjectDefineOwnPropertyFn =
     uint32_t (*)(void*, void*, void*, void*, int);
@@ -786,6 +811,12 @@ using V8StringNewFromUtf8Fn = void* (*)(void*, const char*, int, int);
 using V8ArrayNewFn = void* (*)(void*, int);
 using V8ObjectSetIndexFn = uint32_t (*)(void*, void*, uint32_t, void*);
 using V8NumberNewFn = void* (*)(void*, double);
+
+struct NodeStartExecutionCallbackInfoView {
+    void* firstValue;
+    void* secondValue;
+};
+using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*, void*);
 
 struct V8StartupDataView {
     const char* data;
@@ -924,6 +955,7 @@ static std::once_flag g_realNodeCreateEnvironmentOnce;
 static std::once_flag g_realNodeLoadEnvironmentStringOnce;
 static std::once_flag g_realNodeLoadEnvironmentCallbackOnce;
 static std::once_flag g_v8ContextEnterOnce;
+static std::once_flag g_v8DirectScriptSymbolsOnce;
 static std::once_flag g_realV8ObjectSetPrivateOnce;
 static std::once_flag g_realV8ObjectDefineOwnPropertyOnce;
 static std::once_flag g_realV8CompileFunctionOnce;
@@ -959,6 +991,9 @@ static NodeLoadEnvironmentStringFn g_realNodeLoadEnvironmentString = nullptr;
 static NodeLoadEnvironmentCallbackFn g_realNodeLoadEnvironmentCallback =
     nullptr;
 static V8ContextEnterFn g_v8ContextEnter = nullptr;
+static V8StringNewFromUtf8Fn g_v8DirectStringNewFromUtf8 = nullptr;
+static V8ScriptCompileFn g_v8DirectScriptCompile = nullptr;
+static V8ScriptRunFn g_v8DirectScriptRun = nullptr;
 static V8ObjectSetPrivateFn g_realV8ObjectSetPrivate = nullptr;
 static V8ObjectDefineOwnPropertyFn g_realV8ObjectDefineOwnProperty = nullptr;
 static V8CompileFunctionFn g_realV8CompileFunction = nullptr;
@@ -977,6 +1012,10 @@ static UvFsPathFlagsFn g_realUvFsScandir = nullptr;
 static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
 static V8ContextGlobalFn g_v8ContextGlobal = nullptr;
 static V8ObjectGetFn g_v8ObjectGet = nullptr;
+static V8ObjectSetValueFn g_v8ObjectSetValue = nullptr;
+static V8ValueIsFunctionFn g_v8ValueIsFunction = nullptr;
+static V8FunctionCallFn g_v8FunctionCall = nullptr;
+static V8CreateHandleFn g_v8CreateHandle = nullptr;
 static V8PrivateNameFn g_v8PrivateName = nullptr;
 static V8ValueIsStringFn g_v8ValueIsString = nullptr;
 static V8StringUtf8LengthFn g_v8StringUtf8Length = nullptr;
@@ -1114,6 +1153,7 @@ static std::atomic<uint64_t> g_uvFsResfileCalls{0};
 static std::atomic<uint64_t> g_ohcodeWriteTraceCalls{0};
 static std::atomic<uint64_t> g_ohcodeWriteTraceBytes{0};
 static std::atomic<uint64_t> g_nodeInitializeContextInlineFailures{0};
+static std::atomic<uint64_t> g_nodeStartExecutionThunkInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformForIsolateInlineFailures{0};
 static std::atomic<uint64_t> g_v8CompileFunctionInlineFailures{0};
 static std::atomic<uint64_t> g_nodePlatformRegisterAttempts{0};
@@ -1162,6 +1202,7 @@ static std::atomic<bool> g_electronPreloadAttempted{false};
 static std::atomic<bool> g_electronPreloadSucceeded{false};
 static void* g_electronPreloadHandle = nullptr;
 static std::atomic<bool> g_nodeInitializeContextInlineInstalled{false};
+static std::atomic<bool> g_nodeStartExecutionThunkInlineInstalled{false};
 static std::atomic<bool> g_nodePlatformForIsolateInlineInstalled{false};
 static std::atomic<bool> g_v8CompileFunctionInlineInstalled{false};
 static std::atomic<uint32_t> g_patchedEpollWaitSlots{0};
@@ -1731,6 +1772,20 @@ static void ResolveV8AppSearchPathSymbols() {
         ResolveElectronExport(
             "_ZN2v86Object3GetENS_5LocalINS_7ContextEEENS1_INS_5ValueEEE",
             nullptr));
+    g_v8ObjectSetValue = reinterpret_cast<V8ObjectSetValueFn>(
+        ResolveElectronExport(
+            "_ZN2v86Object3SetENS_5LocalINS_7ContextEEENS1_INS_5ValueEEES5_",
+            nullptr));
+    g_v8ValueIsFunction = reinterpret_cast<V8ValueIsFunctionFn>(
+        ResolveElectronExport("_ZNK2v85Value10IsFunctionEv", nullptr));
+    g_v8FunctionCall = reinterpret_cast<V8FunctionCallFn>(
+        ResolveElectronExport(
+            "_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_",
+            nullptr));
+    g_v8CreateHandle = reinterpret_cast<V8CreateHandleFn>(
+        ResolveElectronExport(
+            "_ZN2v811HandleScope12CreateHandleEPNS_8internal7IsolateEm",
+            nullptr));
     g_v8PrivateName = reinterpret_cast<V8PrivateNameFn>(
         ResolveElectronExport("_ZNK2v87Private4NameEv", nullptr));
     g_v8ValueIsString = reinterpret_cast<V8ValueIsStringFn>(
@@ -1755,16 +1810,18 @@ static void ResolveV8AppSearchPathSymbols() {
         ResolveElectronExport("_ZN2v86Number3NewEPNS_7IsolateEd", nullptr));
 
     if (!g_v8ContextGetIsolate || !g_v8ContextGlobal || !g_v8ObjectGet ||
+        !g_v8ObjectSetValue ||
         !g_v8PrivateName ||
         !g_v8ValueIsString || !g_v8StringWriteUtf8 || !g_v8StringNewFromUtf8 ||
         !g_v8ArrayNew || !g_v8ObjectSetIndex || !g_v8NumberNew) {
         Log("WARNING: appSearchPaths V8 symbols missing: contextGetIsolate=%p "
-            "contextGlobal=%p objectGet=%p "
+            "contextGlobal=%p objectGet=%p objectSet=%p "
             "privateName=%p valueIsString=%p utf8Length=%p writeUtf8=%p newString=%p "
             "arrayNew=%p setIndex=%p numberNew=%p",
             reinterpret_cast<void*>(g_v8ContextGetIsolate),
             reinterpret_cast<void*>(g_v8ContextGlobal),
             reinterpret_cast<void*>(g_v8ObjectGet),
+            reinterpret_cast<void*>(g_v8ObjectSetValue),
             reinterpret_cast<void*>(g_v8PrivateName),
             reinterpret_cast<void*>(g_v8ValueIsString),
             reinterpret_cast<void*>(g_v8StringUtf8Length),
@@ -2659,6 +2716,152 @@ static bool ForceEnterNodeMainContext() {
     g_forcedContextEnterSuccesses.fetch_add(1, std::memory_order_relaxed);
     Log("forced context enter succeeded context=%p", context);
     return true;
+}
+
+static void* RunDirectV8BootstrapScript(void* processObject,
+                                        void* nativeRequire) {
+    std::call_once(g_v8DirectScriptSymbolsOnce, []() {
+        g_v8DirectStringNewFromUtf8 =
+            reinterpret_cast<V8StringNewFromUtf8Fn>(ResolveElectronExport(
+                "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
+                nullptr));
+        g_v8DirectScriptCompile =
+            reinterpret_cast<V8ScriptCompileFn>(ResolveElectronExport(
+                "_ZN2v86Script7CompileENS_5LocalINS_7ContextEEENS1_INS_6StringEEEPNS_12ScriptOriginE",
+                nullptr));
+        g_v8DirectScriptRun =
+            reinterpret_cast<V8ScriptRunFn>(ResolveElectronExport(
+                "_ZN2v86Script3RunENS_5LocalINS_7ContextEEE", nullptr));
+    });
+
+    void* isolate = reinterpret_cast<void*>(
+        g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
+    void* context = reinterpret_cast<void*>(
+        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+    if (!isolate || !context || !g_v8DirectStringNewFromUtf8 ||
+        !g_v8DirectScriptCompile || !g_v8DirectScriptRun) {
+        Log("direct V8 bootstrap unavailable isolate=%p context=%p string=%p "
+            "compile=%p run=%p",
+            isolate, context,
+            reinterpret_cast<void*>(g_v8DirectStringNewFromUtf8),
+            reinterpret_cast<void*>(g_v8DirectScriptCompile),
+            reinterpret_cast<void*>(g_v8DirectScriptRun));
+        return nullptr;
+    }
+
+    void* source = g_v8DirectStringNewFromUtf8(
+        isolate, kNodeDirectBootstrapScript, 0, -1);
+    if (!source) {
+        Log("direct V8 bootstrap failed to create source string");
+        return nullptr;
+    }
+    void* script = g_v8DirectScriptCompile(context, source, nullptr);
+    if (!script) {
+        Log("direct V8 bootstrap compile returned empty context=%p source=%p",
+            context, source);
+        return nullptr;
+    }
+    void* function = g_v8DirectScriptRun(script, context);
+    if (!function || !g_v8FunctionCall) {
+        Log("direct V8 bootstrap function unavailable value=%p call=%p",
+            function, reinterpret_cast<void*>(g_v8FunctionCall));
+        return nullptr;
+    }
+    void* receiver = g_v8ContextGlobal(context);
+    void* arguments[] = {processObject, nativeRequire};
+    void* value = g_v8FunctionCall(
+        function, context, receiver, 2, arguments);
+    Log("direct V8 bootstrap call returned value=%p context=%p function=%p",
+        value, context, function);
+    std::string result;
+    if (ReadNodeLoadEnvironmentStringResult(value, &result)) {
+        Log("direct V8 bootstrap result=%s", result.c_str());
+    } else {
+        Log("direct V8 bootstrap result unreadable value=%p", value);
+    }
+    return value;
+}
+
+static void* ResolveElectronOffset(uintptr_t offset);
+
+static bool BootstrapMissingNodeInternalLoaders(void* environment) {
+    if (!environment) {
+        return false;
+    }
+
+    auto* environmentBytes = static_cast<uint8_t*>(environment);
+    void* realm = *reinterpret_cast<void**>(environmentBytes + 0xa70);
+    auto bootstrap = reinterpret_cast<NodeRealmBootstrapInternalLoadersFn>(
+        ResolveElectronOffset(kNodeRealmBootstrapInternalLoadersOffset));
+    if (!realm || !bootstrap) {
+        Log("Node internal-loader bootstrap unavailable env=%p realm=%p "
+            "function=%p",
+            environment, realm, reinterpret_cast<void*>(bootstrap));
+        return false;
+    }
+
+    Log("running Node Realm::BootstrapInternalLoaders realm=%p function=%p",
+        realm, reinterpret_cast<void*>(bootstrap));
+    void* result = bootstrap(realm);
+    Log("Node Realm::BootstrapInternalLoaders returned value=%p realm=%p",
+        result, realm);
+    return result != nullptr;
+}
+
+static void* RunNodeStartExecutionBootstrap(
+    const NodeStartExecutionCallbackInfoView& info) {
+    void* context = reinterpret_cast<void*>(
+        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+    std::call_once(g_v8AppSearchPathSymbolsOnce,
+                   ResolveV8AppSearchPathSymbols);
+    if (!context || !info.firstValue || !info.secondValue ||
+        !g_v8ContextGetIsolate || !g_v8ContextGlobal ||
+        !g_v8ValueIsFunction || !g_v8FunctionCall || !g_v8CreateHandle) {
+        Log("node bootstrap callback unavailable context=%p first=%p "
+            "second=%p global=%p isFunction=%p call=%p",
+            context, info.firstValue, info.secondValue,
+            reinterpret_cast<void*>(g_v8ContextGlobal),
+            reinterpret_cast<void*>(g_v8ValueIsFunction),
+            reinterpret_cast<void*>(g_v8FunctionCall));
+        return nullptr;
+    }
+
+    void* isolate = g_v8ContextGetIsolate(context);
+    const uintptr_t firstTagged =
+        *reinterpret_cast<const uintptr_t*>(info.firstValue);
+    const uintptr_t secondTagged =
+        *reinterpret_cast<const uintptr_t*>(info.secondValue);
+    void* firstLocal = g_v8CreateHandle(isolate, firstTagged);
+    void* secondLocal = g_v8CreateHandle(isolate, secondTagged);
+    const bool firstIsFunction =
+        firstLocal && g_v8ValueIsFunction(firstLocal);
+    const bool secondIsFunction =
+        secondLocal && g_v8ValueIsFunction(secondLocal);
+    void* nativeRequire = firstIsFunction ? firstLocal : secondLocal;
+    void* processObject = firstIsFunction ? secondLocal : firstLocal;
+    Log("node bootstrap persistent values first=%p tagged=0x%llx local=%p "
+        "function=%d second=%p tagged=0x%llx local=%p function=%d "
+        "process=%p require=%p",
+        info.firstValue, static_cast<unsigned long long>(firstTagged),
+        firstLocal, firstIsFunction, info.secondValue,
+        static_cast<unsigned long long>(secondTagged), secondLocal,
+        secondIsFunction, processObject, nativeRequire);
+    if (firstIsFunction == secondIsFunction) {
+        Log("node bootstrap callback could not uniquely identify native require");
+        return nullptr;
+    }
+    return RunDirectV8BootstrapScript(processObject, nativeRequire);
+}
+
+extern "C" void* OHcodeNodeStartExecutionThunk(
+    void* callbackStorage,
+    const NodeStartExecutionCallbackInfoView* info) {
+    Log("node start-execution thunk entered callback=%p info=%p",
+        callbackStorage, info);
+    if (!info) {
+        return nullptr;
+    }
+    return RunNodeStartExecutionBootstrap(*info);
 }
 
 static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
@@ -5053,32 +5256,7 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         reinterpret_cast<uintptr_t>(callback), std::memory_order_relaxed);
     g_lastNodeLoadEnvironmentPreload.store(
         reinterpret_cast<uintptr_t>(preload), std::memory_order_relaxed);
-    if (callIndex == 1) {
-        ForceEnterNodeMainContext();
-    }
-    void* value = nullptr;
-    if (callIndex == 1) {
-        NodeLoadEnvironmentStringFn realLoadEnvironmentString =
-            GetRealNodeLoadEnvironmentString();
-        g_nodePreLoadProbeAttempts.fetch_add(1, std::memory_order_relaxed);
-        if (realLoadEnvironmentString) {
-            value = realLoadEnvironmentString(environment,
-                                              kNodePreLoadProbeScript);
-            if (value) {
-                g_nodePreLoadProbeSuccesses.fetch_add(
-                    1, std::memory_order_relaxed);
-                RecordNodePreLoadProbeResult(value);
-            } else {
-                g_nodePreLoadProbeFailures.fetch_add(
-                    1, std::memory_order_relaxed);
-            }
-        } else {
-            g_nodePreLoadProbeFailures.fetch_add(1,
-                                                 std::memory_order_relaxed);
-        }
-    } else {
-        value = realLoadEnvironment(environment, callback, preload);
-    }
+    void* value = realLoadEnvironment(environment, callback, preload);
     g_lastNodeLoadEnvironmentResult.store(reinterpret_cast<uintptr_t>(value),
                                           std::memory_order_relaxed);
     if (!value) {
@@ -5090,6 +5268,34 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         Log("node::LoadEnvironment(callback) returned value=%p env=%p "
             "callback=%p preload=%p",
             value, environment, callback, preload);
+    }
+    if (value && callIndex == 1) {
+        auto* environmentBytes = static_cast<uint8_t*>(environment);
+        void* startExecutionData =
+            *reinterpret_cast<void**>(environmentBytes + 0xa70);
+        if (startExecutionData) {
+            auto* dataBytes = static_cast<uint8_t*>(startExecutionData);
+            NodeStartExecutionCallbackInfoView info{
+                *reinterpret_cast<void**>(dataBytes + 0x1c8),
+                *reinterpret_cast<void**>(dataBytes + 0x1a8)};
+            Log("recovered Node start-execution values data=%p first=%p "
+                "second=%p", startExecutionData, info.firstValue,
+                info.secondValue);
+            void* bootstrapResult = RunNodeStartExecutionBootstrap(info);
+            if (!bootstrapResult &&
+                BootstrapMissingNodeInternalLoaders(environment)) {
+                info.firstValue =
+                    *reinterpret_cast<void**>(dataBytes + 0x1c8);
+                info.secondValue =
+                    *reinterpret_cast<void**>(dataBytes + 0x1a8);
+                Log("recovered Node start-execution values after loader "
+                    "bootstrap first=%p second=%p",
+                    info.firstValue, info.secondValue);
+                RunNodeStartExecutionBootstrap(info);
+            }
+        } else {
+            Log("Node start-execution data unavailable env=%p", environment);
+        }
     }
     return value;
 }
@@ -5499,6 +5705,59 @@ static void WriteAbsoluteBranch(void* address, void* target) {
            &targetAddress, sizeof(targetAddress));
 }
 
+static bool InstallNodeStartExecutionThunkInlineHookAt(
+    void* target, bool allowRwFallback) {
+    if (!target) {
+        return false;
+    }
+    if (g_nodeStartExecutionThunkInlineInstalled.load(
+            std::memory_order_acquire)) {
+        return true;
+    }
+
+    std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
+    if (g_nodeStartExecutionThunkInlineInstalled.load(
+            std::memory_order_acquire)) {
+        return true;
+    }
+
+    size_t pageSize = 0;
+    void* pageStart = nullptr;
+    bool keptExecutable = false;
+    if (!MakeCodePageWritable(target, &pageSize, &pageStart,
+                              &keptExecutable, allowRwFallback)) {
+        g_nodeStartExecutionThunkInlineFailures.fetch_add(
+            1, std::memory_order_relaxed);
+        Log("node start-execution thunk hook mprotect failed target=%p "
+            "errno=%d",
+            target, errno);
+        return false;
+    }
+
+    void* replacement =
+        reinterpret_cast<void*>(&OHcodeNodeStartExecutionThunk);
+    WriteAbsoluteBranch(target, replacement);
+    __builtin___clear_cache(
+        reinterpret_cast<char*>(target),
+        reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
+    if (pageStart && pageSize > 0 &&
+        mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
+        g_nodeStartExecutionThunkInlineFailures.fetch_add(
+            1, std::memory_order_relaxed);
+        Log("node start-execution thunk hook restore RX failed target=%p "
+            "errno=%d",
+            target, errno);
+        return false;
+    }
+
+    g_nodeStartExecutionThunkInlineInstalled.store(
+        true, std::memory_order_release);
+    Log("node start-execution thunk hook installed target=%p replacement=%p "
+        "keptExec=%d",
+        target, replacement, keptExecutable ? 1 : 0);
+    return true;
+}
+
 static void* CreateNodeInitializeContextTrampoline(void* target) {
     constexpr size_t trampolineSize =
         kAarch64InlineBranchBytes + kAarch64InlineBranchBytes;
@@ -5862,6 +6121,20 @@ static const PltHookTarget* FindPltHookTarget(const char* symbol) {
         {"_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE",
          reinterpret_cast<void*>(&_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE),
          &g_gotRealSnapshotDecompress, &g_patchedSnapshotDecompressSlots},
+        {"_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE",
+         reinterpret_cast<void*>(
+             &_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE),
+         &g_gotRealNodeNewContext, &g_patchedNodeNewContextSlots},
+        {"_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE",
+         reinterpret_cast<void*>(
+             &_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE),
+         &g_gotRealNodeCreateEnvironment,
+         &g_patchedNodeCreateEnvironmentSlots},
+        {"_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE",
+         reinterpret_cast<void*>(
+             &_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE),
+         &g_gotRealNodeLoadEnvironmentCallback,
+         &g_patchedNodeLoadEnvironmentCallbackSlots},
         {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
          reinterpret_cast<void*>(
              &_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
