@@ -121,6 +121,24 @@ function patchLibadapterAsyncCommand(projectRoot: string): void {
     });
 }
 
+function isHnpDisabled(): boolean {
+    const flag = process.env.OHCODE_NO_HNP;
+    return flag !== undefined && flag !== '' && flag !== '0' && flag.toLowerCase() !== 'false';
+}
+
+// Emulator images lack const.startup.hnp.install.enable, so a HAP declaring hnpPackages
+// always fails with bm error 9568407 (HNP_API_ERRNO_HNP_INSTALL_DISABLED).
+function stripHnpPackages(moduleJsonPath: string): void {
+    const moduleJson = JSON.parse(fs.readFileSync(moduleJsonPath, 'utf8'));
+    if (moduleJson.module?.hnpPackages === undefined) {
+        return;
+    }
+
+    delete moduleJson.module.hnpPackages;
+    fs.writeFileSync(moduleJsonPath, JSON.stringify(moduleJson, null, 2));
+    console.info(`[OHcode] Removed hnpPackages from ${moduleJsonPath}`);
+}
+
 function repackHapWithHnp(context: any): void {
     const modulePath = context.modulePath.toString();
     const projectRoot = path.resolve(modulePath, '..');
@@ -129,25 +147,34 @@ function repackHapWithHnp(context: any): void {
     const outputsRoot = path.join(buildRoot, 'outputs', targetName);
     const sdkHome = process.env.DEVECO_SDK_HOME ?? process.env.HARMONYOS_SDK_HOME ?? process.env.OHOS_SDK_HOME;
     const packingTool = findPackingTool(sdkHome);
-    const hnpPath = stageHnpPath(modulePath, buildRoot, targetName);
+    const noHnp = isHnpDisabled();
+    const hnpPath = noHnp ? undefined : stageHnpPath(modulePath, buildRoot, targetName);
     const outPath = path.join(outputsRoot, `${context.moduleName}-${targetName}-unsigned.hap`);
     const pkgContextPath = path.join(buildRoot, 'intermediates', 'loader', targetName, 'pkgContextInfo.json');
+    const moduleJsonPath = path.join(buildRoot, 'intermediates', 'package', targetName, 'module.json');
 
     patchElectronBrowserInit(projectRoot);
     patchLibadapterAsyncCommand(projectRoot);
 
     const requiredPaths = [
         path.join(buildRoot, 'intermediates', 'stripped_native_libs', targetName),
-        path.join(buildRoot, 'intermediates', 'package', targetName, 'module.json'),
+        moduleJsonPath,
         path.join(buildRoot, 'intermediates', 'res', targetName, 'resources'),
         path.join(buildRoot, 'intermediates', 'res', targetName, 'resources.index'),
         path.join(outputsRoot, 'pack.info'),
-        path.join(buildRoot, 'intermediates', 'loader_out', targetName, 'ets'),
-        hnpPath
+        path.join(buildRoot, 'intermediates', 'loader_out', targetName, 'ets')
     ];
+
+    if (hnpPath !== undefined) {
+        requiredPaths.push(hnpPath);
+    }
 
     for (const required of requiredPaths) {
         requirePath('Required build path', required);
+    }
+
+    if (noHnp) {
+        stripHnpPackages(moduleJsonPath);
     }
 
     const args = [
@@ -156,7 +183,7 @@ function repackHapWithHnp(context: any): void {
         '--mode', 'hap',
         '--force', 'true',
         '--lib-path', path.join(buildRoot, 'intermediates', 'stripped_native_libs', targetName),
-        '--json-path', path.join(buildRoot, 'intermediates', 'package', targetName, 'module.json'),
+        '--json-path', moduleJsonPath,
         '--resources-path', path.join(buildRoot, 'intermediates', 'res', targetName, 'resources'),
         '--index-path', path.join(buildRoot, 'intermediates', 'res', targetName, 'resources.index'),
         '--pack-info-path', path.join(outputsRoot, 'pack.info'),
@@ -168,9 +195,13 @@ function repackHapWithHnp(context: any): void {
         args.push('--pkg-context-path', pkgContextPath);
     }
 
-    args.push('--hnp-path', hnpPath);
+    if (hnpPath !== undefined) {
+        args.push('--hnp-path', hnpPath);
+        console.info(`[OHcode] Repacking HAP with HNP path: ${hnpPath}`);
+    } else {
+        console.warn('[OHcode] OHCODE_NO_HNP set: repacking emulator-only HAP without native packages');
+    }
 
-    console.info(`[OHcode] Repacking HAP with HNP path: ${hnpPath}`);
     execFileSync('java', args, {
         cwd: projectRoot,
         stdio: 'inherit'

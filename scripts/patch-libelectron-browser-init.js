@@ -5,6 +5,12 @@ const path = require("path");
 
 const projectRoot = path.resolve(process.argv[2] || path.join(__dirname, ".."));
 const targetName = process.env.OHCODE_TARGET_NAME || "default";
+const revertedPatchNames = new Set(
+  (process.env.OHCODE_REVERT_LIBELECTRON_PATCHES || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0)
+);
 
 const originalAppFallbackSnippet =
   'if(null==c)throw process.nextTick((function(){return process.exit(1)})),new Error("Unable to find a valid app");';
@@ -194,6 +200,32 @@ const patches = [
   }
 ];
 
+// JS-side Object.defineProperty never reaches the C++ v8::Object::DefineOwnProperty
+// API, so use setHiddenValue markers, which do land in v8::Object::SetPrivate.
+if (process.env.OHCODE_BROWSER_INIT_MARKERS === "1") {
+  const searchPathPatch = patches.find(
+    (patch) => patch.name === "restore Electron search-path initialization"
+  );
+  searchPathPatch.oldSnippets = [
+    resetSearchPathsSnippet,
+    stageAMarkerSnippet,
+    stageARawDebugMarkerSnippet,
+    stageAAppCodeLoadedOnlySnippet,
+    stageAAppCodeLoadedSnippet
+  ];
+  searchPathPatch.newSnippet = stageAHiddenMarkerSnippet;
+
+  const servicesPatch = patches.find(
+    (patch) => patch.name === "restore Electron browser services"
+  );
+  servicesPatch.oldSnippets = [
+    stageDCombinedSnippet,
+    stageDDefineCombinedSnippet,
+    stageDRawDebugMarkerSnippet
+  ];
+  servicesPatch.newSnippet = stageDHiddenMarkerSnippet;
+}
+
 for (const patch of patches) {
   for (const oldSnippet of patch.oldSnippets || [patch.oldSnippet]) {
     if (oldSnippet.length !== patch.newSnippet.length) {
@@ -261,6 +293,17 @@ for (const candidate of candidates) {
         ? patch.offset
         : -1
       : data.indexOf(patch.newBytes);
+
+    if (revertedPatchNames.has(patch.name)) {
+      if (patchedIndex !== -1) {
+        patch.oldBytes.copy(data, patchedIndex);
+        candidatePatched++;
+        console.info(`[OHcode] Reverted libelectron patch: ${patch.name}`);
+      } else {
+        candidateAlreadyPatched++;
+      }
+      continue;
+    }
 
     if (oldIndex === -1) {
       if (patchedIndex !== -1) {

@@ -33,33 +33,33 @@
 #endif
 
 extern "C" uint32_t
-_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void* context);
-extern "C" void*
+_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void *context);
+extern "C" void *
 _ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE(
-    void* isolate, void* objectTemplate);
-extern "C" void*
+    void *isolate, void *objectTemplate);
+extern "C" void *
 _ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE(
-    void* isolateData, void* context, void* args, void* execArgs, void* flags,
-    void* threadId, void* inspectorParentHandle);
-extern "C" void*
-_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
-                                                const char* source);
-extern "C" void*
+    void *isolateData, void *context, void *args, void *execArgs, void *flags,
+    void *threadId, void *inspectorParentHandle);
+extern "C" void *
+_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void *environment,
+                                                const char *source);
+extern "C" void *
 _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
-    void* environment, void* callback, void* preload);
+    void *environment, void *callback, void *preload);
 extern "C" uint32_t
 _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE(
-    void* object, void* context, void* key, void* value);
+    void *object, void *context, void *key, void *value);
 extern "C" uint32_t
 _ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE(
-    void* object, void* context, void* key, void* value, int attributes);
-extern "C" void*
+    void *object, void *context, void *key, void *value, int attributes);
+extern "C" void *
 _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE(
-    void* context, void* source, size_t arguments_count, void* arguments,
-    size_t context_extension_count, void* context_extensions,
+    void *context, void *source, size_t arguments_count, void *arguments,
+    size_t context_extension_count, void *context_extensions,
     int compile_options, int no_cache_reason);
-extern "C" ssize_t write(int fd, const void* buffer, size_t count);
-extern "C" ssize_t writev(int fd, const struct iovec* iov, int iovcnt);
+extern "C" ssize_t write(int fd, const void *buffer, size_t count);
+extern "C" ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 #ifndef R_AARCH64_GLOB_DAT
 #define R_AARCH64_GLOB_DAT 1025
@@ -75,67 +75,69 @@ extern "C" ssize_t writev(int fd, const struct iovec* iov, int iovcnt);
 struct epoll_event;
 #endif
 
-namespace {
+namespace
+{
 
-// Isolate tracking
-struct IsolateInfo {
-    std::string windowId;
-    void* isolatePtr;  // Store as opaque pointer
-    uint64_t lastUsed;
-    bool isActive;
-    int refCount;
-};
+    // Isolate tracking
+    struct IsolateInfo
+    {
+        std::string windowId;
+        void *isolatePtr; // Store as opaque pointer
+        uint64_t lastUsed;
+        bool isActive;
+        int refCount;
+    };
 
-static std::unordered_map<std::string, IsolateInfo> g_isolateMap;
-static std::unordered_map<void*, std::string> g_ptrToWindowId;
-static std::mutex g_mutex;
-static bool g_enabled = true;
-static size_t g_maxPoolSize = 5;
+    static std::unordered_map<std::string, IsolateInfo> g_isolateMap;
+    static std::unordered_map<void *, std::string> g_ptrToWindowId;
+    static std::mutex g_mutex;
+    static bool g_enabled = true;
+    static size_t g_maxPoolSize = 5;
 
-// Disassembly anchor from libelectron.so BuildID
-// 54fa48401561befd00ed0771eb990af1372f4374:
-//
-//   4b27ca4: 29430262  ldp w2, w0, [x19, #0x18]
-//   4b27ca8: 1a89b103  csel w3, w8, w9, lt
-//   4b27cac: 94f6f529  bl 0x88e5150 <epoll_wait@plt>
-//   4b27cb0: 3100041f  cmn w0, #0x1
-//
-// The stack reports the call site (0x4b27cac), while __builtin_return_address
-// gives the next instruction (0x4b27cb0).
-constexpr uintptr_t kChromeIoThreadEpollCallOffset = 0x4b27cac;
-constexpr uintptr_t kChromeIoThreadEpollReturnOffset =
-    kChromeIoThreadEpollCallOffset + 4;
-constexpr int kDefaultChromeIoThreadMaxWaitMs = 1000;
-constexpr int kMinChromeIoThreadMaxWaitMs = 1;
-constexpr int kMaxChromeIoThreadMaxWaitMs = 60000;
+    // Disassembly anchor from libelectron.so BuildID
+    // 54fa48401561befd00ed0771eb990af1372f4374:
+    //
+    //   4b27ca4: 29430262  ldp w2, w0, [x19, #0x18]
+    //   4b27ca8: 1a89b103  csel w3, w8, w9, lt
+    //   4b27cac: 94f6f529  bl 0x88e5150 <epoll_wait@plt>
+    //   4b27cb0: 3100041f  cmn w0, #0x1
+    //
+    // The stack reports the call site (0x4b27cac), while __builtin_return_address
+    // gives the next instruction (0x4b27cb0).
+    constexpr uintptr_t kChromeIoThreadEpollCallOffset = 0x4b27cac;
+    constexpr uintptr_t kChromeIoThreadEpollReturnOffset =
+        kChromeIoThreadEpollCallOffset + 4;
+    constexpr int kDefaultChromeIoThreadMaxWaitMs = 1000;
+    constexpr int kMinChromeIoThreadMaxWaitMs = 1;
+    constexpr int kMaxChromeIoThreadMaxWaitMs = 60000;
 
-// Disassembly anchors for the V8 OOM stack in libelectron.so BuildID
-// 54fa48401561befd00ed0771eb990af1372f4374:
-//
-//   6056394: f9400680  ldr x0, [x20, #0x8]
-//   6056398: f94002a1  ldr x1, [x21]
-//   605639c: 94a2497d  bl 0x88e8990
-//              <v8::Isolate::Initialize(...)@plt>
-//   60563a0: 94001526  bl 0x605b838
-//
-// The crash then reaches:
-//
-//   244f7b4: bl SnapshotCompression::Decompress(...)@plt
-//   1f0d96c: tbz w0, #0, 0x1f0da70
-//   1f0da70: brk #0
-//
-// Hooking Isolate::Initialize keeps this source-free and catches the PLT call
-// before snapshot decompression allocates its temporary buffer.
-constexpr uintptr_t kElectronV8InitializeCallOffset = 0x605639c;
-constexpr uintptr_t kElectronV8InitializeReturnOffset =
-    kElectronV8InitializeCallOffset + 4;
-constexpr uintptr_t kV8ScriptCompilerCompileFunctionOffset = 0x1eea110;
-constexpr size_t kMaxCompileFunctionSourceSampleBytes = 262144;
-constexpr const char* kDefaultV8StartupFlags =
-    "--max-old-space-size=512 --max-semi-space-size=16";
-constexpr const char* kNodeArgvPreloadPath =
-    "/data/storage/el2/base/files/ohcode-node-preload.js";
-constexpr const char* kNodeArgvPreloadScript = R"OHCODE_JS(
+    // Disassembly anchors for the V8 OOM stack in libelectron.so BuildID
+    // 54fa48401561befd00ed0771eb990af1372f4374:
+    //
+    //   6056394: f9400680  ldr x0, [x20, #0x8]
+    //   6056398: f94002a1  ldr x1, [x21]
+    //   605639c: 94a2497d  bl 0x88e8990
+    //              <v8::Isolate::Initialize(...)@plt>
+    //   60563a0: 94001526  bl 0x605b838
+    //
+    // The crash then reaches:
+    //
+    //   244f7b4: bl SnapshotCompression::Decompress(...)@plt
+    //   1f0d96c: tbz w0, #0, 0x1f0da70
+    //   1f0da70: brk #0
+    //
+    // Hooking Isolate::Initialize keeps this source-free and catches the PLT call
+    // before snapshot decompression allocates its temporary buffer.
+    constexpr uintptr_t kElectronV8InitializeCallOffset = 0x605639c;
+    constexpr uintptr_t kElectronV8InitializeReturnOffset =
+        kElectronV8InitializeCallOffset + 4;
+    constexpr uintptr_t kV8ScriptCompilerCompileFunctionOffset = 0x1eea110;
+    constexpr size_t kMaxCompileFunctionSourceSampleBytes = 262144;
+    constexpr const char *kDefaultV8StartupFlags =
+        "--max-old-space-size=512 --max-semi-space-size=16";
+    constexpr const char *kNodeArgvPreloadPath =
+        "/data/storage/el2/base/files/ohcode-node-preload.js";
+    constexpr const char *kNodeArgvPreloadScript = R"OHCODE_JS(
 "use strict";
 const Module = require("module");
 const originalLoad = Module._load;
@@ -157,7 +159,7 @@ process.argv.splice(2, 1);
 process._rawDebug(`[OHcodePreload] runMain ${electronMain}`);
 Module.runMain(electronMain);
 )OHCODE_JS";
-constexpr const char* kNodePreLoadProbeScript = R"OHCODE_JS(
+    constexpr const char *kNodePreLoadProbeScript = R"OHCODE_JS(
 ;(() => {
   const STAMP = "diag-20260715-directv8main1";
   const parts = [];
@@ -386,7 +388,7 @@ constexpr const char* kNodePreLoadProbeScript = R"OHCODE_JS(
   return parts.join(" || ").slice(0, 1800);
 })();
 )OHCODE_JS";
-constexpr const char* kNodeDirectBootstrapScript = R"OHCODE_JS(
+    constexpr const char *kNodeDirectBootstrapScript = R"OHCODE_JS(
 (function(process, require) {
   try {
     process._rawDebug(`[OHcodeDirectV8] entered require=${typeof require}`);
@@ -398,10 +400,10 @@ constexpr const char* kNodeDirectBootstrapScript = R"OHCODE_JS(
   }
 })
 )OHCODE_JS";
-constexpr const char* kNodeExposeBootstrapGlobalsScript =
-    "globalThis.process=process;globalThis.require=require;"
-    "'OHCODE_NODE_GLOBALS_EXPOSED'";
-constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
+    constexpr const char *kNodeExposeBootstrapGlobalsScript =
+        "globalThis.process=process;globalThis.require=require;"
+        "'OHCODE_NODE_GLOBALS_EXPOSED'";
+    constexpr const char *kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
   const STAMP = "diag-20260715-directv8main1";
   const TRACE_PATHS = [
@@ -697,1016 +699,1127 @@ constexpr const char* kNodePostLoadTraceScript = R"OHCODE_JS(
   return resultParts.join(" || ").slice(0, 1800);
 })();
 )OHCODE_JS";
-constexpr size_t kV8CreateParamsSlotDumpCount = 32;
-constexpr int kContextSnapshotReplacementMinBytes = 100000;
-constexpr const char* kDefaultElectronResourceDir =
-    "/data/storage/el1/bundle/electron/resources/resfile";
-constexpr const char* kStartupSnapshotBlobFileName = "snapshot_blob.bin";
-constexpr uintptr_t kSnapshotVectorAllocReturnOffset = 0x244f3e8;
-constexpr uintptr_t kSnapshotVectorRetryAllocReturnOffset = 0x244f420;
-constexpr uintptr_t kSnapshotDataAllocReturnOffset = 0x244f520;
-constexpr int kDefaultSnapshotMmapMinBytes = 1024 * 1024;
-constexpr int kDefaultSnapshotMmapMaxBytes = 768 * 1024 * 1024;
-constexpr size_t kMaxTrackedMmapAllocations = 128;
-constexpr uintptr_t kNodeInitializeContextOffset = 0x857edec;
-constexpr uintptr_t kNodeStartExecutionThunkOffset = 0x857fbf0;
-// node::Realm::BootstrapInternalLoaders(). The stripped Electron binary's
-// normal Node startup can leave builtin_module_require unset on HarmonyOS.
-constexpr uintptr_t kNodeRealmBootstrapInternalLoadersOffset = 0x869a6bc;
-// node::SetIsolateUpForNode calls platform->RegisterIsolate(isolate, loop)
-// through the NodePlatform/MultiIsolatePlatform vtable at byte offset 0xe0.
-// Calling libelectron's internal map-insert helper directly is not ABI-safe.
-constexpr size_t kNodePlatformRegisterIsolateVtableOffset = 0xe0;
-// node::NodePlatform::ForIsolate(v8::Isolate*) aborts if the isolate is not in
-// the platform map. Hook it too because the renderer can reach this lookup
-// outside node::InitializeContext.
-constexpr uintptr_t kNodePlatformForIsolateOffset = 0x868bb68;
-constexpr uintptr_t kNodePlatformMapLookupOffset = 0x2cf09c4;
-constexpr uintptr_t kNodePlatformMapLookupAuxOffset = 0x176e178;
-constexpr size_t kNodePlatformMutexOffset = 0x8;
-constexpr size_t kNodePlatformMapOffset = 0x30;
-constexpr size_t kNodePlatformLookupDataOffset = 0x18;
-constexpr size_t kNodePlatformLookupControlOffset = 0x28;
-constexpr size_t kMaxNodePlatformHookIsolates = 256;
-constexpr size_t kAarch64InlineBranchBytes = 16;
-constexpr uint32_t kAarch64LdrX16Literal8 = 0x58000050u;
-constexpr uint32_t kAarch64BrX16 = 0xd61f0200u;
+    constexpr size_t kV8CreateParamsSlotDumpCount = 32;
+    constexpr int kContextSnapshotReplacementMinBytes = 100000;
+    constexpr const char *kDefaultElectronResourceDir =
+        "/data/storage/el1/bundle/electron/resources/resfile";
+    constexpr const char *kStartupSnapshotBlobFileName = "snapshot_blob.bin";
+    constexpr uintptr_t kSnapshotVectorAllocReturnOffset = 0x244f3e8;
+    constexpr uintptr_t kSnapshotVectorRetryAllocReturnOffset = 0x244f420;
+    constexpr uintptr_t kSnapshotDataAllocReturnOffset = 0x244f520;
+    constexpr int kDefaultSnapshotMmapMinBytes = 1024 * 1024;
+    constexpr int kDefaultSnapshotMmapMaxBytes = 768 * 1024 * 1024;
+    constexpr size_t kMaxTrackedMmapAllocations = 128;
+    constexpr uintptr_t kNodeInitializeContextOffset = 0x857edec;
+    constexpr uintptr_t kNodeStartExecutionThunkOffset = 0x857fbf0;
+    // node::Realm::BootstrapInternalLoaders(). The stripped Electron binary's
+    // normal Node startup can leave builtin_module_require unset on HarmonyOS.
+    constexpr uintptr_t kNodeRealmBootstrapInternalLoadersOffset = 0x869a6bc;
+    // node::SetIsolateUpForNode calls platform->RegisterIsolate(isolate, loop)
+    // through the NodePlatform/MultiIsolatePlatform vtable at byte offset 0xe0.
+    // Calling libelectron's internal map-insert helper directly is not ABI-safe.
+    constexpr size_t kNodePlatformRegisterIsolateVtableOffset = 0xe0;
+    // node::NodePlatform::ForIsolate(v8::Isolate*) aborts if the isolate is not in
+    // the platform map. Hook it too because the renderer can reach this lookup
+    // outside node::InitializeContext.
+    constexpr uintptr_t kNodePlatformForIsolateOffset = 0x868bb68;
+    constexpr uintptr_t kNodePlatformMapLookupOffset = 0x2cf09c4;
+    constexpr uintptr_t kNodePlatformMapLookupAuxOffset = 0x176e178;
+    constexpr size_t kNodePlatformMutexOffset = 0x8;
+    constexpr size_t kNodePlatformMapOffset = 0x30;
+    constexpr size_t kNodePlatformLookupDataOffset = 0x18;
+    constexpr size_t kNodePlatformLookupControlOffset = 0x28;
+    constexpr size_t kMaxNodePlatformHookIsolates = 256;
+    constexpr size_t kAarch64InlineBranchBytes = 16;
+    constexpr uint32_t kAarch64LdrX16Literal8 = 0x58000050u;
+    constexpr uint32_t kAarch64BrX16 = 0xd61f0200u;
 
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
-using EpollWaitFn = int (*)(int, struct epoll_event*, int, int);
-using V8IsolateInitializeFn = bool (*)(void*, const void*);
-using V8SetFlagsFromStringFn = void (*)(const char*);
-using V8SetSnapshotDataBlobFn = void (*)(void*);
-using V8InitializeExternalStartupDataFn = void (*)(const char*);
-using V8InternalInitWithSnapshotFn =
-    bool (*)(void*, void*, void*, void*, bool);
-using NothrowNewFn = void* (*)(size_t, const void*) noexcept;
-using DeleteFn = void (*)(void*) noexcept;
-using NodeInitializeContextFn = uint32_t (*)(void*);
-using V8ContextGetIsolateFn = void* (*)(void*);
-using V8ContextGlobalFn = void* (*)(void*);
-using V8ContextEnterFn = void (*)(void*);
-using V8ScriptCompileFn = void* (*)(void*, void*, void*);
-using V8ScriptRunFn = void* (*)(void*, void*);
-using V8ObjectGetFn = void* (*)(void*, void*, void*);
-using V8ObjectSetValueFn = uint32_t (*)(void*, void*, void*, void*);
-using V8ValueIsFunctionFn = bool (*)(void*);
-using V8FunctionCallFn = void* (*)(void*, void*, void*, int, void**);
-using V8CreateHandleFn = void* (*)(void*, uintptr_t);
-using NodeRealmBootstrapInternalLoadersFn = void* (*)(void*);
-using V8GetCurrentPlatformFn = void* (*)();
-using UvDefaultLoopFn = void* (*)();
-using UvMutexFn = void (*)(void*);
-using NodePlatformRegisterIsolateFn = void (*)(void*, void*, void*);
-using NodePlatformForIsolateFn = void* (*)(void*, void*);
-using NodePlatformMapLookupFn =
-    void* (*)(void*, void*, void*, void*, void*);
-using AdapterArgVector = std::vector<std::string>;
-using AdapterFdVector = std::vector<std::pair<int, int>>;
-using AdapterStartChildProcess2Fn =
-    int (*)(void*, const AdapterArgVector&, const AdapterFdVector&);
-using AdapterStartChildProcess3Fn =
-    int (*)(void*, const AdapterArgVector&, const AdapterFdVector&,
-            const std::string&);
-using WriteFn = ssize_t (*)(int, const void*, size_t);
-using WritevFn = ssize_t (*)(int, const struct iovec*, int);
-using UvFsOpenFn = int (*)(void*, void*, const char*, int, int, void*);
-using UvFsPathFlagsFn = int (*)(void*, void*, const char*, int, void*);
-using UvFsPathFn = int (*)(void*, void*, const char*, void*);
+    using EpollWaitFn = int (*)(int, struct epoll_event *, int, int);
+    using QosSetThreadQoSFn = int (*)(int);
+    // v8::Isolate::Initialize returns void; x0 on return is unrelated leftover.
+    using V8IsolateInitializeFn = void (*)(void *, const void *);
+    using V8SetFlagsFromStringFn = void (*)(const char *);
+    using V8SetSnapshotDataBlobFn = void (*)(void *);
+    using V8InitializeExternalStartupDataFn = void (*)(const char *);
+    using V8InternalInitWithSnapshotFn =
+        bool (*)(void *, void *, void *, void *, bool);
+    using NothrowNewFn = void *(*)(size_t, const void *) noexcept;
+    using DeleteFn = void (*)(void *) noexcept;
+    using NodeInitializeContextFn = uint32_t (*)(void *);
+    using V8ContextGetIsolateFn = void *(*)(void *);
+    using V8ContextGlobalFn = void *(*)(void *);
+    using V8ContextEnterFn = void (*)(void *);
+    using V8ScriptCompileFn = void *(*)(void *, void *, void *);
+    using V8ScriptRunFn = void *(*)(void *, void *);
+    using V8ObjectGetFn = void *(*)(void *, void *, void *);
+    using V8ObjectSetValueFn = uint32_t (*)(void *, void *, void *, void *);
+    using V8ValueIsFunctionFn = bool (*)(void *);
+    using V8FunctionCallFn = void *(*)(void *, void *, void *, int, void **);
+    using V8CreateHandleFn = void *(*)(void *, uintptr_t);
+    using NodeRealmBootstrapInternalLoadersFn = void *(*)(void *);
+    using V8GetCurrentPlatformFn = void *(*)();
+    using UvDefaultLoopFn = void *(*)();
+    using UvMutexFn = void (*)(void *);
+    using NodePlatformRegisterIsolateFn = void (*)(void *, void *, void *);
+    using NodePlatformForIsolateFn = void *(*)(void *, void *);
+    using NodePlatformMapLookupFn =
+        void *(*)(void *, void *, void *, void *, void *);
+    using AdapterArgVector = std::vector<std::string>;
+    using AdapterFdVector = std::vector<std::pair<int, int>>;
+    using AdapterStartChildProcess2Fn =
+        int (*)(void *, const AdapterArgVector &, const AdapterFdVector &);
+    using AdapterStartChildProcess3Fn =
+        int (*)(void *, const AdapterArgVector &, const AdapterFdVector &,
+                const std::string &);
+    using WriteFn = ssize_t (*)(int, const void *, size_t);
+    using WritevFn = ssize_t (*)(int, const struct iovec *, int);
+    using UvFsOpenFn = int (*)(void *, void *, const char *, int, int, void *);
+    using UvFsPathFlagsFn = int (*)(void *, void *, const char *, int, void *);
+    using UvFsPathFn = int (*)(void *, void *, const char *, void *);
 
-struct V8OwnedByteVector {
-    void* vtable;
-    uint8_t* data;
-    uint32_t length;
-    uint8_t ownsData;
-    uint8_t padding[3];
-};
+    struct V8OwnedByteVector
+    {
+        void *vtable;
+        uint8_t *data;
+        uint32_t length;
+        uint8_t ownsData;
+        uint8_t padding[3];
+    };
 
-static_assert(sizeof(V8OwnedByteVector) == 24,
-              "V8OwnedByteVector layout must match the disassembly");
+    static_assert(sizeof(V8OwnedByteVector) == 24,
+                  "V8OwnedByteVector layout must match the disassembly");
 
-using SnapshotDecompressFn = V8OwnedByteVector (*)(const uint8_t*, size_t);
-using NodeNewContextFn = void* (*)(void*, void*);
-using NodeCreateEnvironmentFn =
-    void* (*)(void*, void*, void*, void*, void*, void*, void*);
-using NodeLoadEnvironmentStringFn = void* (*)(void*, const char*);
-using V8ObjectSetPrivateFn = uint32_t (*)(void*, void*, void*, void*);
-using V8ObjectDefineOwnPropertyFn =
-    uint32_t (*)(void*, void*, void*, void*, int);
-using V8CompileFunctionFn =
-    void* (*)(void*, void*, size_t, void*, size_t, void*, int, int);
-using OpenFn = int (*)(const char*, int, ...);
-using FopenFn = FILE* (*)(const char*, const char*);
-using AccessFn = int (*)(const char*, int);
-using StatFn = int (*)(const char*, struct stat*);
-using V8PrivateNameFn = void* (*)(void*);
-using V8ValueIsStringFn = bool (*)(void*);
-using V8StringUtf8LengthFn = int (*)(void*, void*);
-using V8StringWriteUtf8Fn =
-    int (*)(void*, void*, char*, int, int*, int);
-using V8StringNewFromUtf8Fn = void* (*)(void*, const char*, int, int);
-using V8ArrayNewFn = void* (*)(void*, int);
-using V8ObjectSetIndexFn = uint32_t (*)(void*, void*, uint32_t, void*);
-using V8NumberNewFn = void* (*)(void*, double);
+    using SnapshotDecompressFn = V8OwnedByteVector (*)(const uint8_t *, size_t);
+    using NodeNewContextFn = void *(*)(void *, void *);
+    using NodeCreateEnvironmentFn =
+        void *(*)(void *, void *, void *, void *, void *, void *, void *);
+    using NodeLoadEnvironmentStringFn = void *(*)(void *, const char *);
+    using V8ObjectSetPrivateFn = uint32_t (*)(void *, void *, void *, void *);
+    using V8ObjectDefineOwnPropertyFn =
+        uint32_t (*)(void *, void *, void *, void *, int);
+    using V8CompileFunctionFn =
+        void *(*)(void *, void *, size_t, void *, size_t, void *, int, int);
+    using OpenFn = int (*)(const char *, int, ...);
+    using FopenFn = FILE *(*)(const char *, const char *);
+    using AccessFn = int (*)(const char *, int);
+    using StatFn = int (*)(const char *, struct stat *);
+    using V8PrivateNameFn = void *(*)(void *);
+    using V8ValueIsStringFn = bool (*)(void *);
+    using V8StringUtf8LengthFn = int (*)(void *, void *);
+    using V8StringWriteUtf8Fn =
+        int (*)(void *, void *, char *, int, int *, int);
+    using V8StringNewFromUtf8Fn = void *(*)(void *, const char *, int, int);
+    using V8ArrayNewFn = void *(*)(void *, int);
+    using V8ObjectSetIndexFn = uint32_t (*)(void *, void *, uint32_t, void *);
+    using V8NumberNewFn = void *(*)(void *, double);
 
-struct NodeStartExecutionCallbackInfoView {
-    void* firstValue;
-    void* secondValue;
-};
-using NodeLoadEnvironmentCallbackFn = void* (*)(void*, void*, void*);
+    struct NodeStartExecutionCallbackInfoView
+    {
+        void *firstValue;
+        void *secondValue;
+    };
+    using NodeLoadEnvironmentCallbackFn = void *(*)(void *, void *, void *);
 
-struct V8StartupDataView {
-    const char* data;
-    int raw_size;
-};
+    struct V8StartupDataView
+    {
+        const char *data;
+        int raw_size;
+    };
 
-struct V8SnapshotDataView {
-    void* vtable;
-    const uint8_t* data;
-    uint32_t length;
-    uint8_t ownsData;
-    uint8_t padding[3];
-};
+    struct V8SnapshotDataView
+    {
+        void *vtable;
+        const uint8_t *data;
+        uint32_t length;
+        uint8_t ownsData;
+        uint8_t padding[3];
+    };
 
-static_assert(sizeof(V8SnapshotDataView) == 24,
-              "V8SnapshotDataView layout must match the disassembly");
+    static_assert(sizeof(V8SnapshotDataView) == 24,
+                  "V8SnapshotDataView layout must match the disassembly");
 
-static std::once_flag g_epollConfigOnce;
-static std::once_flag g_realEpollWaitOnce;
-static EpollWaitFn g_realEpollWait = nullptr;
-static std::atomic<bool> g_epollHookEnabled{true};
-static std::atomic<bool> g_requireChromeIoThreadName{true};
-static std::atomic<int> g_chromeIoThreadMaxWaitMs{
-    kDefaultChromeIoThreadMaxWaitMs};
-static std::atomic<uint64_t> g_epollTargetHits{0};
-static std::atomic<uint64_t> g_epollClampHits{0};
-static std::atomic<uint64_t> g_epollPassThroughHits{0};
-static std::atomic<int> g_lastOriginalEpollTimeoutMs{0};
-static std::atomic<int> g_lastEffectiveEpollTimeoutMs{0};
-static std::atomic<uintptr_t> g_lastEpollCallerOffset{0};
-static std::atomic<void*> g_gotRealEpollWait{nullptr};
+    static std::once_flag g_epollConfigOnce;
+    static std::once_flag g_realEpollWaitOnce;
+    static EpollWaitFn g_realEpollWait = nullptr;
+    static std::atomic<bool> g_epollHookEnabled{true};
+    static std::atomic<bool> g_requireChromeIoThreadName{true};
+    static std::atomic<int> g_chromeIoThreadMaxWaitMs{
+        kDefaultChromeIoThreadMaxWaitMs};
+    static std::atomic<uint64_t> g_epollTargetHits{0};
+    static std::atomic<uint64_t> g_epollClampHits{0};
+    static std::atomic<uint64_t> g_epollPassThroughHits{0};
+    static std::atomic<int> g_lastOriginalEpollTimeoutMs{0};
+    static std::atomic<int> g_lastEffectiveEpollTimeoutMs{0};
+    static std::atomic<uintptr_t> g_lastEpollCallerOffset{0};
+    static std::atomic<void *> g_gotRealEpollWait{nullptr};
 
-static std::once_flag g_v8InitializeConfigOnce;
-static std::once_flag g_realV8InitializeOnce;
-static std::once_flag g_v8FlagsOnce;
-static std::once_flag g_realV8SetSnapshotDataBlobOnce;
-static std::once_flag g_realV8InitializeExternalStartupDataOnce;
-static std::once_flag g_realV8InitializeExternalStartupDataFromFileOnce;
-static std::once_flag g_realV8InternalInitWithSnapshotOnce;
-static std::once_flag g_baseStartupBlobOnce;
-static V8IsolateInitializeFn g_realV8IsolateInitialize = nullptr;
-static V8SetSnapshotDataBlobFn g_realV8SetSnapshotDataBlob = nullptr;
-static V8InitializeExternalStartupDataFn g_realV8InitializeExternalStartupData =
-    nullptr;
-static V8InitializeExternalStartupDataFn
-    g_realV8InitializeExternalStartupDataFromFile = nullptr;
-static V8InternalInitWithSnapshotFn g_realV8InternalInitWithSnapshot = nullptr;
-static std::mutex g_v8InitializeMutex;
-static std::mutex g_v8FlagsMutex;
-static std::string g_v8StartupFlags;
-static std::atomic<bool> g_v8InitializeHookEnabled{true};
-static std::atomic<bool> g_serializeV8Initialize{true};
-static std::atomic<bool> g_forceV8InitializeSuccess{false};
-static std::atomic<bool> g_v8StartupFlagsApplied{false};
-static std::atomic<bool> g_v8StartupFlagsResolveFailed{false};
-static std::atomic<bool> g_v8StartupFlagsSymbolResolved{false};
-static std::atomic<bool> g_v8StartupFlagsEnvPresent{false};
-static std::atomic<bool> g_v8StartupFlagsEnvEmpty{false};
-static std::atomic<bool> g_v8StartupFlagsUsingDefault{false};
-static std::atomic<uint32_t> g_v8StartupFlagsLength{0};
-static std::atomic<uint64_t> g_v8StartupFlagsApplyAttempts{0};
-static std::atomic<uint64_t> g_v8StartupFlagsEmptySkips{0};
-static std::atomic<uint64_t> g_v8SetSnapshotDataBlobCalls{0};
-static std::atomic<uintptr_t> g_lastV8SnapshotDataBlobAddress{0};
-static std::atomic<uintptr_t> g_lastV8SnapshotDataBlobDataAddress{0};
-static std::atomic<int32_t> g_lastV8SnapshotDataBlobRawSize{0};
-static std::atomic<uintptr_t> g_lastEffectiveV8SnapshotDataBlobAddress{0};
-static std::atomic<uintptr_t> g_lastEffectiveV8SnapshotDataBlobDataAddress{0};
-static std::atomic<int32_t> g_lastEffectiveV8SnapshotDataBlobRawSize{0};
-static std::atomic<bool> g_replaceContextSnapshotWithStartup{false};
-static std::atomic<bool> g_skipV8SnapshotDataBlob{false};
-static std::atomic<uint64_t> g_snapshotBlobSkips{0};
-static std::atomic<uint64_t> g_snapshotBlobReplacementAttempts{0};
-static std::atomic<uint64_t> g_snapshotBlobReplacements{0};
-static std::atomic<uint64_t> g_snapshotBlobReplacementFailures{0};
-static std::atomic<int32_t> g_baseStartupBlobRawSize{0};
-static std::mutex g_snapshotBlobReplacementPathMutex;
-static std::string g_snapshotBlobReplacementPath;
-static std::vector<char> g_baseStartupBlobBytes;
-static V8StartupDataView g_baseStartupBlobData{nullptr, 0};
-static std::atomic<uint64_t> g_v8InitializeExternalStartupDataCalls{0};
-static std::atomic<uint64_t> g_v8InitializeExternalStartupDataFromFileCalls{0};
-static std::mutex g_v8ExternalStartupDataPathMutex;
-static std::string g_lastV8ExternalStartupDataPath;
-static std::atomic<uint64_t> g_v8InitWithSnapshotCalls{0};
-static std::atomic<uint64_t> g_v8InitWithSnapshotSuccesses{0};
-static std::atomic<uint64_t> g_v8InitWithSnapshotFailures{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotCallerOffset{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotIsolate{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotReadOnlyAddress{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotReadOnlyDataAddress{0};
-static std::atomic<uint32_t> g_lastV8InitWithSnapshotReadOnlyLength{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotSharedAddress{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotSharedDataAddress{0};
-static std::atomic<uint32_t> g_lastV8InitWithSnapshotSharedLength{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotStartupAddress{0};
-static std::atomic<uintptr_t> g_lastV8InitWithSnapshotStartupDataAddress{0};
-static std::atomic<uint32_t> g_lastV8InitWithSnapshotStartupLength{0};
-static std::atomic<bool> g_lastV8InitWithSnapshotCanRehash{false};
-static std::atomic<bool> g_lastV8InitWithSnapshotResult{false};
-static std::atomic<uint64_t> g_v8InitializeCalls{0};
-static std::atomic<uint64_t> g_v8InitializeTargetHits{0};
-static std::atomic<uint64_t> g_v8InitializeSerializedCalls{0};
-static std::atomic<uint64_t> g_v8InitializePassThroughCalls{0};
-static std::atomic<uint64_t> g_v8InitializeFailures{0};
-static std::atomic<uint64_t> g_v8InitializeForcedSuccesses{0};
-static std::atomic<bool> g_disableNodeStartupSnapshot{false};
-static std::atomic<uint64_t> g_v8SnapshotBlobClears{0};
-static std::atomic<uint64_t> g_v8SnapshotBlobNulls{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsAddress{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsSlot0{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsSlot1{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsSlot2{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsSlot3{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsSlot4{0};
-static std::atomic<uintptr_t> g_lastV8CreateParamsSlot5{0};
-static std::atomic<uintptr_t> g_lastV8SnapshotBlobAddress{0};
-static std::mutex g_createParamsDumpMutex;
-static std::string g_lastV8CreateParamsSlotsHex;
-static std::atomic<uint32_t> g_activeV8Initializations{0};
-static std::atomic<uint32_t> g_maxConcurrentV8Initializations{0};
-static std::atomic<uintptr_t> g_lastV8InitializeCallerOffset{0};
-static thread_local bool g_insideV8InitializeHook = false;
+    static std::atomic<void *> g_gotRealQosSetThreadQoS{nullptr};
+    static std::once_flag g_realQosSetThreadQoSOnce;
+    static QosSetThreadQoSFn g_realQosSetThreadQoS = nullptr;
+    static std::atomic<uint64_t> g_qosSetThreadQoSCalls{0};
+    static std::atomic<uint64_t> g_qosSetThreadQoSPassThrough{0};
+    static std::atomic<uint64_t> g_qosSetThreadQoSSkips{0};
+    static std::atomic<size_t> g_lastQosStackHeadroom{0};
 
-static std::once_flag g_snapshotAllocConfigOnce;
-static std::once_flag g_nodePlatformHookConfigOnce;
-static std::once_flag g_adapterChildHookConfigOnce;
-static std::once_flag g_realArrayNothrowNewOnce;
-static std::once_flag g_realScalarNothrowNewOnce;
-static std::once_flag g_realArrayDeleteOnce;
-static std::once_flag g_realScalarDeleteOnce;
-static std::once_flag g_realSnapshotDecompressOnce;
-static std::once_flag g_realNodeInitializeContextOnce;
-static std::once_flag g_realNodeNewContextOnce;
-static std::once_flag g_realNodeCreateEnvironmentOnce;
-static std::once_flag g_realNodeLoadEnvironmentStringOnce;
-static std::once_flag g_realNodeLoadEnvironmentCallbackOnce;
-static std::once_flag g_v8ContextEnterOnce;
-static std::once_flag g_v8DirectScriptSymbolsOnce;
-static std::once_flag g_realV8ObjectSetPrivateOnce;
-static std::once_flag g_realV8ObjectDefineOwnPropertyOnce;
-static std::once_flag g_realV8CompileFunctionOnce;
-static std::once_flag g_realOpenOnce;
-static std::once_flag g_realFopenOnce;
-static std::once_flag g_realAccessOnce;
-static std::once_flag g_realStatOnce;
-static std::once_flag g_realLstatOnce;
-static std::once_flag g_realWriteOnce;
-static std::once_flag g_realWritevOnce;
-static std::once_flag g_realUvFsOpenOnce;
-static std::once_flag g_realUvFsStatOnce;
-static std::once_flag g_realUvFsLstatOnce;
-static std::once_flag g_realUvFsAccessOnce;
-static std::once_flag g_realUvFsScandirOnce;
-static std::once_flag g_v8AppSearchPathSymbolsOnce;
-static std::once_flag g_realAdapterStartGpuProcessOnce;
-static std::once_flag g_realAdapterStartLegacyChildProcessOnce;
-static std::once_flag g_realAdapterStartNormalChildProcessOnce;
-static std::once_flag g_realAdapterStartIsolateChildProcessOnce;
-static std::once_flag g_nodePlatformSymbolsOnce;
-static std::once_flag g_nodePlatformLookupSymbolsOnce;
-static std::mutex g_nodeInitializeContextInlineHookMutex;
-static NothrowNewFn g_realArrayNothrowNew = nullptr;
-static NothrowNewFn g_realScalarNothrowNew = nullptr;
-static DeleteFn g_realArrayDelete = nullptr;
-static DeleteFn g_realScalarDelete = nullptr;
-static SnapshotDecompressFn g_realSnapshotDecompress = nullptr;
-static NodeInitializeContextFn g_realNodeInitializeContext = nullptr;
-static NodeNewContextFn g_realNodeNewContext = nullptr;
-static NodeCreateEnvironmentFn g_realNodeCreateEnvironment = nullptr;
-static NodeLoadEnvironmentStringFn g_realNodeLoadEnvironmentString = nullptr;
-static NodeLoadEnvironmentCallbackFn g_realNodeLoadEnvironmentCallback =
-    nullptr;
-static V8ContextEnterFn g_v8ContextEnter = nullptr;
-static V8StringNewFromUtf8Fn g_v8DirectStringNewFromUtf8 = nullptr;
-static V8ScriptCompileFn g_v8DirectScriptCompile = nullptr;
-static V8ScriptRunFn g_v8DirectScriptRun = nullptr;
-static V8ObjectSetPrivateFn g_realV8ObjectSetPrivate = nullptr;
-static V8ObjectDefineOwnPropertyFn g_realV8ObjectDefineOwnProperty = nullptr;
-static V8CompileFunctionFn g_realV8CompileFunction = nullptr;
-static OpenFn g_realOpen = nullptr;
-static FopenFn g_realFopen = nullptr;
-static AccessFn g_realAccess = nullptr;
-static StatFn g_realStat = nullptr;
-static StatFn g_realLstat = nullptr;
-static WriteFn g_realWrite = nullptr;
-static WritevFn g_realWritev = nullptr;
-static UvFsOpenFn g_realUvFsOpen = nullptr;
-static UvFsPathFn g_realUvFsStat = nullptr;
-static UvFsPathFn g_realUvFsLstat = nullptr;
-static UvFsPathFlagsFn g_realUvFsAccess = nullptr;
-static UvFsPathFlagsFn g_realUvFsScandir = nullptr;
-static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
-static V8ContextGlobalFn g_v8ContextGlobal = nullptr;
-static V8ObjectGetFn g_v8ObjectGet = nullptr;
-static V8ObjectSetValueFn g_v8ObjectSetValue = nullptr;
-static V8ValueIsFunctionFn g_v8ValueIsFunction = nullptr;
-static V8FunctionCallFn g_v8FunctionCall = nullptr;
-static V8CreateHandleFn g_v8CreateHandle = nullptr;
-static V8PrivateNameFn g_v8PrivateName = nullptr;
-static V8ValueIsStringFn g_v8ValueIsString = nullptr;
-static V8StringUtf8LengthFn g_v8StringUtf8Length = nullptr;
-static V8StringWriteUtf8Fn g_v8StringWriteUtf8 = nullptr;
-static V8StringNewFromUtf8Fn g_v8StringNewFromUtf8 = nullptr;
-static V8ArrayNewFn g_v8ArrayNew = nullptr;
-static V8ObjectSetIndexFn g_v8ObjectSetIndex = nullptr;
-static V8NumberNewFn g_v8NumberNew = nullptr;
-static V8GetCurrentPlatformFn g_v8GetCurrentPlatform = nullptr;
-static UvDefaultLoopFn g_uvDefaultLoop = nullptr;
-static UvMutexFn g_uvMutexLock = nullptr;
-static UvMutexFn g_uvMutexUnlock = nullptr;
-static NodePlatformMapLookupFn g_nodePlatformMapLookup = nullptr;
-static void* g_nodePlatformMapLookupAux = nullptr;
-static NodePlatformForIsolateFn g_realNodePlatformForIsolate = nullptr;
-static AdapterStartChildProcess2Fn g_realAdapterStartGpuProcess = nullptr;
-static AdapterStartChildProcess2Fn g_realAdapterStartLegacyChildProcess =
-    nullptr;
-static AdapterStartChildProcess3Fn g_realAdapterStartNormalChildProcess =
-    nullptr;
-static AdapterStartChildProcess3Fn g_realAdapterStartIsolateChildProcess =
-    nullptr;
-static std::atomic<void*> g_gotRealV8IsolateInitialize{nullptr};
-static std::atomic<void*> g_gotRealV8SetSnapshotDataBlob{nullptr};
-static std::atomic<void*> g_gotRealV8InitializeExternalStartupData{nullptr};
-static std::atomic<void*> g_gotRealV8InitializeExternalStartupDataFromFile{
-    nullptr};
-static std::atomic<void*> g_gotRealV8InternalInitWithSnapshot{nullptr};
-static std::atomic<void*> g_gotRealSnapshotDecompress{nullptr};
-static std::atomic<void*> g_gotRealArrayNothrowNew{nullptr};
-static std::atomic<void*> g_gotRealScalarNothrowNew{nullptr};
-static std::atomic<void*> g_gotRealArrayDelete{nullptr};
-static std::atomic<void*> g_gotRealScalarDelete{nullptr};
-static std::atomic<void*> g_gotRealNodeInitializeContext{nullptr};
-static std::atomic<void*> g_gotRealNodeNewContext{nullptr};
-static std::atomic<void*> g_gotRealNodeCreateEnvironment{nullptr};
-static std::atomic<void*> g_gotRealNodeLoadEnvironmentString{nullptr};
-static std::atomic<void*> g_gotRealNodeLoadEnvironmentCallback{nullptr};
-static std::atomic<void*> g_gotRealV8ObjectSetPrivate{nullptr};
-static std::atomic<void*> g_gotRealV8ObjectDefineOwnProperty{nullptr};
-static std::atomic<void*> g_gotRealV8CompileFunction{nullptr};
-static std::atomic<void*> g_gotRealOpen{nullptr};
-static std::atomic<void*> g_gotRealFopen{nullptr};
-static std::atomic<void*> g_gotRealAccess{nullptr};
-static std::atomic<void*> g_gotRealStat{nullptr};
-static std::atomic<void*> g_gotRealLstat{nullptr};
-static std::atomic<void*> g_gotRealWrite{nullptr};
-static std::atomic<void*> g_gotRealWritev{nullptr};
-static std::atomic<void*> g_gotRealUvFsOpen{nullptr};
-static std::atomic<void*> g_gotRealUvFsStat{nullptr};
-static std::atomic<void*> g_gotRealUvFsLstat{nullptr};
-static std::atomic<void*> g_gotRealUvFsAccess{nullptr};
-static std::atomic<void*> g_gotRealUvFsScandir{nullptr};
-static std::atomic<void*> g_nodePlatformForIsolateInlineTrampoline{nullptr};
-static std::atomic<void*> g_v8CompileFunctionInlineTrampoline{nullptr};
-static std::atomic<void*> g_gotRealAdapterStartGpuProcess{nullptr};
-static std::atomic<void*> g_gotRealAdapterStartLegacyChildProcess{nullptr};
-static std::atomic<void*> g_gotRealAdapterStartNormalChildProcess{nullptr};
-static std::atomic<void*> g_gotRealAdapterStartIsolateChildProcess{nullptr};
-static std::atomic<void*> g_nodeInitializeContextInlineTrampoline{nullptr};
-constexpr uintptr_t kReservedMmapAllocationPtrValue = UINTPTR_MAX;
-static std::atomic<void*> g_mmapAllocationPtrs[kMaxTrackedMmapAllocations];
-static std::atomic<size_t> g_mmapAllocationSizes[kMaxTrackedMmapAllocations];
-static std::atomic<void*>
-    g_nodePlatformRegisteredIsolates[kMaxNodePlatformHookIsolates];
-static std::atomic<uint32_t> g_activeMmapAllocationCount{0};
-static std::atomic<bool> g_snapshotMmapFallbackEnabled{true};
-static std::atomic<bool> g_nodePlatformHookEnabled{false};
-static std::atomic<bool> g_nodePlatformRegisterOnLookupEnabled{true};
-static std::atomic<bool> g_adapterCrashpadBlockEnabled{true};
-static std::atomic<bool> g_nodePlatformResolveFailed{false};
-static std::atomic<int> g_snapshotMmapMinBytes{kDefaultSnapshotMmapMinBytes};
-static std::atomic<int> g_snapshotMmapMaxBytes{kDefaultSnapshotMmapMaxBytes};
-static std::atomic<uint64_t> g_snapshotNothrowNewCalls{0};
-static std::atomic<uint64_t> g_snapshotNothrowNewFailures{0};
-static std::atomic<uint64_t> g_snapshotMmapFallbacks{0};
-static std::atomic<uint64_t> g_snapshotMmapFallbackFailures{0};
-static std::atomic<uint64_t> g_snapshotMmapDeletes{0};
-static std::atomic<uint64_t> g_snapshotMmapBytes{0};
-static std::atomic<uint64_t> g_snapshotDecompressCalls{0};
-static std::atomic<uint64_t> g_snapshotDecompressBytesIn{0};
-static std::atomic<uint64_t> g_nodeInitializeContextCalls{0};
-static std::atomic<uint64_t> g_nodeNewContextCalls{0};
-static std::atomic<uint64_t> g_nodeNewContextNulls{0};
-static std::atomic<uint64_t> g_nodeCreateEnvironmentCalls{0};
-static std::atomic<uint64_t> g_nodeCreateEnvironmentNulls{0};
-static std::atomic<uint64_t> g_nodeCreateEnvironmentArgTraceFailures{0};
-static std::atomic<uint64_t> g_nodeLoadEnvironmentStringCalls{0};
-static std::atomic<uint64_t> g_nodeLoadEnvironmentCallbackCalls{0};
-static std::atomic<uint64_t> g_nodeLoadEnvironmentNulls{0};
-static std::atomic<uint64_t> g_forcedContextEnterAttempts{0};
-static std::atomic<uint64_t> g_forcedContextEnterSuccesses{0};
-static std::atomic<uint64_t> g_nodePreLoadProbeAttempts{0};
-static std::atomic<uint64_t> g_nodePreLoadProbeSuccesses{0};
-static std::atomic<uint64_t> g_nodePreLoadProbeFailures{0};
-static std::atomic<uint64_t> g_nodePreLoadProbeResultReads{0};
-static std::atomic<uint64_t> g_nodePreLoadProbeResultReadFailures{0};
-static std::atomic<uint64_t> g_nodePreLoadProbeHiddenWrites{0};
-static std::atomic<uint64_t> g_nodePostLoadTraceAttempts{0};
-static std::atomic<uint64_t> g_nodePostLoadTraceSuccesses{0};
-static std::atomic<uint64_t> g_nodePostLoadTraceFailures{0};
-static std::atomic<uint64_t> g_nodePostLoadTraceResultReads{0};
-static std::atomic<uint64_t> g_nodePostLoadTraceResultReadFailures{0};
-static std::atomic<uint64_t> g_v8ObjectSetPrivateCalls{0};
-static std::atomic<uint64_t> g_v8ObjectDefineOwnPropertyCalls{0};
-static std::atomic<uint64_t> g_v8ObjectDefineOwnPropertyNameReadFailures{0};
-static std::atomic<uint64_t> g_v8CompileFunctionCalls{0};
-static std::atomic<uint64_t> g_v8CompileFunctionSourceReads{0};
-static std::atomic<uint64_t> g_v8CompileFunctionSourceReadFailures{0};
-static std::atomic<uint64_t> g_v8CompileFunctionMarkerHits{0};
-static std::atomic<uint64_t> g_v8CompileFunctionResetSearchPathHits{0};
-static std::atomic<uint64_t> g_v8DefineResourcesPathPatches{0};
-static std::atomic<uint64_t> g_browserInitDefineOCalls{0};
-static std::atomic<uint64_t> g_browserInitStageDefineCalls{0};
-static std::atomic<uint64_t> g_browserAppSearchPathPatchAttempts{0};
-static std::atomic<uint64_t> g_browserAppSearchPathPatches{0};
-static std::atomic<uint64_t> g_browserAppSearchPathPatchFailures{0};
-static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyPatches{0};
-static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyFallbackPatches{0};
-static std::atomic<uint64_t> g_browserAppSearchPathNameReadFailures{0};
-static std::atomic<uint32_t> g_v8ObjectSetPrivateNameTraceCount{0};
-static std::atomic<uint32_t> g_v8ObjectDefineOwnPropertyNameTraceCount{0};
-static std::atomic<uint64_t> g_entryPathProbeHits{0};
-static std::atomic<uint64_t> g_entryPathProbePackageJsonHits{0};
-static std::atomic<uint64_t> g_entryPathProbeEntryJsHits{0};
-static std::atomic<uint64_t> g_entryPathProbeOutMainHits{0};
-static std::atomic<uint64_t> g_entryPathProbeElectronMainHits{0};
-static std::atomic<uint64_t> g_entryPathProbeNullSlotPatches{0};
-static std::atomic<uint64_t> g_uvFsOpenCalls{0};
-static std::atomic<uint64_t> g_uvFsStatCalls{0};
-static std::atomic<uint64_t> g_uvFsLstatCalls{0};
-static std::atomic<uint64_t> g_uvFsAccessCalls{0};
-static std::atomic<uint64_t> g_uvFsScandirCalls{0};
-static std::atomic<uint64_t> g_uvFsResfileCalls{0};
-static std::atomic<uint64_t> g_ohcodeWriteTraceCalls{0};
-static std::atomic<uint64_t> g_ohcodeWriteTraceBytes{0};
-static std::atomic<uint64_t> g_nodeInitializeContextInlineFailures{0};
-static std::atomic<uint64_t> g_nodeStartExecutionThunkInlineFailures{0};
-static std::atomic<uint64_t> g_nodePlatformForIsolateInlineFailures{0};
-static std::atomic<uint64_t> g_v8CompileFunctionInlineFailures{0};
-static std::atomic<uint64_t> g_nodePlatformRegisterAttempts{0};
-static std::atomic<uint64_t> g_nodePlatformRegisterSuccesses{0};
-static std::atomic<uint64_t> g_nodePlatformRegisterDuplicateSkips{0};
-static std::atomic<uint64_t> g_nodePlatformRegisterMissingVtable{0};
-static std::atomic<uint64_t> g_nodePlatformForIsolateCalls{0};
-static std::atomic<uint64_t> g_nodePlatformLookupHits{0};
-static std::atomic<uint64_t> g_nodePlatformLookupMisses{0};
-static std::atomic<uint64_t> g_nodePlatformLookupFallbacks{0};
-static std::atomic<uint64_t> g_nodePlatformLookupFakeFallbacks{0};
-static std::atomic<uint64_t> g_adapterChildProcessCalls{0};
-static std::atomic<uint64_t> g_adapterChildProcessPassThrough{0};
-static std::atomic<uint64_t> g_adapterCrashpadBlocks{0};
-static std::atomic<uint32_t> g_lastSnapshotCompressedSize{0};
-static std::atomic<uint32_t> g_lastSnapshotDecompressedSize{0};
-static std::atomic<uintptr_t> g_lastSnapshotAllocCallerOffset{0};
-static std::atomic<uintptr_t> g_lastNodePlatformIsolate{0};
-static std::atomic<uintptr_t> g_lastNodePlatformAddress{0};
-static std::atomic<uintptr_t> g_lastNodePlatformRegisterAddress{0};
-static std::atomic<uintptr_t> g_lastNodePlatformDataAddress{0};
-static std::atomic<uintptr_t> g_lastNodeNewContextIsolate{0};
-static std::atomic<uintptr_t> g_lastNodeNewContextTemplate{0};
-static std::atomic<uintptr_t> g_lastNodeNewContextResult{0};
-static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentIsolateData{0};
-static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentContext{0};
-static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentResult{0};
-static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentEnv{0};
-static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentSource{0};
-static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentPreload{0};
-static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentResult{0};
-static std::atomic<uintptr_t> g_lastV8CompileFunctionContext{0};
-static std::atomic<uintptr_t> g_lastV8CompileFunctionSourcePtr{0};
-static std::atomic<uint64_t> g_lastV8CompileFunctionArgCount{0};
-static std::atomic<int32_t> g_lastV8CompileFunctionOptions{0};
-static std::atomic<int32_t> g_lastV8CompileFunctionNoCacheReason{0};
-static std::atomic<void*> g_lastNodePlatformData{nullptr};
-static std::atomic<void*> g_lastNodePlatformDataPlatform{nullptr};
-static std::atomic<uint64_t> g_electronPltPatchAttempts{0};
-static std::atomic<uint64_t> g_electronPltPatchedSlots{0};
-static std::atomic<uint64_t> g_electronPltPatchFailures{0};
-static std::atomic<uint32_t> g_electronPltPatchRuns{0};
-static std::atomic<bool> g_electronPltPatchInstalled{false};
-static std::atomic<bool> g_electronPltPatchThreadStarted{false};
-static std::atomic<bool> g_electronPreloadAttempted{false};
-static std::atomic<bool> g_electronPreloadSucceeded{false};
-static void* g_electronPreloadHandle = nullptr;
-static std::atomic<bool> g_nodeInitializeContextInlineInstalled{false};
-static std::atomic<bool> g_nodeStartExecutionThunkInlineInstalled{false};
-static std::atomic<bool> g_nodePlatformForIsolateInlineInstalled{false};
-static std::atomic<bool> g_v8CompileFunctionInlineInstalled{false};
-static std::atomic<uint32_t> g_patchedEpollWaitSlots{0};
-static std::atomic<uint32_t> g_patchedV8InitializeSlots{0};
-static std::atomic<uint32_t> g_patchedV8SetSnapshotDataBlobSlots{0};
-static std::atomic<uint32_t> g_patchedV8InitializeExternalStartupDataSlots{0};
-static std::atomic<uint32_t>
-    g_patchedV8InitializeExternalStartupDataFromFileSlots{0};
-static std::atomic<uint32_t> g_patchedV8InternalInitWithSnapshotSlots{0};
-static std::atomic<uint32_t> g_patchedSnapshotDecompressSlots{0};
-static std::atomic<uint32_t> g_patchedArrayNothrowNewSlots{0};
-static std::atomic<uint32_t> g_patchedScalarNothrowNewSlots{0};
-static std::atomic<uint32_t> g_patchedArrayDeleteSlots{0};
-static std::atomic<uint32_t> g_patchedScalarDeleteSlots{0};
-static std::atomic<uint32_t> g_patchedNodeInitializeContextSlots{0};
-static std::atomic<uint32_t> g_patchedNodeNewContextSlots{0};
-static std::atomic<uint32_t> g_patchedNodeCreateEnvironmentSlots{0};
-static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentStringSlots{0};
-static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentCallbackSlots{0};
-static std::atomic<uint32_t> g_patchedV8ObjectSetPrivateSlots{0};
-static std::atomic<uint32_t> g_patchedV8ObjectDefineOwnPropertySlots{0};
-static std::atomic<uint32_t> g_patchedV8CompileFunctionSlots{0};
-static std::atomic<uint32_t> g_patchedOpenSlots{0};
-static std::atomic<uint32_t> g_patchedFopenSlots{0};
-static std::atomic<uint32_t> g_patchedAccessSlots{0};
-static std::atomic<uint32_t> g_patchedStatSlots{0};
-static std::atomic<uint32_t> g_patchedLstatSlots{0};
-static std::atomic<uint32_t> g_patchedWriteSlots{0};
-static std::atomic<uint32_t> g_patchedWritevSlots{0};
-static std::atomic<uint32_t> g_patchedUvFsOpenSlots{0};
-static std::atomic<uint32_t> g_patchedUvFsStatSlots{0};
-static std::atomic<uint32_t> g_patchedUvFsLstatSlots{0};
-static std::atomic<uint32_t> g_patchedUvFsAccessSlots{0};
-static std::atomic<uint32_t> g_patchedUvFsScandirSlots{0};
-static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
-static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
-static std::atomic<uint32_t> g_patchedV8CompileFunctionInlineEntrypoints{0};
-static std::atomic<uint32_t> g_patchedAdapterStartGpuProcessSlots{0};
-static std::atomic<uint32_t> g_patchedAdapterStartLegacyChildProcessSlots{0};
-static std::atomic<uint32_t> g_patchedAdapterStartNormalChildProcessSlots{0};
-static std::atomic<uint32_t> g_patchedAdapterStartIsolateChildProcessSlots{0};
-static thread_local bool g_insideNodeInitializeContextHook = false;
-static thread_local bool g_insideNodePlatformForIsolateHook = false;
-static std::mutex g_entryPathProbeMutex;
-static std::string g_lastEntryPathProbeOp;
-static std::string g_lastEntryPathProbePath;
-static std::mutex g_uvFsPathMutex;
-static std::string g_lastUvFsOp;
-static std::string g_lastUvFsPath;
-static std::mutex g_ohcodeWriteTraceMutex;
-static std::string g_lastOhcodeWriteTrace;
-static std::mutex g_nodePostLoadTraceResultMutex;
-static std::string g_lastNodePostLoadTraceResult;
-static std::mutex g_nodePostLoadStageMutex;
-static std::string g_lastNodePostLoadStage;
-static std::mutex g_nodeCreateEnvironmentArgTraceMutex;
-static std::string g_lastNodeCreateEnvironmentArgs;
-static std::string g_lastNodeCreateEnvironmentExecArgs;
-static std::string g_lastNodeCreateEnvironmentInitScript;
-static std::mutex g_nodePreLoadProbeResultMutex;
-static std::string g_lastNodePreLoadProbeResult;
-static std::mutex g_nodePreLoadProbeHiddenMutex;
-static std::string g_lastNodePreLoadProbeHiddenValue;
-static std::mutex g_v8ObjectSetPrivateTraceMutex;
-static std::string g_v8ObjectSetPrivateNames;
-static std::mutex g_v8ObjectDefineOwnPropertyTraceMutex;
-static std::string g_v8ObjectDefineOwnPropertyNames;
-static std::mutex g_v8CompileFunctionTraceMutex;
-static std::string g_lastV8CompileFunctionSource;
-static std::string g_lastV8CompileFunctionSourceSlots;
-static std::string g_firstV8CompileFunctionSource;
-static std::string g_interestingV8CompileFunctionSource;
-static std::string g_v8CompileFunctionSourceSequence;
-static std::mutex g_resourcesPathTraceMutex;
-static std::string g_lastDefinedResourcesPath;
-static std::mutex g_browserInitDefineOMutex;
-static std::string g_lastBrowserInitDefineO;
-static std::mutex g_browserInitStageDefineMutex;
-static std::string g_browserInitStageDefines;
+    static std::once_flag g_v8InitializeConfigOnce;
+    static std::once_flag g_realV8InitializeOnce;
+    static std::once_flag g_v8FlagsOnce;
+    static std::once_flag g_realV8SetSnapshotDataBlobOnce;
+    static std::once_flag g_realV8InitializeExternalStartupDataOnce;
+    static std::once_flag g_realV8InitializeExternalStartupDataFromFileOnce;
+    static std::once_flag g_realV8InternalInitWithSnapshotOnce;
+    static std::once_flag g_baseStartupBlobOnce;
+    static V8IsolateInitializeFn g_realV8IsolateInitialize = nullptr;
+    static V8SetSnapshotDataBlobFn g_realV8SetSnapshotDataBlob = nullptr;
+    static V8InitializeExternalStartupDataFn g_realV8InitializeExternalStartupData =
+        nullptr;
+    static V8InitializeExternalStartupDataFn
+        g_realV8InitializeExternalStartupDataFromFile = nullptr;
+    static V8InternalInitWithSnapshotFn g_realV8InternalInitWithSnapshot = nullptr;
+    static std::mutex g_v8InitializeMutex;
+    static std::mutex g_v8FlagsMutex;
+    static std::string g_v8StartupFlags;
+    static std::atomic<bool> g_v8InitializeHookEnabled{true};
+    static std::atomic<bool> g_serializeV8Initialize{true};
+    static std::atomic<bool> g_forceV8InitializeSuccess{false};
+    static std::atomic<bool> g_v8StartupFlagsApplied{false};
+    static std::atomic<bool> g_v8StartupFlagsResolveFailed{false};
+    static std::atomic<bool> g_v8StartupFlagsSymbolResolved{false};
+    static std::atomic<bool> g_v8StartupFlagsEnvPresent{false};
+    static std::atomic<bool> g_v8StartupFlagsEnvEmpty{false};
+    static std::atomic<bool> g_v8StartupFlagsUsingDefault{false};
+    static std::atomic<uint32_t> g_v8StartupFlagsLength{0};
+    static std::atomic<uint64_t> g_v8StartupFlagsApplyAttempts{0};
+    static std::atomic<uint64_t> g_v8StartupFlagsEmptySkips{0};
+    static std::atomic<uint64_t> g_v8SetSnapshotDataBlobCalls{0};
+    static std::atomic<uintptr_t> g_lastV8SnapshotDataBlobAddress{0};
+    static std::atomic<uintptr_t> g_lastV8SnapshotDataBlobDataAddress{0};
+    static std::atomic<int32_t> g_lastV8SnapshotDataBlobRawSize{0};
+    static std::atomic<uintptr_t> g_lastEffectiveV8SnapshotDataBlobAddress{0};
+    static std::atomic<uintptr_t> g_lastEffectiveV8SnapshotDataBlobDataAddress{0};
+    static std::atomic<int32_t> g_lastEffectiveV8SnapshotDataBlobRawSize{0};
+    static std::atomic<bool> g_replaceContextSnapshotWithStartup{false};
+    static std::atomic<bool> g_skipV8SnapshotDataBlob{false};
+    static std::atomic<uint64_t> g_snapshotBlobSkips{0};
+    static std::atomic<uint64_t> g_snapshotBlobReplacementAttempts{0};
+    static std::atomic<uint64_t> g_snapshotBlobReplacements{0};
+    static std::atomic<uint64_t> g_snapshotBlobReplacementFailures{0};
+    static std::atomic<int32_t> g_baseStartupBlobRawSize{0};
+    static std::mutex g_snapshotBlobReplacementPathMutex;
+    static std::string g_snapshotBlobReplacementPath;
+    static std::vector<char> g_baseStartupBlobBytes;
+    static V8StartupDataView g_baseStartupBlobData{nullptr, 0};
+    static std::atomic<uint64_t> g_v8InitializeExternalStartupDataCalls{0};
+    static std::atomic<uint64_t> g_v8InitializeExternalStartupDataFromFileCalls{0};
+    static std::mutex g_v8ExternalStartupDataPathMutex;
+    static std::string g_lastV8ExternalStartupDataPath;
+    static std::atomic<uint64_t> g_v8InitWithSnapshotCalls{0};
+    static std::atomic<uint64_t> g_v8InitWithSnapshotSuccesses{0};
+    static std::atomic<uint64_t> g_v8InitWithSnapshotFailures{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotCallerOffset{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotIsolate{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotReadOnlyAddress{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotReadOnlyDataAddress{0};
+    static std::atomic<uint32_t> g_lastV8InitWithSnapshotReadOnlyLength{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotSharedAddress{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotSharedDataAddress{0};
+    static std::atomic<uint32_t> g_lastV8InitWithSnapshotSharedLength{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotStartupAddress{0};
+    static std::atomic<uintptr_t> g_lastV8InitWithSnapshotStartupDataAddress{0};
+    static std::atomic<uint32_t> g_lastV8InitWithSnapshotStartupLength{0};
+    static std::atomic<bool> g_lastV8InitWithSnapshotCanRehash{false};
+    static std::atomic<bool> g_lastV8InitWithSnapshotResult{false};
+    static std::atomic<uint64_t> g_v8InitializeCalls{0};
+    static std::atomic<uint64_t> g_v8InitializeTargetHits{0};
+    static std::atomic<uint64_t> g_v8InitializeSerializedCalls{0};
+    static std::atomic<uint64_t> g_v8InitializePassThroughCalls{0};
+    static std::atomic<uint64_t> g_v8InitializeFailures{0};
+    static std::atomic<uint64_t> g_v8InitializeForcedSuccesses{0};
+    static std::atomic<bool> g_disableNodeStartupSnapshot{false};
+    static std::atomic<uint64_t> g_v8SnapshotBlobClears{0};
+    static std::atomic<uint64_t> g_v8SnapshotBlobNulls{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsAddress{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsSlot0{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsSlot1{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsSlot2{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsSlot3{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsSlot4{0};
+    static std::atomic<uintptr_t> g_lastV8CreateParamsSlot5{0};
+    static std::atomic<uintptr_t> g_lastV8SnapshotBlobAddress{0};
+    static std::mutex g_createParamsDumpMutex;
+    static std::string g_lastV8CreateParamsSlotsHex;
+    static std::atomic<uint32_t> g_activeV8Initializations{0};
+    static std::atomic<uint32_t> g_maxConcurrentV8Initializations{0};
+    static std::atomic<uintptr_t> g_lastV8InitializeCallerOffset{0};
+    static thread_local bool g_insideV8InitializeHook = false;
 
-// Logging
-void Log(const char* fmt, ...) {
-    char message[2048];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(message, sizeof(message), fmt, args);
-    va_end(args);
+    static std::once_flag g_snapshotAllocConfigOnce;
+    static std::once_flag g_nodePlatformHookConfigOnce;
+    static std::once_flag g_adapterChildHookConfigOnce;
+    static std::once_flag g_realArrayNothrowNewOnce;
+    static std::once_flag g_realScalarNothrowNewOnce;
+    static std::once_flag g_realArrayDeleteOnce;
+    static std::once_flag g_realScalarDeleteOnce;
+    static std::once_flag g_realSnapshotDecompressOnce;
+    static std::once_flag g_realNodeInitializeContextOnce;
+    static std::once_flag g_realNodeNewContextOnce;
+    static std::once_flag g_realNodeCreateEnvironmentOnce;
+    static std::once_flag g_realNodeLoadEnvironmentStringOnce;
+    static std::once_flag g_realNodeLoadEnvironmentCallbackOnce;
+    static std::once_flag g_v8ContextEnterOnce;
+    static std::once_flag g_v8DirectScriptSymbolsOnce;
+    static std::once_flag g_realV8ObjectSetPrivateOnce;
+    static std::once_flag g_realV8ObjectDefineOwnPropertyOnce;
+    static std::once_flag g_realV8CompileFunctionOnce;
+    static std::once_flag g_realOpenOnce;
+    static std::once_flag g_realFopenOnce;
+    static std::once_flag g_realAccessOnce;
+    static std::once_flag g_realStatOnce;
+    static std::once_flag g_realLstatOnce;
+    static std::once_flag g_realWriteOnce;
+    static std::once_flag g_realWritevOnce;
+    static std::once_flag g_realUvFsOpenOnce;
+    static std::once_flag g_realUvFsStatOnce;
+    static std::once_flag g_realUvFsLstatOnce;
+    static std::once_flag g_realUvFsAccessOnce;
+    static std::once_flag g_realUvFsScandirOnce;
+    static std::once_flag g_v8AppSearchPathSymbolsOnce;
+    static std::once_flag g_realAdapterStartGpuProcessOnce;
+    static std::once_flag g_realAdapterStartLegacyChildProcessOnce;
+    static std::once_flag g_realAdapterStartNormalChildProcessOnce;
+    static std::once_flag g_realAdapterStartIsolateChildProcessOnce;
+    static std::once_flag g_nodePlatformSymbolsOnce;
+    static std::once_flag g_nodePlatformLookupSymbolsOnce;
+    static std::mutex g_nodeInitializeContextInlineHookMutex;
+    static NothrowNewFn g_realArrayNothrowNew = nullptr;
+    static NothrowNewFn g_realScalarNothrowNew = nullptr;
+    static DeleteFn g_realArrayDelete = nullptr;
+    static DeleteFn g_realScalarDelete = nullptr;
+    static SnapshotDecompressFn g_realSnapshotDecompress = nullptr;
+    static NodeInitializeContextFn g_realNodeInitializeContext = nullptr;
+    static NodeNewContextFn g_realNodeNewContext = nullptr;
+    static NodeCreateEnvironmentFn g_realNodeCreateEnvironment = nullptr;
+    static NodeLoadEnvironmentStringFn g_realNodeLoadEnvironmentString = nullptr;
+    static NodeLoadEnvironmentCallbackFn g_realNodeLoadEnvironmentCallback =
+        nullptr;
+    static V8ContextEnterFn g_v8ContextEnter = nullptr;
+    static V8StringNewFromUtf8Fn g_v8DirectStringNewFromUtf8 = nullptr;
+    static V8ScriptCompileFn g_v8DirectScriptCompile = nullptr;
+    static V8ScriptRunFn g_v8DirectScriptRun = nullptr;
+    static V8ObjectSetPrivateFn g_realV8ObjectSetPrivate = nullptr;
+    static V8ObjectDefineOwnPropertyFn g_realV8ObjectDefineOwnProperty = nullptr;
+    static V8CompileFunctionFn g_realV8CompileFunction = nullptr;
+    static OpenFn g_realOpen = nullptr;
+    static FopenFn g_realFopen = nullptr;
+    static AccessFn g_realAccess = nullptr;
+    static StatFn g_realStat = nullptr;
+    static StatFn g_realLstat = nullptr;
+    static WriteFn g_realWrite = nullptr;
+    static WritevFn g_realWritev = nullptr;
+    static UvFsOpenFn g_realUvFsOpen = nullptr;
+    static UvFsPathFn g_realUvFsStat = nullptr;
+    static UvFsPathFn g_realUvFsLstat = nullptr;
+    static UvFsPathFlagsFn g_realUvFsAccess = nullptr;
+    static UvFsPathFlagsFn g_realUvFsScandir = nullptr;
+    static V8ContextGetIsolateFn g_v8ContextGetIsolate = nullptr;
+    static V8ContextGlobalFn g_v8ContextGlobal = nullptr;
+    static V8ObjectGetFn g_v8ObjectGet = nullptr;
+    static V8ObjectSetValueFn g_v8ObjectSetValue = nullptr;
+    static V8ValueIsFunctionFn g_v8ValueIsFunction = nullptr;
+    static V8FunctionCallFn g_v8FunctionCall = nullptr;
+    static V8CreateHandleFn g_v8CreateHandle = nullptr;
+    static V8PrivateNameFn g_v8PrivateName = nullptr;
+    static V8ValueIsStringFn g_v8ValueIsString = nullptr;
+    static V8StringUtf8LengthFn g_v8StringUtf8Length = nullptr;
+    static V8StringWriteUtf8Fn g_v8StringWriteUtf8 = nullptr;
+    static V8StringNewFromUtf8Fn g_v8StringNewFromUtf8 = nullptr;
+    static V8ArrayNewFn g_v8ArrayNew = nullptr;
+    static V8ObjectSetIndexFn g_v8ObjectSetIndex = nullptr;
+    static V8NumberNewFn g_v8NumberNew = nullptr;
+    static V8GetCurrentPlatformFn g_v8GetCurrentPlatform = nullptr;
+    static UvDefaultLoopFn g_uvDefaultLoop = nullptr;
+    static UvMutexFn g_uvMutexLock = nullptr;
+    static UvMutexFn g_uvMutexUnlock = nullptr;
+    static NodePlatformMapLookupFn g_nodePlatformMapLookup = nullptr;
+    static void *g_nodePlatformMapLookupAux = nullptr;
+    static NodePlatformForIsolateFn g_realNodePlatformForIsolate = nullptr;
+    static AdapterStartChildProcess2Fn g_realAdapterStartGpuProcess = nullptr;
+    static AdapterStartChildProcess2Fn g_realAdapterStartLegacyChildProcess =
+        nullptr;
+    static AdapterStartChildProcess3Fn g_realAdapterStartNormalChildProcess =
+        nullptr;
+    static AdapterStartChildProcess3Fn g_realAdapterStartIsolateChildProcess =
+        nullptr;
+    static std::atomic<void *> g_gotRealV8IsolateInitialize{nullptr};
+    static std::atomic<void *> g_gotRealV8SetSnapshotDataBlob{nullptr};
+    static std::atomic<void *> g_gotRealV8InitializeExternalStartupData{nullptr};
+    static std::atomic<void *> g_gotRealV8InitializeExternalStartupDataFromFile{
+        nullptr};
+    static std::atomic<void *> g_gotRealV8InternalInitWithSnapshot{nullptr};
+    static std::atomic<void *> g_gotRealSnapshotDecompress{nullptr};
+    static std::atomic<void *> g_gotRealArrayNothrowNew{nullptr};
+    static std::atomic<void *> g_gotRealScalarNothrowNew{nullptr};
+    static std::atomic<void *> g_gotRealArrayDelete{nullptr};
+    static std::atomic<void *> g_gotRealScalarDelete{nullptr};
+    static std::atomic<void *> g_gotRealNodeInitializeContext{nullptr};
+    static std::atomic<void *> g_gotRealNodeNewContext{nullptr};
+    static std::atomic<void *> g_gotRealNodeCreateEnvironment{nullptr};
+    static std::atomic<void *> g_gotRealNodeLoadEnvironmentString{nullptr};
+    static std::atomic<void *> g_gotRealNodeLoadEnvironmentCallback{nullptr};
+    static std::atomic<void *> g_gotRealV8ObjectSetPrivate{nullptr};
+    static std::atomic<void *> g_gotRealV8ObjectDefineOwnProperty{nullptr};
+    static std::atomic<void *> g_gotRealV8CompileFunction{nullptr};
+    static std::atomic<void *> g_gotRealOpen{nullptr};
+    static std::atomic<void *> g_gotRealFopen{nullptr};
+    static std::atomic<void *> g_gotRealAccess{nullptr};
+    static std::atomic<void *> g_gotRealStat{nullptr};
+    static std::atomic<void *> g_gotRealLstat{nullptr};
+    static std::atomic<void *> g_gotRealWrite{nullptr};
+    static std::atomic<void *> g_gotRealWritev{nullptr};
+    static std::atomic<void *> g_gotRealUvFsOpen{nullptr};
+    static std::atomic<void *> g_gotRealUvFsStat{nullptr};
+    static std::atomic<void *> g_gotRealUvFsLstat{nullptr};
+    static std::atomic<void *> g_gotRealUvFsAccess{nullptr};
+    static std::atomic<void *> g_gotRealUvFsScandir{nullptr};
+    static std::atomic<void *> g_nodePlatformForIsolateInlineTrampoline{nullptr};
+    static std::atomic<void *> g_v8CompileFunctionInlineTrampoline{nullptr};
+    static std::atomic<void *> g_gotRealAdapterStartGpuProcess{nullptr};
+    static std::atomic<void *> g_gotRealAdapterStartLegacyChildProcess{nullptr};
+    static std::atomic<void *> g_gotRealAdapterStartNormalChildProcess{nullptr};
+    static std::atomic<void *> g_gotRealAdapterStartIsolateChildProcess{nullptr};
+    static std::atomic<void *> g_nodeInitializeContextInlineTrampoline{nullptr};
+    constexpr uintptr_t kReservedMmapAllocationPtrValue = UINTPTR_MAX;
+    static std::atomic<void *> g_mmapAllocationPtrs[kMaxTrackedMmapAllocations];
+    static std::atomic<size_t> g_mmapAllocationSizes[kMaxTrackedMmapAllocations];
+    static std::atomic<void *>
+        g_nodePlatformRegisteredIsolates[kMaxNodePlatformHookIsolates];
+    static std::atomic<uint32_t> g_activeMmapAllocationCount{0};
+    static std::atomic<bool> g_snapshotMmapFallbackEnabled{true};
+    static std::atomic<bool> g_nodePlatformHookEnabled{false};
+    static std::atomic<bool> g_nodePlatformRegisterOnLookupEnabled{true};
+    static std::atomic<bool> g_adapterCrashpadBlockEnabled{true};
+    static std::atomic<bool> g_nodePlatformResolveFailed{false};
+    static std::atomic<int> g_snapshotMmapMinBytes{kDefaultSnapshotMmapMinBytes};
+    static std::atomic<int> g_snapshotMmapMaxBytes{kDefaultSnapshotMmapMaxBytes};
+    static std::atomic<uint64_t> g_snapshotNothrowNewCalls{0};
+    static std::atomic<uint64_t> g_snapshotNothrowNewFailures{0};
+    static std::atomic<uint64_t> g_snapshotMmapFallbacks{0};
+    static std::atomic<uint64_t> g_snapshotMmapFallbackFailures{0};
+    static std::atomic<uint64_t> g_snapshotMmapDeletes{0};
+    static std::atomic<uint64_t> g_snapshotMmapBytes{0};
+    static std::atomic<uint64_t> g_snapshotDecompressCalls{0};
+    static std::atomic<uint64_t> g_snapshotDecompressBytesIn{0};
+    static std::atomic<uint64_t> g_nodeInitializeContextCalls{0};
+    static std::atomic<uint64_t> g_nodeNewContextCalls{0};
+    static std::atomic<uint64_t> g_nodeNewContextNulls{0};
+    static std::atomic<uint64_t> g_nodeCreateEnvironmentCalls{0};
+    static std::atomic<uint64_t> g_nodeCreateEnvironmentNulls{0};
+    static std::atomic<uint64_t> g_nodeCreateEnvironmentArgTraceFailures{0};
+    static std::atomic<uint64_t> g_nodeLoadEnvironmentStringCalls{0};
+    static std::atomic<uint64_t> g_nodeLoadEnvironmentCallbackCalls{0};
+    static std::atomic<uint64_t> g_nodeLoadEnvironmentNulls{0};
+    static std::atomic<uint64_t> g_forcedContextEnterAttempts{0};
+    static std::atomic<uint64_t> g_forcedContextEnterSuccesses{0};
+    static std::atomic<uint64_t> g_nodePreLoadProbeAttempts{0};
+    static std::atomic<uint64_t> g_nodePreLoadProbeSuccesses{0};
+    static std::atomic<uint64_t> g_nodePreLoadProbeFailures{0};
+    static std::atomic<uint64_t> g_nodePreLoadProbeResultReads{0};
+    static std::atomic<uint64_t> g_nodePreLoadProbeResultReadFailures{0};
+    static std::atomic<uint64_t> g_nodePreLoadProbeHiddenWrites{0};
+    static std::atomic<uint64_t> g_nodePostLoadTraceAttempts{0};
+    static std::atomic<uint64_t> g_nodePostLoadTraceSuccesses{0};
+    static std::atomic<uint64_t> g_nodePostLoadTraceFailures{0};
+    static std::atomic<uint64_t> g_nodePostLoadTraceResultReads{0};
+    static std::atomic<uint64_t> g_nodePostLoadTraceResultReadFailures{0};
+    static std::atomic<uint64_t> g_v8ObjectSetPrivateCalls{0};
+    static std::atomic<uint64_t> g_v8ObjectDefineOwnPropertyCalls{0};
+    static std::atomic<uint64_t> g_v8ObjectDefineOwnPropertyNameReadFailures{0};
+    static std::atomic<uint64_t> g_v8CompileFunctionCalls{0};
+    static std::atomic<uint64_t> g_v8CompileFunctionSourceReads{0};
+    static std::atomic<uint64_t> g_v8CompileFunctionSourceReadFailures{0};
+    static std::atomic<uint64_t> g_v8CompileFunctionMarkerHits{0};
+    static std::atomic<uint64_t> g_v8CompileFunctionResetSearchPathHits{0};
+    static std::atomic<uint64_t> g_v8DefineResourcesPathPatches{0};
+    static std::atomic<uint64_t> g_browserInitDefineOCalls{0};
+    static std::atomic<uint64_t> g_browserInitStageDefineCalls{0};
+    static std::atomic<uint64_t> g_browserAppSearchPathPatchAttempts{0};
+    static std::atomic<uint64_t> g_browserAppSearchPathPatches{0};
+    static std::atomic<uint64_t> g_browserAppSearchPathPatchFailures{0};
+    static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyPatches{0};
+    static std::atomic<uint64_t> g_browserAppSearchPathAsarOnlyFallbackPatches{0};
+    static std::atomic<uint64_t> g_browserAppSearchPathNameReadFailures{0};
+    static std::atomic<uint32_t> g_v8ObjectSetPrivateNameTraceCount{0};
+    static std::atomic<uint32_t> g_v8ObjectDefineOwnPropertyNameTraceCount{0};
+    static std::atomic<uint64_t> g_entryPathProbeHits{0};
+    static std::atomic<uint64_t> g_entryPathProbePackageJsonHits{0};
+    static std::atomic<uint64_t> g_entryPathProbeEntryJsHits{0};
+    static std::atomic<uint64_t> g_entryPathProbeOutMainHits{0};
+    static std::atomic<uint64_t> g_entryPathProbeElectronMainHits{0};
+    static std::atomic<uint64_t> g_entryPathProbeNullSlotPatches{0};
+    static std::atomic<uint64_t> g_uvFsOpenCalls{0};
+    static std::atomic<uint64_t> g_uvFsStatCalls{0};
+    static std::atomic<uint64_t> g_uvFsLstatCalls{0};
+    static std::atomic<uint64_t> g_uvFsAccessCalls{0};
+    static std::atomic<uint64_t> g_uvFsScandirCalls{0};
+    static std::atomic<uint64_t> g_uvFsResfileCalls{0};
+    static std::atomic<uint64_t> g_ohcodeWriteTraceCalls{0};
+    static std::atomic<uint64_t> g_ohcodeWriteTraceBytes{0};
+    static std::atomic<uint64_t> g_nodeInitializeContextInlineFailures{0};
+    static std::atomic<uint64_t> g_nodeStartExecutionThunkInlineFailures{0};
+    static std::atomic<uint64_t> g_nodePlatformForIsolateInlineFailures{0};
+    static std::atomic<uint64_t> g_v8CompileFunctionInlineFailures{0};
+    static std::atomic<uint64_t> g_nodePlatformRegisterAttempts{0};
+    static std::atomic<uint64_t> g_nodePlatformRegisterSuccesses{0};
+    static std::atomic<uint64_t> g_nodePlatformRegisterDuplicateSkips{0};
+    static std::atomic<uint64_t> g_nodePlatformRegisterMissingVtable{0};
+    static std::atomic<uint64_t> g_nodePlatformForIsolateCalls{0};
+    static std::atomic<uint64_t> g_nodePlatformLookupHits{0};
+    static std::atomic<uint64_t> g_nodePlatformLookupMisses{0};
+    static std::atomic<uint64_t> g_nodePlatformLookupFallbacks{0};
+    static std::atomic<uint64_t> g_nodePlatformLookupFakeFallbacks{0};
+    static std::atomic<uint64_t> g_adapterChildProcessCalls{0};
+    static std::atomic<uint64_t> g_adapterChildProcessPassThrough{0};
+    static std::atomic<uint64_t> g_adapterCrashpadBlocks{0};
+    static std::atomic<uint32_t> g_lastSnapshotCompressedSize{0};
+    static std::atomic<uint32_t> g_lastSnapshotDecompressedSize{0};
+    static std::atomic<uintptr_t> g_lastSnapshotAllocCallerOffset{0};
+    static std::atomic<uintptr_t> g_lastNodePlatformIsolate{0};
+    static std::atomic<uintptr_t> g_lastNodePlatformAddress{0};
+    static std::atomic<uintptr_t> g_lastNodePlatformRegisterAddress{0};
+    static std::atomic<uintptr_t> g_lastNodePlatformDataAddress{0};
+    static std::atomic<uintptr_t> g_lastNodeNewContextIsolate{0};
+    static std::atomic<uintptr_t> g_lastNodeNewContextTemplate{0};
+    static std::atomic<uintptr_t> g_lastNodeNewContextResult{0};
+    static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentIsolateData{0};
+    static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentContext{0};
+    static std::atomic<uintptr_t> g_lastNodeCreateEnvironmentResult{0};
+    static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentEnv{0};
+    static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentSource{0};
+    static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentPreload{0};
+    static std::atomic<uintptr_t> g_lastNodeLoadEnvironmentResult{0};
+    static std::atomic<uintptr_t> g_lastV8CompileFunctionContext{0};
+    static std::atomic<uintptr_t> g_lastV8CompileFunctionSourcePtr{0};
+    static std::atomic<uint64_t> g_lastV8CompileFunctionArgCount{0};
+    static std::atomic<int32_t> g_lastV8CompileFunctionOptions{0};
+    static std::atomic<int32_t> g_lastV8CompileFunctionNoCacheReason{0};
+    static std::atomic<void *> g_lastNodePlatformData{nullptr};
+    static std::atomic<void *> g_lastNodePlatformDataPlatform{nullptr};
+    static std::atomic<uint64_t> g_electronPltPatchAttempts{0};
+    static std::atomic<uint64_t> g_electronPltPatchedSlots{0};
+    static std::atomic<uint64_t> g_electronPltPatchFailures{0};
+    static std::atomic<uint32_t> g_electronPltPatchRuns{0};
+    static std::atomic<bool> g_electronPltPatchInstalled{false};
+    static std::atomic<bool> g_electronPltPatchThreadStarted{false};
+    static std::atomic<bool> g_electronPreloadAttempted{false};
+    static std::atomic<bool> g_electronPreloadSucceeded{false};
+    static void *g_electronPreloadHandle = nullptr;
+    static std::atomic<bool> g_nodeInitializeContextInlineInstalled{false};
+    static std::atomic<bool> g_nodeStartExecutionThunkInlineInstalled{false};
+    static std::atomic<bool> g_nodePlatformForIsolateInlineInstalled{false};
+    static std::atomic<bool> g_v8CompileFunctionInlineInstalled{false};
+    static std::atomic<uint32_t> g_patchedEpollWaitSlots{0};
+    static std::atomic<uint32_t> g_patchedQosSetThreadQoSSlots{0};
+    static std::atomic<uint32_t> g_patchedV8InitializeSlots{0};
+    static std::atomic<uint32_t> g_patchedV8SetSnapshotDataBlobSlots{0};
+    static std::atomic<uint32_t> g_patchedV8InitializeExternalStartupDataSlots{0};
+    static std::atomic<uint32_t>
+        g_patchedV8InitializeExternalStartupDataFromFileSlots{0};
+    static std::atomic<uint32_t> g_patchedV8InternalInitWithSnapshotSlots{0};
+    static std::atomic<uint32_t> g_patchedSnapshotDecompressSlots{0};
+    static std::atomic<uint32_t> g_patchedArrayNothrowNewSlots{0};
+    static std::atomic<uint32_t> g_patchedScalarNothrowNewSlots{0};
+    static std::atomic<uint32_t> g_patchedArrayDeleteSlots{0};
+    static std::atomic<uint32_t> g_patchedScalarDeleteSlots{0};
+    static std::atomic<uint32_t> g_patchedNodeInitializeContextSlots{0};
+    static std::atomic<uint32_t> g_patchedNodeNewContextSlots{0};
+    static std::atomic<uint32_t> g_patchedNodeCreateEnvironmentSlots{0};
+    static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentStringSlots{0};
+    static std::atomic<uint32_t> g_patchedNodeLoadEnvironmentCallbackSlots{0};
+    static std::atomic<uint32_t> g_patchedV8ObjectSetPrivateSlots{0};
+    static std::atomic<uint32_t> g_patchedV8ObjectDefineOwnPropertySlots{0};
+    static std::atomic<uint32_t> g_patchedV8CompileFunctionSlots{0};
+    static std::atomic<uint32_t> g_patchedOpenSlots{0};
+    static std::atomic<uint32_t> g_patchedFopenSlots{0};
+    static std::atomic<uint32_t> g_patchedAccessSlots{0};
+    static std::atomic<uint32_t> g_patchedStatSlots{0};
+    static std::atomic<uint32_t> g_patchedLstatSlots{0};
+    static std::atomic<uint32_t> g_patchedWriteSlots{0};
+    static std::atomic<uint32_t> g_patchedWritevSlots{0};
+    static std::atomic<uint32_t> g_patchedUvFsOpenSlots{0};
+    static std::atomic<uint32_t> g_patchedUvFsStatSlots{0};
+    static std::atomic<uint32_t> g_patchedUvFsLstatSlots{0};
+    static std::atomic<uint32_t> g_patchedUvFsAccessSlots{0};
+    static std::atomic<uint32_t> g_patchedUvFsScandirSlots{0};
+    static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
+    static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
+    static std::atomic<uint32_t> g_patchedV8CompileFunctionInlineEntrypoints{0};
+    static std::atomic<uint32_t> g_patchedAdapterStartGpuProcessSlots{0};
+    static std::atomic<uint32_t> g_patchedAdapterStartLegacyChildProcessSlots{0};
+    static std::atomic<uint32_t> g_patchedAdapterStartNormalChildProcessSlots{0};
+    static std::atomic<uint32_t> g_patchedAdapterStartIsolateChildProcessSlots{0};
+    static thread_local bool g_insideNodeInitializeContextHook = false;
+    static thread_local bool g_insideNodePlatformForIsolateHook = false;
+    static std::mutex g_entryPathProbeMutex;
+    static std::string g_lastEntryPathProbeOp;
+    static std::string g_lastEntryPathProbePath;
+    static std::mutex g_uvFsPathMutex;
+    static std::string g_lastUvFsOp;
+    static std::string g_lastUvFsPath;
+    static std::mutex g_ohcodeWriteTraceMutex;
+    static std::string g_lastOhcodeWriteTrace;
+    static std::mutex g_nodePostLoadTraceResultMutex;
+    static std::string g_lastNodePostLoadTraceResult;
+    static std::mutex g_nodePostLoadStageMutex;
+    static std::string g_lastNodePostLoadStage;
+    static std::mutex g_nodeCreateEnvironmentArgTraceMutex;
+    static std::string g_lastNodeCreateEnvironmentArgs;
+    static std::string g_lastNodeCreateEnvironmentExecArgs;
+    static std::string g_lastNodeCreateEnvironmentInitScript;
+    static std::mutex g_nodePreLoadProbeResultMutex;
+    static std::string g_lastNodePreLoadProbeResult;
+    static std::mutex g_nodePreLoadProbeHiddenMutex;
+    static std::string g_lastNodePreLoadProbeHiddenValue;
+    static std::mutex g_v8ObjectSetPrivateTraceMutex;
+    static std::string g_v8ObjectSetPrivateNames;
+    static std::mutex g_v8ObjectDefineOwnPropertyTraceMutex;
+    static std::string g_v8ObjectDefineOwnPropertyNames;
+    static std::mutex g_v8CompileFunctionTraceMutex;
+    static std::string g_lastV8CompileFunctionSource;
+    static std::string g_lastV8CompileFunctionSourceSlots;
+    static std::string g_firstV8CompileFunctionSource;
+    static std::string g_interestingV8CompileFunctionSource;
+    static std::string g_v8CompileFunctionSourceSequence;
+    static std::mutex g_resourcesPathTraceMutex;
+    static std::string g_lastDefinedResourcesPath;
+    static std::mutex g_browserInitDefineOMutex;
+    static std::string g_lastBrowserInitDefineO;
+    static std::mutex g_browserInitStageDefineMutex;
+    static std::string g_browserInitStageDefines;
 
-    fprintf(stderr, "[V8PoolHook] %s", message);
-    fprintf(stderr, "\n");
+    // Logging
+    void Log(const char *fmt, ...)
+    {
+        char message[2048];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(message, sizeof(message), fmt, args);
+        va_end(args);
+
+        fprintf(stderr, "[V8PoolHook] %s", message);
+        fprintf(stderr, "\n");
 #if OHCODE_HAS_HILOG
-    OH_LOG_Print(LOG_APP, LOG_INFO, 0x0000, "V8PoolHook", "%{public}s",
-                 message);
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0x0000, "V8PoolHook", "%{public}s",
+                     message);
 #endif
-}
-
-static bool ReadEnvBool(const char* name, bool default_value) {
-    const char* value = getenv(name);
-    if (!value || value[0] == '\0') {
-        return default_value;
-    }
-    if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0 ||
-        strcmp(value, "FALSE") == 0 || strcmp(value, "off") == 0 ||
-        strcmp(value, "OFF") == 0) {
-        return false;
-    }
-    return true;
-}
-
-static int ReadEnvInt(const char* name, int default_value, int min_value,
-                      int max_value) {
-    const char* value = getenv(name);
-    if (!value || value[0] == '\0') {
-        return default_value;
     }
 
-    char* end = nullptr;
-    long parsed = strtol(value, &end, 10);
-    if (end == value) {
-        return default_value;
+    static bool ReadEnvBool(const char *name, bool default_value)
+    {
+        const char *value = getenv(name);
+        if (!value || value[0] == '\0')
+        {
+            return default_value;
+        }
+        if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0 ||
+            strcmp(value, "FALSE") == 0 || strcmp(value, "off") == 0 ||
+            strcmp(value, "OFF") == 0)
+        {
+            return false;
+        }
+        return true;
     }
-    if (parsed < min_value) {
-        return min_value;
+
+    static int ReadEnvInt(const char *name, int default_value, int min_value,
+                          int max_value)
+    {
+        const char *value = getenv(name);
+        if (!value || value[0] == '\0')
+        {
+            return default_value;
+        }
+
+        char *end = nullptr;
+        long parsed = strtol(value, &end, 10);
+        if (end == value)
+        {
+            return default_value;
+        }
+        if (parsed < min_value)
+        {
+            return min_value;
+        }
+        if (parsed > max_value)
+        {
+            return max_value;
+        }
+        return static_cast<int>(parsed);
     }
-    if (parsed > max_value) {
-        return max_value;
+
+    static uint32_t StringLengthForStats(const std::string &value)
+    {
+        constexpr size_t kMaxUint32Size = 0xffffffffu;
+        if (value.size() > kMaxUint32Size)
+        {
+            return 0xffffffffu;
+        }
+        return static_cast<uint32_t>(value.size());
     }
-    return static_cast<int>(parsed);
-}
 
-static uint32_t StringLengthForStats(const std::string& value) {
-    constexpr size_t kMaxUint32Size = 0xffffffffu;
-    if (value.size() > kMaxUint32Size) {
-        return 0xffffffffu;
+    static void InitEpollHookConfig()
+    {
+        g_epollHookEnabled.store(
+            ReadEnvBool("V8_POOL_HOOK_EPOLL_ENABLE", true),
+            std::memory_order_relaxed);
+        g_requireChromeIoThreadName.store(
+            ReadEnvBool("V8_POOL_HOOK_REQUIRE_IO_THREAD", true),
+            std::memory_order_relaxed);
+        g_chromeIoThreadMaxWaitMs.store(
+            ReadEnvInt("V8_POOL_HOOK_IO_EPOLL_MAX_MS",
+                       kDefaultChromeIoThreadMaxWaitMs,
+                       kMinChromeIoThreadMaxWaitMs,
+                       kMaxChromeIoThreadMaxWaitMs),
+            std::memory_order_relaxed);
     }
-    return static_cast<uint32_t>(value.size());
-}
 
-static void InitEpollHookConfig() {
-    g_epollHookEnabled.store(
-        ReadEnvBool("V8_POOL_HOOK_EPOLL_ENABLE", true),
-        std::memory_order_relaxed);
-    g_requireChromeIoThreadName.store(
-        ReadEnvBool("V8_POOL_HOOK_REQUIRE_IO_THREAD", true),
-        std::memory_order_relaxed);
-    g_chromeIoThreadMaxWaitMs.store(
-        ReadEnvInt("V8_POOL_HOOK_IO_EPOLL_MAX_MS",
-                   kDefaultChromeIoThreadMaxWaitMs,
-                   kMinChromeIoThreadMaxWaitMs,
-                   kMaxChromeIoThreadMaxWaitMs),
-        std::memory_order_relaxed);
-}
+    static void InitV8InitializeHookConfig()
+    {
+        g_v8InitializeHookEnabled.store(
+            ReadEnvBool("V8_POOL_HOOK_ISOLATE_INIT_ENABLE", true),
+            std::memory_order_relaxed);
+        g_serializeV8Initialize.store(
+            ReadEnvBool("V8_POOL_HOOK_SERIALIZE_ISOLATE_INIT", true),
+            std::memory_order_relaxed);
+        g_forceV8InitializeSuccess.store(
+            ReadEnvBool("V8_POOL_HOOK_FORCE_ISOLATE_INIT_SUCCESS", true),
+            std::memory_order_relaxed);
+        g_disableNodeStartupSnapshot.store(
+            ReadEnvBool("V8_POOL_HOOK_DISABLE_NODE_STARTUP_SNAPSHOT", false),
+            std::memory_order_relaxed);
+        g_replaceContextSnapshotWithStartup.store(
+            ReadEnvBool("V8_POOL_HOOK_REPLACE_CONTEXT_SNAPSHOT_WITH_STARTUP",
+                        false),
+            std::memory_order_relaxed);
+        g_skipV8SnapshotDataBlob.store(
+            ReadEnvBool("V8_POOL_HOOK_SKIP_SNAPSHOT_BLOB", false),
+            std::memory_order_relaxed);
 
-static void InitV8InitializeHookConfig() {
-    g_v8InitializeHookEnabled.store(
-        ReadEnvBool("V8_POOL_HOOK_ISOLATE_INIT_ENABLE", true),
-        std::memory_order_relaxed);
-    g_serializeV8Initialize.store(
-        ReadEnvBool("V8_POOL_HOOK_SERIALIZE_ISOLATE_INIT", true),
-        std::memory_order_relaxed);
-    g_forceV8InitializeSuccess.store(
-        ReadEnvBool("V8_POOL_HOOK_FORCE_ISOLATE_INIT_SUCCESS", true),
-        std::memory_order_relaxed);
-    g_disableNodeStartupSnapshot.store(
-        ReadEnvBool("V8_POOL_HOOK_DISABLE_NODE_STARTUP_SNAPSHOT", false),
-        std::memory_order_relaxed);
-    g_replaceContextSnapshotWithStartup.store(
-        ReadEnvBool("V8_POOL_HOOK_REPLACE_CONTEXT_SNAPSHOT_WITH_STARTUP",
-                    false),
-        std::memory_order_relaxed);
-    g_skipV8SnapshotDataBlob.store(
-        ReadEnvBool("V8_POOL_HOOK_SKIP_SNAPSHOT_BLOB", false),
-        std::memory_order_relaxed);
-
-    const char* flags = getenv("V8_POOL_HOOK_V8_FLAGS");
-    const bool envPresent = flags != nullptr;
-    const bool envEmpty = envPresent && flags[0] == '\0';
-    g_v8StartupFlagsEnvPresent.store(envPresent, std::memory_order_relaxed);
-    g_v8StartupFlagsEnvEmpty.store(envEmpty, std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lock(g_v8FlagsMutex);
-    g_v8StartupFlags =
-        (!envPresent || envEmpty) ? kDefaultV8StartupFlags : flags;
-    g_v8StartupFlagsUsingDefault.store(!envPresent || envEmpty,
-                                       std::memory_order_relaxed);
-    g_v8StartupFlagsLength.store(StringLengthForStats(g_v8StartupFlags),
-                                 std::memory_order_relaxed);
-}
-
-static void InitSnapshotAllocHookConfig() {
-    g_snapshotMmapFallbackEnabled.store(
-        ReadEnvBool("V8_POOL_HOOK_SNAPSHOT_MMAP_ENABLE", true),
-        std::memory_order_relaxed);
-    g_snapshotMmapMinBytes.store(
-        ReadEnvInt("V8_POOL_HOOK_SNAPSHOT_MMAP_MIN_BYTES",
-                   kDefaultSnapshotMmapMinBytes, 0,
-                   kDefaultSnapshotMmapMaxBytes),
-        std::memory_order_relaxed);
-    g_snapshotMmapMaxBytes.store(
-        ReadEnvInt("V8_POOL_HOOK_SNAPSHOT_MMAP_MAX_BYTES",
-                   kDefaultSnapshotMmapMaxBytes, kDefaultSnapshotMmapMinBytes,
-                   2147483647),
-        std::memory_order_relaxed);
-}
-
-static void InitNodePlatformHookConfig() {
-    // HarmonyOS phone runs the renderer in-process and hits node::InitializeContext
-    // before NodePlatform has foreground task data for that renderer isolate.
-    // Direct pre-registration is kept behind an env switch. Calling the internal
-    // RegisterIsolate path with the wrong platform subobject aborts during
-    // v8::Isolate::Initialize, so the default path must not register.
-    g_nodePlatformHookEnabled.store(
-        ReadEnvBool("V8_POOL_HOOK_NODE_PLATFORM_REGISTER_ENABLE", false),
-        std::memory_order_relaxed);
-    g_nodePlatformRegisterOnLookupEnabled.store(
-        ReadEnvBool("V8_POOL_HOOK_NODE_PLATFORM_REGISTER_ON_LOOKUP_ENABLE",
-                    true),
-        std::memory_order_relaxed);
-}
-
-static void InitAdapterChildHookConfig() {
-    g_adapterCrashpadBlockEnabled.store(
-        ReadEnvBool("V8_POOL_HOOK_BLOCK_CRASHPAD_CHILD", true),
-        std::memory_order_relaxed);
-}
-
-static EpollWaitFn GetRealEpollWait() {
-    if (void* gotReal = g_gotRealEpollWait.load(std::memory_order_acquire)) {
-        return reinterpret_cast<EpollWaitFn>(gotReal);
+        const char *flags = getenv("V8_POOL_HOOK_V8_FLAGS");
+        const bool envPresent = flags != nullptr;
+        const bool envEmpty = envPresent && flags[0] == '\0';
+        g_v8StartupFlagsEnvPresent.store(envPresent, std::memory_order_relaxed);
+        g_v8StartupFlagsEnvEmpty.store(envEmpty, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(g_v8FlagsMutex);
+        g_v8StartupFlags =
+            (!envPresent || envEmpty) ? kDefaultV8StartupFlags : flags;
+        g_v8StartupFlagsUsingDefault.store(!envPresent || envEmpty,
+                                           std::memory_order_relaxed);
+        g_v8StartupFlagsLength.store(StringLengthForStats(g_v8StartupFlags),
+                                     std::memory_order_relaxed);
     }
-    std::call_once(g_realEpollWaitOnce, []() {
-        g_realEpollWait = reinterpret_cast<EpollWaitFn>(
-            dlsym(RTLD_NEXT, "epoll_wait"));
-    });
-    return g_realEpollWait;
-}
 
-static V8IsolateInitializeFn GetRealV8IsolateInitialize() {
-    if (void* gotReal =
-            g_gotRealV8IsolateInitialize.load(std::memory_order_acquire)) {
-        return reinterpret_cast<V8IsolateInitializeFn>(gotReal);
+    static void InitSnapshotAllocHookConfig()
+    {
+        g_snapshotMmapFallbackEnabled.store(
+            ReadEnvBool("V8_POOL_HOOK_SNAPSHOT_MMAP_ENABLE", true),
+            std::memory_order_relaxed);
+        g_snapshotMmapMinBytes.store(
+            ReadEnvInt("V8_POOL_HOOK_SNAPSHOT_MMAP_MIN_BYTES",
+                       kDefaultSnapshotMmapMinBytes, 0,
+                       kDefaultSnapshotMmapMaxBytes),
+            std::memory_order_relaxed);
+        g_snapshotMmapMaxBytes.store(
+            ReadEnvInt("V8_POOL_HOOK_SNAPSHOT_MMAP_MAX_BYTES",
+                       kDefaultSnapshotMmapMaxBytes, kDefaultSnapshotMmapMinBytes,
+                       2147483647),
+            std::memory_order_relaxed);
     }
-    std::call_once(g_realV8InitializeOnce, []() {
+
+    static void InitNodePlatformHookConfig()
+    {
+        // HarmonyOS phone runs the renderer in-process and hits node::InitializeContext
+        // before NodePlatform has foreground task data for that renderer isolate.
+        // Direct pre-registration is kept behind an env switch. Calling the internal
+        // RegisterIsolate path with the wrong platform subobject aborts during
+        // v8::Isolate::Initialize, so the default path must not register.
+        g_nodePlatformHookEnabled.store(
+            ReadEnvBool("V8_POOL_HOOK_NODE_PLATFORM_REGISTER_ENABLE", false),
+            std::memory_order_relaxed);
+        g_nodePlatformRegisterOnLookupEnabled.store(
+            ReadEnvBool("V8_POOL_HOOK_NODE_PLATFORM_REGISTER_ON_LOOKUP_ENABLE",
+                        true),
+            std::memory_order_relaxed);
+    }
+
+    static void InitAdapterChildHookConfig()
+    {
+        g_adapterCrashpadBlockEnabled.store(
+            ReadEnvBool("V8_POOL_HOOK_BLOCK_CRASHPAD_CHILD", true),
+            std::memory_order_relaxed);
+    }
+
+    static EpollWaitFn GetRealEpollWait()
+    {
+        if (void *gotReal = g_gotRealEpollWait.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<EpollWaitFn>(gotReal);
+        }
+        std::call_once(g_realEpollWaitOnce, []()
+                       { g_realEpollWait = reinterpret_cast<EpollWaitFn>(
+                             dlsym(RTLD_NEXT, "epoll_wait")); });
+        return g_realEpollWait;
+    }
+
+    static QosSetThreadQoSFn GetRealQosSetThreadQoS()
+    {
+        if (void *gotReal =
+                g_gotRealQosSetThreadQoS.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<QosSetThreadQoSFn>(gotReal);
+        }
+        std::call_once(g_realQosSetThreadQoSOnce, []()
+                       { g_realQosSetThreadQoS = reinterpret_cast<QosSetThreadQoSFn>(
+                             dlsym(RTLD_NEXT, "OH_QoS_SetThreadQoS")); });
+        return g_realQosSetThreadQoS;
+    }
+
+    // Returns SIZE_MAX when the thread's stack bounds cannot be determined.
+    static size_t CurrentStackHeadroom()
+    {
+        pthread_attr_t attr;
+        if (pthread_getattr_np(pthread_self(), &attr) != 0)
+        {
+            return SIZE_MAX;
+        }
+
+        void *stackAddr = nullptr;
+        size_t stackSize = 0;
+        const int ret = pthread_attr_getstack(&attr, &stackAddr, &stackSize);
+        pthread_attr_destroy(&attr);
+        if (ret != 0 || stackAddr == nullptr)
+        {
+            return SIZE_MAX;
+        }
+
+        const uintptr_t low = reinterpret_cast<uintptr_t>(stackAddr);
+        uintptr_t sp = 0;
+        sp = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
+        if (sp <= low || sp > low + stackSize)
+        {
+            return 0;
+        }
+        return static_cast<size_t>(sp - low);
+    }
+
+    static V8IsolateInitializeFn GetRealV8IsolateInitialize()
+    {
+        if (void *gotReal =
+                g_gotRealV8IsolateInitialize.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8IsolateInitializeFn>(gotReal);
+        }
+        std::call_once(g_realV8InitializeOnce, []()
+                       {
         g_realV8IsolateInitialize = reinterpret_cast<V8IsolateInitializeFn>(
             dlsym(RTLD_NEXT,
                   "_ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE"));
         if (!g_realV8IsolateInitialize) {
             Log("WARNING: v8::Isolate::Initialize real symbol not found");
-        }
-    });
-    return g_realV8IsolateInitialize;
-}
-
-static V8SetSnapshotDataBlobFn GetRealV8SetSnapshotDataBlob() {
-    if (void* gotReal =
-            g_gotRealV8SetSnapshotDataBlob.load(std::memory_order_acquire)) {
-        return reinterpret_cast<V8SetSnapshotDataBlobFn>(gotReal);
+        } });
+        return g_realV8IsolateInitialize;
     }
-    std::call_once(g_realV8SetSnapshotDataBlobOnce, []() {
+
+    static V8SetSnapshotDataBlobFn GetRealV8SetSnapshotDataBlob()
+    {
+        if (void *gotReal =
+                g_gotRealV8SetSnapshotDataBlob.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8SetSnapshotDataBlobFn>(gotReal);
+        }
+        std::call_once(g_realV8SetSnapshotDataBlobOnce, []()
+                       {
         g_realV8SetSnapshotDataBlob =
             reinterpret_cast<V8SetSnapshotDataBlobFn>(
                 dlsym(RTLD_NEXT, "_ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE"));
         if (!g_realV8SetSnapshotDataBlob) {
             Log("WARNING: v8::V8::SetSnapshotDataBlob real symbol not found");
-        }
-    });
-    return g_realV8SetSnapshotDataBlob;
-}
-
-static V8InitializeExternalStartupDataFn
-GetRealV8InitializeExternalStartupData() {
-    if (void* gotReal = g_gotRealV8InitializeExternalStartupData.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<V8InitializeExternalStartupDataFn>(gotReal);
+        } });
+        return g_realV8SetSnapshotDataBlob;
     }
-    std::call_once(g_realV8InitializeExternalStartupDataOnce, []() {
+
+    static V8InitializeExternalStartupDataFn
+    GetRealV8InitializeExternalStartupData()
+    {
+        if (void *gotReal = g_gotRealV8InitializeExternalStartupData.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8InitializeExternalStartupDataFn>(gotReal);
+        }
+        std::call_once(g_realV8InitializeExternalStartupDataOnce, []()
+                       {
         g_realV8InitializeExternalStartupData =
             reinterpret_cast<V8InitializeExternalStartupDataFn>(
                 dlsym(RTLD_NEXT, "_ZN2v82V829InitializeExternalStartupDataEPKc"));
         if (!g_realV8InitializeExternalStartupData) {
             Log("WARNING: v8::V8::InitializeExternalStartupData real symbol not found");
-        }
-    });
-    return g_realV8InitializeExternalStartupData;
-}
-
-static V8InitializeExternalStartupDataFn
-GetRealV8InitializeExternalStartupDataFromFile() {
-    if (void* gotReal = g_gotRealV8InitializeExternalStartupDataFromFile.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<V8InitializeExternalStartupDataFn>(gotReal);
+        } });
+        return g_realV8InitializeExternalStartupData;
     }
-    std::call_once(g_realV8InitializeExternalStartupDataFromFileOnce, []() {
+
+    static V8InitializeExternalStartupDataFn
+    GetRealV8InitializeExternalStartupDataFromFile()
+    {
+        if (void *gotReal = g_gotRealV8InitializeExternalStartupDataFromFile.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8InitializeExternalStartupDataFn>(gotReal);
+        }
+        std::call_once(g_realV8InitializeExternalStartupDataFromFileOnce, []()
+                       {
         g_realV8InitializeExternalStartupDataFromFile =
             reinterpret_cast<V8InitializeExternalStartupDataFn>(
                 dlsym(RTLD_NEXT, "_ZN2v82V837InitializeExternalStartupDataFromFileEPKc"));
         if (!g_realV8InitializeExternalStartupDataFromFile) {
             Log("WARNING: v8::V8::InitializeExternalStartupDataFromFile real symbol not found");
-        }
-    });
-    return g_realV8InitializeExternalStartupDataFromFile;
-}
-
-static V8InternalInitWithSnapshotFn GetRealV8InternalInitWithSnapshot() {
-    if (void* gotReal =
-            g_gotRealV8InternalInitWithSnapshot.load(
-                std::memory_order_acquire)) {
-        return reinterpret_cast<V8InternalInitWithSnapshotFn>(gotReal);
+        } });
+        return g_realV8InitializeExternalStartupDataFromFile;
     }
-    std::call_once(g_realV8InternalInitWithSnapshotOnce, []() {
+
+    static V8InternalInitWithSnapshotFn GetRealV8InternalInitWithSnapshot()
+    {
+        if (void *gotReal =
+                g_gotRealV8InternalInitWithSnapshot.load(
+                    std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8InternalInitWithSnapshotFn>(gotReal);
+        }
+        std::call_once(g_realV8InternalInitWithSnapshotOnce, []()
+                       {
         g_realV8InternalInitWithSnapshot =
             reinterpret_cast<V8InternalInitWithSnapshotFn>(dlsym(
                 RTLD_NEXT,
                 "_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b"));
         if (!g_realV8InternalInitWithSnapshot) {
             Log("WARNING: v8::internal::Isolate::InitWithSnapshot real symbol not found");
-        }
-    });
-    return g_realV8InternalInitWithSnapshot;
-}
-
-static NothrowNewFn GetRealArrayNothrowNew() {
-    if (void* gotReal =
-            g_gotRealArrayNothrowNew.load(std::memory_order_acquire)) {
-        return reinterpret_cast<NothrowNewFn>(gotReal);
+        } });
+        return g_realV8InternalInitWithSnapshot;
     }
-    std::call_once(g_realArrayNothrowNewOnce, []() {
+
+    static NothrowNewFn GetRealArrayNothrowNew()
+    {
+        if (void *gotReal =
+                g_gotRealArrayNothrowNew.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<NothrowNewFn>(gotReal);
+        }
+        std::call_once(g_realArrayNothrowNewOnce, []()
+                       {
         g_realArrayNothrowNew = reinterpret_cast<NothrowNewFn>(
             dlsym(RTLD_NEXT, "_ZnamRKSt9nothrow_t"));
         if (!g_realArrayNothrowNew) {
             Log("WARNING: operator new[](nothrow) real symbol not found");
-        }
-    });
-    return g_realArrayNothrowNew;
-}
-
-static NothrowNewFn GetRealScalarNothrowNew() {
-    if (void* gotReal =
-            g_gotRealScalarNothrowNew.load(std::memory_order_acquire)) {
-        return reinterpret_cast<NothrowNewFn>(gotReal);
+        } });
+        return g_realArrayNothrowNew;
     }
-    std::call_once(g_realScalarNothrowNewOnce, []() {
+
+    static NothrowNewFn GetRealScalarNothrowNew()
+    {
+        if (void *gotReal =
+                g_gotRealScalarNothrowNew.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<NothrowNewFn>(gotReal);
+        }
+        std::call_once(g_realScalarNothrowNewOnce, []()
+                       {
         g_realScalarNothrowNew = reinterpret_cast<NothrowNewFn>(
             dlsym(RTLD_NEXT, "_ZnwmRKSt9nothrow_t"));
         if (!g_realScalarNothrowNew) {
             Log("WARNING: operator new(nothrow) real symbol not found");
-        }
-    });
-    return g_realScalarNothrowNew;
-}
-
-static DeleteFn GetRealArrayDelete() {
-    if (void* gotReal =
-            g_gotRealArrayDelete.load(std::memory_order_acquire)) {
-        return reinterpret_cast<DeleteFn>(gotReal);
+        } });
+        return g_realScalarNothrowNew;
     }
-    std::call_once(g_realArrayDeleteOnce, []() {
+
+    static DeleteFn GetRealArrayDelete()
+    {
+        if (void *gotReal =
+                g_gotRealArrayDelete.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<DeleteFn>(gotReal);
+        }
+        std::call_once(g_realArrayDeleteOnce, []()
+                       {
         g_realArrayDelete =
             reinterpret_cast<DeleteFn>(dlsym(RTLD_NEXT, "_ZdaPv"));
         if (!g_realArrayDelete) {
             Log("WARNING: operator delete[] real symbol not found");
-        }
-    });
-    return g_realArrayDelete;
-}
-
-static DeleteFn GetRealScalarDelete() {
-    if (void* gotReal =
-            g_gotRealScalarDelete.load(std::memory_order_acquire)) {
-        return reinterpret_cast<DeleteFn>(gotReal);
+        } });
+        return g_realArrayDelete;
     }
-    std::call_once(g_realScalarDeleteOnce, []() {
+
+    static DeleteFn GetRealScalarDelete()
+    {
+        if (void *gotReal =
+                g_gotRealScalarDelete.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<DeleteFn>(gotReal);
+        }
+        std::call_once(g_realScalarDeleteOnce, []()
+                       {
         g_realScalarDelete =
             reinterpret_cast<DeleteFn>(dlsym(RTLD_NEXT, "_ZdlPv"));
         if (!g_realScalarDelete) {
             Log("WARNING: operator delete real symbol not found");
-        }
-    });
-    return g_realScalarDelete;
-}
-
-static SnapshotDecompressFn GetRealSnapshotDecompress() {
-    if (void* gotReal =
-            g_gotRealSnapshotDecompress.load(std::memory_order_acquire)) {
-        return reinterpret_cast<SnapshotDecompressFn>(gotReal);
+        } });
+        return g_realScalarDelete;
     }
-    std::call_once(g_realSnapshotDecompressOnce, []() {
+
+    static SnapshotDecompressFn GetRealSnapshotDecompress()
+    {
+        if (void *gotReal =
+                g_gotRealSnapshotDecompress.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<SnapshotDecompressFn>(gotReal);
+        }
+        std::call_once(g_realSnapshotDecompressOnce, []()
+                       {
         g_realSnapshotDecompress =
             reinterpret_cast<SnapshotDecompressFn>(dlsym(
                 RTLD_NEXT,
                 "_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE"));
         if (!g_realSnapshotDecompress) {
             Log("WARNING: SnapshotCompression::Decompress real symbol not found");
+        } });
+        return g_realSnapshotDecompress;
+    }
+
+    static NodeInitializeContextFn GetRealNodeInitializeContext()
+    {
+        if (void *trampoline =
+                g_nodeInitializeContextInlineTrampoline.load(
+                    std::memory_order_acquire))
+        {
+            return reinterpret_cast<NodeInitializeContextFn>(trampoline);
         }
-    });
-    return g_realSnapshotDecompress;
-}
 
-static NodeInitializeContextFn GetRealNodeInitializeContext() {
-    if (void* trampoline =
-            g_nodeInitializeContextInlineTrampoline.load(
-                std::memory_order_acquire)) {
-        return reinterpret_cast<NodeInitializeContextFn>(trampoline);
-    }
-
-    void* gotReal =
-        g_gotRealNodeInitializeContext.load(std::memory_order_acquire);
-    if (gotReal && gotReal !=
-                       reinterpret_cast<void*>(
-                           &_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE)) {
-        return reinterpret_cast<NodeInitializeContextFn>(gotReal);
-    }
-    std::call_once(g_realNodeInitializeContextOnce, []() {
+        void *gotReal =
+            g_gotRealNodeInitializeContext.load(std::memory_order_acquire);
+        if (gotReal && gotReal !=
+                           reinterpret_cast<void *>(
+                               &_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE))
+        {
+            return reinterpret_cast<NodeInitializeContextFn>(gotReal);
+        }
+        std::call_once(g_realNodeInitializeContextOnce, []()
+                       {
         g_realNodeInitializeContext =
             reinterpret_cast<NodeInitializeContextFn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE"));
         if (!g_realNodeInitializeContext) {
             Log("WARNING: node::InitializeContext real symbol not found");
-        }
-    });
-    return g_realNodeInitializeContext;
-}
-
-static NodeNewContextFn GetRealNodeNewContext() {
-    if (void* gotReal =
-            g_gotRealNodeNewContext.load(std::memory_order_acquire)) {
-        return reinterpret_cast<NodeNewContextFn>(gotReal);
+        } });
+        return g_realNodeInitializeContext;
     }
-    std::call_once(g_realNodeNewContextOnce, []() {
+
+    static NodeNewContextFn GetRealNodeNewContext()
+    {
+        if (void *gotReal =
+                g_gotRealNodeNewContext.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<NodeNewContextFn>(gotReal);
+        }
+        std::call_once(g_realNodeNewContextOnce, []()
+                       {
         g_realNodeNewContext = reinterpret_cast<NodeNewContextFn>(dlsym(
             RTLD_NEXT,
             "_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE"));
         if (!g_realNodeNewContext) {
             Log("WARNING: node::NewContext real symbol not found");
-        }
-    });
-    return g_realNodeNewContext;
-}
-
-static NodeCreateEnvironmentFn GetRealNodeCreateEnvironment() {
-    if (void* gotReal =
-            g_gotRealNodeCreateEnvironment.load(std::memory_order_acquire)) {
-        return reinterpret_cast<NodeCreateEnvironmentFn>(gotReal);
+        } });
+        return g_realNodeNewContext;
     }
-    std::call_once(g_realNodeCreateEnvironmentOnce, []() {
+
+    static NodeCreateEnvironmentFn GetRealNodeCreateEnvironment()
+    {
+        if (void *gotReal =
+                g_gotRealNodeCreateEnvironment.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<NodeCreateEnvironmentFn>(gotReal);
+        }
+        std::call_once(g_realNodeCreateEnvironmentOnce, []()
+                       {
         g_realNodeCreateEnvironment =
             reinterpret_cast<NodeCreateEnvironmentFn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE"));
         if (!g_realNodeCreateEnvironment) {
             Log("WARNING: node::CreateEnvironment real symbol not found");
+        } });
+        return g_realNodeCreateEnvironment;
+    }
+
+    static void *ResolveElectronExport(const char *symbolName,
+                                       const void *wrapperAddress)
+    {
+        void *symbol = nullptr;
+        if (g_electronPreloadHandle)
+        {
+            symbol = dlsym(g_electronPreloadHandle, symbolName);
         }
-    });
-    return g_realNodeCreateEnvironment;
-}
 
-static void* ResolveElectronExport(const char* symbolName,
-                                   const void* wrapperAddress) {
-    void* symbol = nullptr;
-    if (g_electronPreloadHandle) {
-        symbol = dlsym(g_electronPreloadHandle, symbolName);
-    }
-
-    if (!symbol) {
-        void* handle = dlopen("libelectron.so", RTLD_LAZY | RTLD_GLOBAL);
-        if (handle) {
-            g_electronPreloadHandle = handle;
-            symbol = dlsym(handle, symbolName);
+        if (!symbol)
+        {
+            void *handle = dlopen("libelectron.so", RTLD_LAZY | RTLD_GLOBAL);
+            if (handle)
+            {
+                g_electronPreloadHandle = handle;
+                symbol = dlsym(handle, symbolName);
+            }
         }
-    }
 
-    if (!symbol) {
-        symbol = dlsym(RTLD_DEFAULT, symbolName);
-    }
+        if (!symbol)
+        {
+            symbol = dlsym(RTLD_DEFAULT, symbolName);
+        }
 
-    if (symbol && wrapperAddress && symbol == wrapperAddress) {
-        Log("WARNING: resolved %s to wrapper address %p; ignoring",
-            symbolName, symbol);
-        return nullptr;
-    }
+        if (symbol && wrapperAddress && symbol == wrapperAddress)
+        {
+            Log("WARNING: resolved %s to wrapper address %p; ignoring",
+                symbolName, symbol);
+            return nullptr;
+        }
 
-    if (symbol) {
-        Dl_info info;
-        memset(&info, 0, sizeof(info));
-        if (dladdr(symbol, &info) != 0 && info.dli_fname &&
-            strstr(info.dli_fname, "libelectron.so")) {
-            Log("resolved %s from %s at %p", symbolName, info.dli_fname,
+        if (symbol)
+        {
+            Dl_info info;
+            memset(&info, 0, sizeof(info));
+            if (dladdr(symbol, &info) != 0 && info.dli_fname &&
+                strstr(info.dli_fname, "libelectron.so"))
+            {
+                Log("resolved %s from %s at %p", symbolName, info.dli_fname,
+                    symbol);
+                return symbol;
+            }
+            Log("WARNING: resolved %s from non-electron module %s at %p",
+                symbolName, info.dli_fname ? info.dli_fname : "<unknown>",
                 symbol);
-            return symbol;
         }
-        Log("WARNING: resolved %s from non-electron module %s at %p",
-            symbolName, info.dli_fname ? info.dli_fname : "<unknown>",
-            symbol);
+
+        return symbol;
     }
 
-    return symbol;
-}
-
-static V8ObjectSetPrivateFn GetRealV8ObjectSetPrivate() {
-    if (void* gotReal =
-            g_gotRealV8ObjectSetPrivate.load(std::memory_order_acquire)) {
-        return reinterpret_cast<V8ObjectSetPrivateFn>(gotReal);
-    }
-    std::call_once(g_realV8ObjectSetPrivateOnce, []() {
+    static V8ObjectSetPrivateFn GetRealV8ObjectSetPrivate()
+    {
+        if (void *gotReal =
+                g_gotRealV8ObjectSetPrivate.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8ObjectSetPrivateFn>(gotReal);
+        }
+        std::call_once(g_realV8ObjectSetPrivateOnce, []()
+                       {
         g_realV8ObjectSetPrivate =
             reinterpret_cast<V8ObjectSetPrivateFn>(ResolveElectronExport(
                 "_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
@@ -1714,17 +1827,19 @@ static V8ObjectSetPrivateFn GetRealV8ObjectSetPrivate() {
                     &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE)));
         if (!g_realV8ObjectSetPrivate) {
             Log("WARNING: v8::Object::SetPrivate real symbol not found");
-        }
-    });
-    return g_realV8ObjectSetPrivate;
-}
-
-static V8ObjectDefineOwnPropertyFn GetRealV8ObjectDefineOwnProperty() {
-    if (void* gotReal = g_gotRealV8ObjectDefineOwnProperty.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<V8ObjectDefineOwnPropertyFn>(gotReal);
+        } });
+        return g_realV8ObjectSetPrivate;
     }
-    std::call_once(g_realV8ObjectDefineOwnPropertyOnce, []() {
+
+    static V8ObjectDefineOwnPropertyFn GetRealV8ObjectDefineOwnProperty()
+    {
+        if (void *gotReal = g_gotRealV8ObjectDefineOwnProperty.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8ObjectDefineOwnPropertyFn>(gotReal);
+        }
+        std::call_once(g_realV8ObjectDefineOwnPropertyOnce, []()
+                       {
         g_realV8ObjectDefineOwnProperty =
             reinterpret_cast<V8ObjectDefineOwnPropertyFn>(
                 ResolveElectronExport(
@@ -1733,22 +1848,25 @@ static V8ObjectDefineOwnPropertyFn GetRealV8ObjectDefineOwnProperty() {
                         &_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE)));
         if (!g_realV8ObjectDefineOwnProperty) {
             Log("WARNING: v8::Object::DefineOwnProperty real symbol not found");
-        }
-    });
-    return g_realV8ObjectDefineOwnProperty;
-}
+        } });
+        return g_realV8ObjectDefineOwnProperty;
+    }
 
-static V8CompileFunctionFn GetRealV8CompileFunction() {
-    if (void* trampoline =
-            g_v8CompileFunctionInlineTrampoline.load(
-                std::memory_order_acquire)) {
-        return reinterpret_cast<V8CompileFunctionFn>(trampoline);
-    }
-    if (void* gotReal =
-            g_gotRealV8CompileFunction.load(std::memory_order_acquire)) {
-        return reinterpret_cast<V8CompileFunctionFn>(gotReal);
-    }
-    std::call_once(g_realV8CompileFunctionOnce, []() {
+    static V8CompileFunctionFn GetRealV8CompileFunction()
+    {
+        if (void *trampoline =
+                g_v8CompileFunctionInlineTrampoline.load(
+                    std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8CompileFunctionFn>(trampoline);
+        }
+        if (void *gotReal =
+                g_gotRealV8CompileFunction.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8CompileFunctionFn>(gotReal);
+        }
+        std::call_once(g_realV8CompileFunctionOnce, []()
+                       {
         g_realV8CompileFunction =
             reinterpret_cast<V8CompileFunctionFn>(ResolveElectronExport(
                 "_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE",
@@ -1756,971 +1874,1131 @@ static V8CompileFunctionFn GetRealV8CompileFunction() {
                     &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE)));
         if (!g_realV8CompileFunction) {
             Log("WARNING: v8::ScriptCompiler::CompileFunction real symbol not found");
+        } });
+        return g_realV8CompileFunction;
+    }
+
+    static void ResolveV8AppSearchPathSymbols()
+    {
+        if (!g_v8ContextGetIsolate)
+        {
+            g_v8ContextGetIsolate = reinterpret_cast<V8ContextGetIsolateFn>(
+                ResolveElectronExport("_ZN2v87Context10GetIsolateEv", nullptr));
         }
-    });
-    return g_realV8CompileFunction;
-}
+        g_v8ContextGlobal = reinterpret_cast<V8ContextGlobalFn>(
+            ResolveElectronExport("_ZN2v87Context6GlobalEv", nullptr));
+        g_v8ObjectGet = reinterpret_cast<V8ObjectGetFn>(
+            ResolveElectronExport(
+                "_ZN2v86Object3GetENS_5LocalINS_7ContextEEENS1_INS_5ValueEEE",
+                nullptr));
+        g_v8ObjectSetValue = reinterpret_cast<V8ObjectSetValueFn>(
+            ResolveElectronExport(
+                "_ZN2v86Object3SetENS_5LocalINS_7ContextEEENS1_INS_5ValueEEES5_",
+                nullptr));
+        g_v8ValueIsFunction = reinterpret_cast<V8ValueIsFunctionFn>(
+            ResolveElectronExport("_ZNK2v85Value10IsFunctionEv", nullptr));
+        g_v8FunctionCall = reinterpret_cast<V8FunctionCallFn>(
+            ResolveElectronExport(
+                "_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_",
+                nullptr));
+        g_v8CreateHandle = reinterpret_cast<V8CreateHandleFn>(
+            ResolveElectronExport(
+                "_ZN2v811HandleScope12CreateHandleEPNS_8internal7IsolateEm",
+                nullptr));
+        g_v8PrivateName = reinterpret_cast<V8PrivateNameFn>(
+            ResolveElectronExport("_ZNK2v87Private4NameEv", nullptr));
+        g_v8ValueIsString = reinterpret_cast<V8ValueIsStringFn>(
+            ResolveElectronExport("_ZNK2v85Value12FullIsStringEv", nullptr));
+        g_v8StringUtf8Length = reinterpret_cast<V8StringUtf8LengthFn>(
+            ResolveElectronExport("_ZNK2v86String10Utf8LengthEPNS_7IsolateE",
+                                  nullptr));
+        g_v8StringWriteUtf8 = reinterpret_cast<V8StringWriteUtf8Fn>(
+            ResolveElectronExport("_ZNK2v86String9WriteUtf8EPNS_7IsolateEPciPii",
+                                  nullptr));
+        g_v8StringNewFromUtf8 = reinterpret_cast<V8StringNewFromUtf8Fn>(
+            ResolveElectronExport(
+                "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
+                nullptr));
+        g_v8ArrayNew = reinterpret_cast<V8ArrayNewFn>(
+            ResolveElectronExport("_ZN2v85Array3NewEPNS_7IsolateEi", nullptr));
+        g_v8ObjectSetIndex = reinterpret_cast<V8ObjectSetIndexFn>(
+            ResolveElectronExport(
+                "_ZN2v86Object3SetENS_5LocalINS_7ContextEEEjNS1_INS_5ValueEEE",
+                nullptr));
+        g_v8NumberNew = reinterpret_cast<V8NumberNewFn>(
+            ResolveElectronExport("_ZN2v86Number3NewEPNS_7IsolateEd", nullptr));
 
-static void ResolveV8AppSearchPathSymbols() {
-    if (!g_v8ContextGetIsolate) {
-        g_v8ContextGetIsolate = reinterpret_cast<V8ContextGetIsolateFn>(
-            ResolveElectronExport("_ZN2v87Context10GetIsolateEv", nullptr));
-    }
-    g_v8ContextGlobal = reinterpret_cast<V8ContextGlobalFn>(
-        ResolveElectronExport("_ZN2v87Context6GlobalEv", nullptr));
-    g_v8ObjectGet = reinterpret_cast<V8ObjectGetFn>(
-        ResolveElectronExport(
-            "_ZN2v86Object3GetENS_5LocalINS_7ContextEEENS1_INS_5ValueEEE",
-            nullptr));
-    g_v8ObjectSetValue = reinterpret_cast<V8ObjectSetValueFn>(
-        ResolveElectronExport(
-            "_ZN2v86Object3SetENS_5LocalINS_7ContextEEENS1_INS_5ValueEEES5_",
-            nullptr));
-    g_v8ValueIsFunction = reinterpret_cast<V8ValueIsFunctionFn>(
-        ResolveElectronExport("_ZNK2v85Value10IsFunctionEv", nullptr));
-    g_v8FunctionCall = reinterpret_cast<V8FunctionCallFn>(
-        ResolveElectronExport(
-            "_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_",
-            nullptr));
-    g_v8CreateHandle = reinterpret_cast<V8CreateHandleFn>(
-        ResolveElectronExport(
-            "_ZN2v811HandleScope12CreateHandleEPNS_8internal7IsolateEm",
-            nullptr));
-    g_v8PrivateName = reinterpret_cast<V8PrivateNameFn>(
-        ResolveElectronExport("_ZNK2v87Private4NameEv", nullptr));
-    g_v8ValueIsString = reinterpret_cast<V8ValueIsStringFn>(
-        ResolveElectronExport("_ZNK2v85Value12FullIsStringEv", nullptr));
-    g_v8StringUtf8Length = reinterpret_cast<V8StringUtf8LengthFn>(
-        ResolveElectronExport("_ZNK2v86String10Utf8LengthEPNS_7IsolateE",
-                              nullptr));
-    g_v8StringWriteUtf8 = reinterpret_cast<V8StringWriteUtf8Fn>(
-        ResolveElectronExport("_ZNK2v86String9WriteUtf8EPNS_7IsolateEPciPii",
-                              nullptr));
-    g_v8StringNewFromUtf8 = reinterpret_cast<V8StringNewFromUtf8Fn>(
-        ResolveElectronExport(
-            "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
-            nullptr));
-    g_v8ArrayNew = reinterpret_cast<V8ArrayNewFn>(
-        ResolveElectronExport("_ZN2v85Array3NewEPNS_7IsolateEi", nullptr));
-    g_v8ObjectSetIndex = reinterpret_cast<V8ObjectSetIndexFn>(
-        ResolveElectronExport(
-            "_ZN2v86Object3SetENS_5LocalINS_7ContextEEEjNS1_INS_5ValueEEE",
-            nullptr));
-    g_v8NumberNew = reinterpret_cast<V8NumberNewFn>(
-        ResolveElectronExport("_ZN2v86Number3NewEPNS_7IsolateEd", nullptr));
-
-    if (!g_v8ContextGetIsolate || !g_v8ContextGlobal || !g_v8ObjectGet ||
-        !g_v8ObjectSetValue ||
-        !g_v8PrivateName ||
-        !g_v8ValueIsString || !g_v8StringWriteUtf8 || !g_v8StringNewFromUtf8 ||
-        !g_v8ArrayNew || !g_v8ObjectSetIndex || !g_v8NumberNew) {
-        Log("WARNING: appSearchPaths V8 symbols missing: contextGetIsolate=%p "
-            "contextGlobal=%p objectGet=%p objectSet=%p "
-            "privateName=%p valueIsString=%p utf8Length=%p writeUtf8=%p newString=%p "
-            "arrayNew=%p setIndex=%p numberNew=%p",
-            reinterpret_cast<void*>(g_v8ContextGetIsolate),
-            reinterpret_cast<void*>(g_v8ContextGlobal),
-            reinterpret_cast<void*>(g_v8ObjectGet),
-            reinterpret_cast<void*>(g_v8ObjectSetValue),
-            reinterpret_cast<void*>(g_v8PrivateName),
-            reinterpret_cast<void*>(g_v8ValueIsString),
-            reinterpret_cast<void*>(g_v8StringUtf8Length),
-            reinterpret_cast<void*>(g_v8StringWriteUtf8),
-            reinterpret_cast<void*>(g_v8StringNewFromUtf8),
-            reinterpret_cast<void*>(g_v8ArrayNew),
-            reinterpret_cast<void*>(g_v8ObjectSetIndex),
-            reinterpret_cast<void*>(g_v8NumberNew));
-    }
-}
-
-static bool ReadV8PrivateName(void* context, void* key, char* buffer,
-                              size_t bufferSize) {
-    if (!context || !key || !buffer || bufferSize == 0) {
-        return false;
-    }
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!g_v8ContextGetIsolate || !g_v8PrivateName ||
-        !g_v8ValueIsString || !g_v8StringWriteUtf8) {
-        return false;
+        if (!g_v8ContextGetIsolate || !g_v8ContextGlobal || !g_v8ObjectGet ||
+            !g_v8ObjectSetValue ||
+            !g_v8PrivateName ||
+            !g_v8ValueIsString || !g_v8StringWriteUtf8 || !g_v8StringNewFromUtf8 ||
+            !g_v8ArrayNew || !g_v8ObjectSetIndex || !g_v8NumberNew)
+        {
+            Log("WARNING: appSearchPaths V8 symbols missing: contextGetIsolate=%p "
+                "contextGlobal=%p objectGet=%p objectSet=%p "
+                "privateName=%p valueIsString=%p utf8Length=%p writeUtf8=%p newString=%p "
+                "arrayNew=%p setIndex=%p numberNew=%p",
+                reinterpret_cast<void *>(g_v8ContextGetIsolate),
+                reinterpret_cast<void *>(g_v8ContextGlobal),
+                reinterpret_cast<void *>(g_v8ObjectGet),
+                reinterpret_cast<void *>(g_v8ObjectSetValue),
+                reinterpret_cast<void *>(g_v8PrivateName),
+                reinterpret_cast<void *>(g_v8ValueIsString),
+                reinterpret_cast<void *>(g_v8StringUtf8Length),
+                reinterpret_cast<void *>(g_v8StringWriteUtf8),
+                reinterpret_cast<void *>(g_v8StringNewFromUtf8),
+                reinterpret_cast<void *>(g_v8ArrayNew),
+                reinterpret_cast<void *>(g_v8ObjectSetIndex),
+                reinterpret_cast<void *>(g_v8NumberNew));
+        }
     }
 
-    void* isolate = g_v8ContextGetIsolate(context);
-    void* name = g_v8PrivateName(key);
-    if (!isolate || !name) {
-        return false;
-    }
-    if (!g_v8ValueIsString(name)) {
-        return false;
-    }
+    static bool ReadV8PrivateName(void *context, void *key, char *buffer,
+                                  size_t bufferSize)
+    {
+        if (!context || !key || !buffer || bufferSize == 0)
+        {
+            return false;
+        }
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!g_v8ContextGetIsolate || !g_v8PrivateName ||
+            !g_v8ValueIsString || !g_v8StringWriteUtf8)
+        {
+            return false;
+        }
 
-    buffer[0] = '\0';
-    int charsWritten = 0;
-    const int bytesWritten = g_v8StringWriteUtf8(
-        name, isolate, buffer, static_cast<int>(bufferSize - 1),
-        &charsWritten, 0);
-    if (bytesWritten <= 0) {
+        void *isolate = g_v8ContextGetIsolate(context);
+        void *name = g_v8PrivateName(key);
+        if (!isolate || !name)
+        {
+            return false;
+        }
+        if (!g_v8ValueIsString(name))
+        {
+            return false;
+        }
+
         buffer[0] = '\0';
-        return false;
-    }
-    const size_t clamped =
-        static_cast<size_t>(bytesWritten) < bufferSize
-            ? static_cast<size_t>(bytesWritten)
-            : bufferSize - 1;
-    buffer[clamped] = '\0';
-    return true;
-}
-
-static void* NewV8Utf8String(void* isolate, const char* value) {
-    if (!isolate || !value || !g_v8StringNewFromUtf8) {
-        return nullptr;
-    }
-    return g_v8StringNewFromUtf8(isolate, value, 0, -1);
-}
-
-static void* BuildBrowserAppSearchPathsArray(void* context) {
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!context || !g_v8ContextGetIsolate || !g_v8StringNewFromUtf8 ||
-        !g_v8ArrayNew || !g_v8ObjectSetIndex) {
-        return nullptr;
+        int charsWritten = 0;
+        const int bytesWritten = g_v8StringWriteUtf8(
+            name, isolate, buffer, static_cast<int>(bufferSize - 1),
+            &charsWritten, 0);
+        if (bytesWritten <= 0)
+        {
+            buffer[0] = '\0';
+            return false;
+        }
+        const size_t clamped =
+            static_cast<size_t>(bytesWritten) < bufferSize
+                ? static_cast<size_t>(bytesWritten)
+                : bufferSize - 1;
+        buffer[clamped] = '\0';
+        return true;
     }
 
-    void* isolate = g_v8ContextGetIsolate(context);
-    if (!isolate) {
-        return nullptr;
-    }
-
-    constexpr const char* kSearchPaths[] = {
-        "resources/app",
-        "app",
-        "resources/app.asar",
-        "app.asar",
-        "default_app.asar",
-    };
-    constexpr size_t kSearchPathCount =
-        sizeof(kSearchPaths) / sizeof(kSearchPaths[0]);
-    void* array =
-        g_v8ArrayNew(isolate, static_cast<int>(kSearchPathCount));
-    if (!array) {
-        return nullptr;
-    }
-
-    for (uint32_t i = 0; i < kSearchPathCount; ++i) {
-        void* item = NewV8Utf8String(isolate, kSearchPaths[i]);
-        if (!item) {
+    static void *NewV8Utf8String(void *isolate, const char *value)
+    {
+        if (!isolate || !value || !g_v8StringNewFromUtf8)
+        {
             return nullptr;
         }
-        g_v8ObjectSetIndex(array, context, i, item);
+        return g_v8StringNewFromUtf8(isolate, value, 0, -1);
     }
-    return array;
-}
 
-static void* BuildV8FalseValue(void* context) {
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!context || !g_v8ContextGetIsolate || !g_v8NumberNew) {
-        return nullptr;
-    }
-    void* isolate = g_v8ContextGetIsolate(context);
-    if (!isolate) {
-        return nullptr;
-    }
-    return g_v8NumberNew(isolate, 0.0);
-}
+    static void *BuildBrowserAppSearchPathsArray(void *context)
+    {
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!context || !g_v8ContextGetIsolate || !g_v8StringNewFromUtf8 ||
+            !g_v8ArrayNew || !g_v8ObjectSetIndex)
+        {
+            return nullptr;
+        }
 
-static OpenFn GetRealOpen() {
-    if (void* gotReal = g_gotRealOpen.load(std::memory_order_acquire)) {
-        return reinterpret_cast<OpenFn>(gotReal);
+        void *isolate = g_v8ContextGetIsolate(context);
+        if (!isolate)
+        {
+            return nullptr;
+        }
+
+        constexpr const char *kSearchPaths[] = {
+            "resources/app",
+            "app",
+            "resources/app.asar",
+            "app.asar",
+            "default_app.asar",
+        };
+        constexpr size_t kSearchPathCount =
+            sizeof(kSearchPaths) / sizeof(kSearchPaths[0]);
+        void *array =
+            g_v8ArrayNew(isolate, static_cast<int>(kSearchPathCount));
+        if (!array)
+        {
+            return nullptr;
+        }
+
+        for (uint32_t i = 0; i < kSearchPathCount; ++i)
+        {
+            void *item = NewV8Utf8String(isolate, kSearchPaths[i]);
+            if (!item)
+            {
+                return nullptr;
+            }
+            g_v8ObjectSetIndex(array, context, i, item);
+        }
+        return array;
     }
-    std::call_once(g_realOpenOnce, []() {
+
+    static void *BuildV8FalseValue(void *context)
+    {
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!context || !g_v8ContextGetIsolate || !g_v8NumberNew)
+        {
+            return nullptr;
+        }
+        void *isolate = g_v8ContextGetIsolate(context);
+        if (!isolate)
+        {
+            return nullptr;
+        }
+        return g_v8NumberNew(isolate, 0.0);
+    }
+
+    static OpenFn GetRealOpen()
+    {
+        if (void *gotReal = g_gotRealOpen.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<OpenFn>(gotReal);
+        }
+        std::call_once(g_realOpenOnce, []()
+                       {
         g_realOpen = reinterpret_cast<OpenFn>(dlsym(RTLD_NEXT, "open"));
         if (!g_realOpen) {
             Log("WARNING: open real symbol not found");
-        }
-    });
-    return g_realOpen;
-}
-
-static FopenFn GetRealFopen() {
-    if (void* gotReal = g_gotRealFopen.load(std::memory_order_acquire)) {
-        return reinterpret_cast<FopenFn>(gotReal);
+        } });
+        return g_realOpen;
     }
-    std::call_once(g_realFopenOnce, []() {
+
+    static FopenFn GetRealFopen()
+    {
+        if (void *gotReal = g_gotRealFopen.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<FopenFn>(gotReal);
+        }
+        std::call_once(g_realFopenOnce, []()
+                       {
         g_realFopen = reinterpret_cast<FopenFn>(dlsym(RTLD_NEXT, "fopen"));
         if (!g_realFopen) {
             Log("WARNING: fopen real symbol not found");
-        }
-    });
-    return g_realFopen;
-}
-
-static AccessFn GetRealAccess() {
-    if (void* gotReal = g_gotRealAccess.load(std::memory_order_acquire)) {
-        return reinterpret_cast<AccessFn>(gotReal);
+        } });
+        return g_realFopen;
     }
-    std::call_once(g_realAccessOnce, []() {
+
+    static AccessFn GetRealAccess()
+    {
+        if (void *gotReal = g_gotRealAccess.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<AccessFn>(gotReal);
+        }
+        std::call_once(g_realAccessOnce, []()
+                       {
         g_realAccess = reinterpret_cast<AccessFn>(dlsym(RTLD_NEXT, "access"));
         if (!g_realAccess) {
             Log("WARNING: access real symbol not found");
-        }
-    });
-    return g_realAccess;
-}
-
-static StatFn GetRealStat() {
-    if (void* gotReal = g_gotRealStat.load(std::memory_order_acquire)) {
-        return reinterpret_cast<StatFn>(gotReal);
+        } });
+        return g_realAccess;
     }
-    std::call_once(g_realStatOnce, []() {
+
+    static StatFn GetRealStat()
+    {
+        if (void *gotReal = g_gotRealStat.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<StatFn>(gotReal);
+        }
+        std::call_once(g_realStatOnce, []()
+                       {
         g_realStat = reinterpret_cast<StatFn>(dlsym(RTLD_NEXT, "stat"));
         if (!g_realStat) {
             Log("WARNING: stat real symbol not found");
-        }
-    });
-    return g_realStat;
-}
-
-static StatFn GetRealLstat() {
-    if (void* gotReal = g_gotRealLstat.load(std::memory_order_acquire)) {
-        return reinterpret_cast<StatFn>(gotReal);
+        } });
+        return g_realStat;
     }
-    std::call_once(g_realLstatOnce, []() {
+
+    static StatFn GetRealLstat()
+    {
+        if (void *gotReal = g_gotRealLstat.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<StatFn>(gotReal);
+        }
+        std::call_once(g_realLstatOnce, []()
+                       {
         g_realLstat = reinterpret_cast<StatFn>(dlsym(RTLD_NEXT, "lstat"));
         if (!g_realLstat) {
             Log("WARNING: lstat real symbol not found");
-        }
-    });
-    return g_realLstat;
-}
-
-static WriteFn GetRealWrite() {
-    if (void* gotReal = g_gotRealWrite.load(std::memory_order_acquire)) {
-        return reinterpret_cast<WriteFn>(gotReal);
+        } });
+        return g_realLstat;
     }
-    std::call_once(g_realWriteOnce, []() {
+
+    static WriteFn GetRealWrite()
+    {
+        if (void *gotReal = g_gotRealWrite.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<WriteFn>(gotReal);
+        }
+        std::call_once(g_realWriteOnce, []()
+                       {
         g_realWrite = reinterpret_cast<WriteFn>(dlsym(RTLD_NEXT, "write"));
         if (!g_realWrite) {
             Log("WARNING: write real symbol not found");
-        }
-    });
-    return g_realWrite;
-}
-
-static WritevFn GetRealWritev() {
-    if (void* gotReal = g_gotRealWritev.load(std::memory_order_acquire)) {
-        return reinterpret_cast<WritevFn>(gotReal);
+        } });
+        return g_realWrite;
     }
-    std::call_once(g_realWritevOnce, []() {
+
+    static WritevFn GetRealWritev()
+    {
+        if (void *gotReal = g_gotRealWritev.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<WritevFn>(gotReal);
+        }
+        std::call_once(g_realWritevOnce, []()
+                       {
         g_realWritev = reinterpret_cast<WritevFn>(dlsym(RTLD_NEXT, "writev"));
         if (!g_realWritev) {
             Log("WARNING: writev real symbol not found");
-        }
-    });
-    return g_realWritev;
-}
-
-static UvFsOpenFn GetRealUvFsOpen() {
-    if (void* gotReal = g_gotRealUvFsOpen.load(std::memory_order_acquire)) {
-        return reinterpret_cast<UvFsOpenFn>(gotReal);
+        } });
+        return g_realWritev;
     }
-    std::call_once(g_realUvFsOpenOnce, []() {
+
+    static UvFsOpenFn GetRealUvFsOpen()
+    {
+        if (void *gotReal = g_gotRealUvFsOpen.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<UvFsOpenFn>(gotReal);
+        }
+        std::call_once(g_realUvFsOpenOnce, []()
+                       {
         g_realUvFsOpen =
             reinterpret_cast<UvFsOpenFn>(dlsym(RTLD_NEXT, "uv_fs_open"));
         if (!g_realUvFsOpen) {
             Log("WARNING: uv_fs_open real symbol not found");
-        }
-    });
-    return g_realUvFsOpen;
-}
-
-static UvFsPathFn GetRealUvFsStat() {
-    if (void* gotReal = g_gotRealUvFsStat.load(std::memory_order_acquire)) {
-        return reinterpret_cast<UvFsPathFn>(gotReal);
+        } });
+        return g_realUvFsOpen;
     }
-    std::call_once(g_realUvFsStatOnce, []() {
+
+    static UvFsPathFn GetRealUvFsStat()
+    {
+        if (void *gotReal = g_gotRealUvFsStat.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<UvFsPathFn>(gotReal);
+        }
+        std::call_once(g_realUvFsStatOnce, []()
+                       {
         g_realUvFsStat =
             reinterpret_cast<UvFsPathFn>(dlsym(RTLD_NEXT, "uv_fs_stat"));
         if (!g_realUvFsStat) {
             Log("WARNING: uv_fs_stat real symbol not found");
-        }
-    });
-    return g_realUvFsStat;
-}
-
-static UvFsPathFn GetRealUvFsLstat() {
-    if (void* gotReal = g_gotRealUvFsLstat.load(std::memory_order_acquire)) {
-        return reinterpret_cast<UvFsPathFn>(gotReal);
+        } });
+        return g_realUvFsStat;
     }
-    std::call_once(g_realUvFsLstatOnce, []() {
+
+    static UvFsPathFn GetRealUvFsLstat()
+    {
+        if (void *gotReal = g_gotRealUvFsLstat.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<UvFsPathFn>(gotReal);
+        }
+        std::call_once(g_realUvFsLstatOnce, []()
+                       {
         g_realUvFsLstat =
             reinterpret_cast<UvFsPathFn>(dlsym(RTLD_NEXT, "uv_fs_lstat"));
         if (!g_realUvFsLstat) {
             Log("WARNING: uv_fs_lstat real symbol not found");
-        }
-    });
-    return g_realUvFsLstat;
-}
-
-static UvFsPathFlagsFn GetRealUvFsAccess() {
-    if (void* gotReal = g_gotRealUvFsAccess.load(std::memory_order_acquire)) {
-        return reinterpret_cast<UvFsPathFlagsFn>(gotReal);
+        } });
+        return g_realUvFsLstat;
     }
-    std::call_once(g_realUvFsAccessOnce, []() {
+
+    static UvFsPathFlagsFn GetRealUvFsAccess()
+    {
+        if (void *gotReal = g_gotRealUvFsAccess.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<UvFsPathFlagsFn>(gotReal);
+        }
+        std::call_once(g_realUvFsAccessOnce, []()
+                       {
         g_realUvFsAccess = reinterpret_cast<UvFsPathFlagsFn>(
             dlsym(RTLD_NEXT, "uv_fs_access"));
         if (!g_realUvFsAccess) {
             Log("WARNING: uv_fs_access real symbol not found");
-        }
-    });
-    return g_realUvFsAccess;
-}
-
-static UvFsPathFlagsFn GetRealUvFsScandir() {
-    if (void* gotReal = g_gotRealUvFsScandir.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<UvFsPathFlagsFn>(gotReal);
+        } });
+        return g_realUvFsAccess;
     }
-    std::call_once(g_realUvFsScandirOnce, []() {
+
+    static UvFsPathFlagsFn GetRealUvFsScandir()
+    {
+        if (void *gotReal = g_gotRealUvFsScandir.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<UvFsPathFlagsFn>(gotReal);
+        }
+        std::call_once(g_realUvFsScandirOnce, []()
+                       {
         g_realUvFsScandir = reinterpret_cast<UvFsPathFlagsFn>(
             dlsym(RTLD_NEXT, "uv_fs_scandir"));
         if (!g_realUvFsScandir) {
             Log("WARNING: uv_fs_scandir real symbol not found");
+        } });
+        return g_realUvFsScandir;
+    }
+
+    static bool PathContains(const char *path, const char *needle)
+    {
+        return path && needle && strstr(path, needle) != nullptr;
+    }
+
+    static bool ShouldTraceEntryPath(const char *path)
+    {
+        if (!PathContains(path, "resfile"))
+        {
+            return false;
         }
-    });
-    return g_realUvFsScandir;
-}
-
-static bool PathContains(const char* path, const char* needle) {
-    return path && needle && strstr(path, needle) != nullptr;
-}
-
-static bool ShouldTraceEntryPath(const char* path) {
-    if (!PathContains(path, "resfile")) {
-        return false;
-    }
-    return PathContains(path, "/app/package.json") ||
-           PathContains(path, "/resources/app/package.json") ||
-           PathContains(path, "ohcode-entry-probe.js") ||
-           PathContains(path, "/out/main.js") ||
-           PathContains(path, "/electron-main/main.js");
-}
-
-static void TraceEntryPathProbe(const char* op, const char* path) {
-    if (!ShouldTraceEntryPath(path)) {
-        return;
+        return PathContains(path, "/app/package.json") ||
+               PathContains(path, "/resources/app/package.json") ||
+               PathContains(path, "ohcode-entry-probe.js") ||
+               PathContains(path, "/out/main.js") ||
+               PathContains(path, "/electron-main/main.js");
     }
 
-    const uint64_t hit =
-        g_entryPathProbeHits.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (PathContains(path, "/package.json")) {
-        g_entryPathProbePackageJsonHits.fetch_add(
-            1, std::memory_order_relaxed);
-    }
-    if (PathContains(path, "ohcode-entry-probe.js")) {
-        g_entryPathProbeEntryJsHits.fetch_add(1, std::memory_order_relaxed);
-    }
-    if (PathContains(path, "/out/main.js")) {
-        g_entryPathProbeOutMainHits.fetch_add(1, std::memory_order_relaxed);
-    }
-    if (PathContains(path, "/electron-main/main.js")) {
-        g_entryPathProbeElectronMainHits.fetch_add(
-            1, std::memory_order_relaxed);
+    static void TraceEntryPathProbe(const char *op, const char *path)
+    {
+        if (!ShouldTraceEntryPath(path))
+        {
+            return;
+        }
+
+        const uint64_t hit =
+            g_entryPathProbeHits.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (PathContains(path, "/package.json"))
+        {
+            g_entryPathProbePackageJsonHits.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+        if (PathContains(path, "ohcode-entry-probe.js"))
+        {
+            g_entryPathProbeEntryJsHits.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (PathContains(path, "/out/main.js"))
+        {
+            g_entryPathProbeOutMainHits.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (PathContains(path, "/electron-main/main.js"))
+        {
+            g_entryPathProbeElectronMainHits.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
+            g_lastEntryPathProbeOp = op ? op : "";
+            g_lastEntryPathProbePath = path ? path : "";
+        }
+
+        if (hit <= 30)
+        {
+            Log("entry path probe %s %s", op ? op : "<op>", path);
+        }
     }
 
+    static std::string GetLastEntryPathProbeOp()
     {
         std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
-        g_lastEntryPathProbeOp = op ? op : "";
-        g_lastEntryPathProbePath = path ? path : "";
+        return g_lastEntryPathProbeOp;
     }
 
-    if (hit <= 30) {
-        Log("entry path probe %s %s", op ? op : "<op>", path);
-    }
-}
-
-static std::string GetLastEntryPathProbeOp() {
-    std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
-    return g_lastEntryPathProbeOp;
-}
-
-static std::string GetLastEntryPathProbePath() {
-    std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
-    return g_lastEntryPathProbePath;
-}
-
-static void TraceUvFsPath(const char* op, const char* path) {
-    TraceEntryPathProbe(op, path);
-    if (!PathContains(path, "resfile")) {
-        return;
+    static std::string GetLastEntryPathProbePath()
+    {
+        std::lock_guard<std::mutex> lock(g_entryPathProbeMutex);
+        return g_lastEntryPathProbePath;
     }
 
-    const uint64_t hit =
-        g_uvFsResfileCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    static void TraceUvFsPath(const char *op, const char *path)
+    {
+        TraceEntryPathProbe(op, path);
+        if (!PathContains(path, "resfile"))
+        {
+            return;
+        }
+
+        const uint64_t hit =
+            g_uvFsResfileCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+        {
+            std::lock_guard<std::mutex> lock(g_uvFsPathMutex);
+            g_lastUvFsOp = op ? op : "";
+            g_lastUvFsPath = path ? path : "";
+        }
+
+        if (hit <= 40)
+        {
+            Log("uv fs probe %s %s", op ? op : "<op>", path);
+        }
+    }
+
+    static std::string GetLastUvFsOp()
     {
         std::lock_guard<std::mutex> lock(g_uvFsPathMutex);
-        g_lastUvFsOp = op ? op : "";
-        g_lastUvFsPath = path ? path : "";
+        return g_lastUvFsOp;
     }
 
-    if (hit <= 40) {
-        Log("uv fs probe %s %s", op ? op : "<op>", path);
+    static std::string GetLastUvFsPath()
+    {
+        std::lock_guard<std::mutex> lock(g_uvFsPathMutex);
+        return g_lastUvFsPath;
     }
-}
 
-static std::string GetLastUvFsOp() {
-    std::lock_guard<std::mutex> lock(g_uvFsPathMutex);
-    return g_lastUvFsOp;
-}
-
-static std::string GetLastUvFsPath() {
-    std::lock_guard<std::mutex> lock(g_uvFsPathMutex);
-    return g_lastUvFsPath;
-}
-
-static bool BufferContains(const char* data, size_t size,
-                           const char* needle) {
-    if (!data || !needle) {
+    static bool BufferContains(const char *data, size_t size,
+                               const char *needle)
+    {
+        if (!data || !needle)
+        {
+            return false;
+        }
+        const size_t needleSize = strlen(needle);
+        if (needleSize == 0 || size < needleSize)
+        {
+            return false;
+        }
+        for (size_t i = 0; i + needleSize <= size; ++i)
+        {
+            if (memcmp(data + i, needle, needleSize) == 0)
+            {
+                return true;
+            }
+        }
         return false;
     }
-    const size_t needleSize = strlen(needle);
-    if (needleSize == 0 || size < needleSize) {
-        return false;
-    }
-    for (size_t i = 0; i + needleSize <= size; ++i) {
-        if (memcmp(data + i, needle, needleSize) == 0) {
-            return true;
+
+    static void CaptureOhcodeWriteTrace(const void *buffer, size_t count)
+    {
+        if (!buffer || count == 0)
+        {
+            return;
         }
-    }
-    return false;
-}
-
-static void CaptureOhcodeWriteTrace(const void* buffer, size_t count) {
-    if (!buffer || count == 0) {
-        return;
-    }
-    const char* data = reinterpret_cast<const char*>(buffer);
-    if (!BufferContains(data, count, "[OHcode]")) {
-        return;
-    }
-
-    size_t start = 0;
-    for (; start < count; ++start) {
-        if (start + 8 <= count && memcmp(data + start, "[OHcode]", 8) == 0) {
-            break;
+        const char *data = reinterpret_cast<const char *>(buffer);
+        if (!BufferContains(data, count, "[OHcode]"))
+        {
+            return;
         }
-    }
-    if (start >= count) {
-        start = 0;
-    }
 
-    size_t end = start;
-    while (end < count && data[end] != '\n' && data[end] != '\r') {
-        ++end;
-    }
-    if (end <= start) {
-        end = count;
-    }
-    if (end - start > 768) {
-        end = start + 768;
-    }
-
-    std::string line(data + start, data + end);
-    for (char& ch : line) {
-        if (ch == '\n' || ch == '\r' || ch == '\t') {
-            ch = ' ';
+        size_t start = 0;
+        for (; start < count; ++start)
+        {
+            if (start + 8 <= count && memcmp(data + start, "[OHcode]", 8) == 0)
+            {
+                break;
+            }
         }
+        if (start >= count)
+        {
+            start = 0;
+        }
+
+        size_t end = start;
+        while (end < count && data[end] != '\n' && data[end] != '\r')
+        {
+            ++end;
+        }
+        if (end <= start)
+        {
+            end = count;
+        }
+        if (end - start > 768)
+        {
+            end = start + 768;
+        }
+
+        std::string line(data + start, data + end);
+        for (char &ch : line)
+        {
+            if (ch == '\n' || ch == '\r' || ch == '\t')
+            {
+                ch = ' ';
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_ohcodeWriteTraceMutex);
+            g_lastOhcodeWriteTrace = std::move(line);
+        }
+        g_ohcodeWriteTraceCalls.fetch_add(1, std::memory_order_relaxed);
+        g_ohcodeWriteTraceBytes.fetch_add(count, std::memory_order_relaxed);
     }
+
+    static std::string GetLastOhcodeWriteTrace()
     {
         std::lock_guard<std::mutex> lock(g_ohcodeWriteTraceMutex);
-        g_lastOhcodeWriteTrace = std::move(line);
-    }
-    g_ohcodeWriteTraceCalls.fetch_add(1, std::memory_order_relaxed);
-    g_ohcodeWriteTraceBytes.fetch_add(count, std::memory_order_relaxed);
-}
-
-static std::string GetLastOhcodeWriteTrace() {
-    std::lock_guard<std::mutex> lock(g_ohcodeWriteTraceMutex);
-    return g_lastOhcodeWriteTrace;
-}
-
-static bool ReadV8StringValue(void* context, void* value, char* buffer,
-                              size_t bufferSize) {
-    if (!context || !value || !buffer || bufferSize == 0) {
-        return false;
-    }
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!g_v8ContextGetIsolate || !g_v8ValueIsString ||
-        !g_v8StringWriteUtf8) {
-        return false;
+        return g_lastOhcodeWriteTrace;
     }
 
-    void* isolate = g_v8ContextGetIsolate(context);
-    if (!isolate || !g_v8ValueIsString(value)) {
-        return false;
-    }
+    static bool ReadV8StringValue(void *context, void *value, char *buffer,
+                                  size_t bufferSize)
+    {
+        if (!context || !value || !buffer || bufferSize == 0)
+        {
+            return false;
+        }
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!g_v8ContextGetIsolate || !g_v8ValueIsString ||
+            !g_v8StringWriteUtf8)
+        {
+            return false;
+        }
 
-    buffer[0] = '\0';
-    int charsWritten = 0;
-    const int bytesWritten = g_v8StringWriteUtf8(
-        value, isolate, buffer, static_cast<int>(bufferSize - 1),
-        &charsWritten, 0);
-    if (bytesWritten <= 0) {
+        void *isolate = g_v8ContextGetIsolate(context);
+        if (!isolate || !g_v8ValueIsString(value))
+        {
+            return false;
+        }
+
         buffer[0] = '\0';
-        return false;
+        int charsWritten = 0;
+        const int bytesWritten = g_v8StringWriteUtf8(
+            value, isolate, buffer, static_cast<int>(bufferSize - 1),
+            &charsWritten, 0);
+        if (bytesWritten <= 0)
+        {
+            buffer[0] = '\0';
+            return false;
+        }
+        const size_t clamped =
+            static_cast<size_t>(bytesWritten) < bufferSize
+                ? static_cast<size_t>(bytesWritten)
+                : bufferSize - 1;
+        buffer[clamped] = '\0';
+        return true;
     }
-    const size_t clamped =
-        static_cast<size_t>(bytesWritten) < bufferSize
-            ? static_cast<size_t>(bytesWritten)
-            : bufferSize - 1;
-    buffer[clamped] = '\0';
-    return true;
-}
 
-static bool ReadV8GlobalStringProperty(void* context, const char* name,
-                                       std::string* output) {
-    if (!context || !name || !output) {
-        return false;
+    static bool ReadV8GlobalStringProperty(void *context, const char *name,
+                                           std::string *output)
+    {
+        if (!context || !name || !output)
+        {
+            return false;
+        }
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!g_v8ContextGetIsolate || !g_v8ContextGlobal || !g_v8ObjectGet ||
+            !g_v8StringNewFromUtf8)
+        {
+            return false;
+        }
+        void *isolate = g_v8ContextGetIsolate(context);
+        void *global = g_v8ContextGlobal(context);
+        void *key = NewV8Utf8String(isolate, name);
+        if (!isolate || !global || !key)
+        {
+            return false;
+        }
+        void *value = g_v8ObjectGet(global, context, key);
+        char text[1024];
+        if (!value || !ReadV8StringValue(context, value, text, sizeof(text)))
+        {
+            return false;
+        }
+        *output = text;
+        return true;
     }
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!g_v8ContextGetIsolate || !g_v8ContextGlobal || !g_v8ObjectGet ||
-        !g_v8StringNewFromUtf8) {
-        return false;
-    }
-    void* isolate = g_v8ContextGetIsolate(context);
-    void* global = g_v8ContextGlobal(context);
-    void* key = NewV8Utf8String(isolate, name);
-    if (!isolate || !global || !key) {
-        return false;
-    }
-    void* value = g_v8ObjectGet(global, context, key);
-    char text[1024];
-    if (!value || !ReadV8StringValue(context, value, text, sizeof(text))) {
-        return false;
-    }
-    *output = text;
-    return true;
-}
 
-static void CaptureNodePostLoadStage() {
-    void* context = reinterpret_cast<void*>(
-        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
-    std::string stage;
-    if (!ReadV8GlobalStringProperty(context, "__ohcodeNativeRescueStage",
-                                    &stage)) {
-        stage = "<unreadable>";
+    static void CaptureNodePostLoadStage()
+    {
+        void *context = reinterpret_cast<void *>(
+            g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+        std::string stage;
+        if (!ReadV8GlobalStringProperty(context, "__ohcodeNativeRescueStage",
+                                        &stage))
+        {
+            stage = "<unreadable>";
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_nodePostLoadStageMutex);
+            g_lastNodePostLoadStage = stage;
+        }
+        Log("node post-load rescue stage=%s", stage.c_str());
     }
+
+    static std::string GetLastNodePostLoadStage()
     {
         std::lock_guard<std::mutex> lock(g_nodePostLoadStageMutex);
-        g_lastNodePostLoadStage = stage;
-    }
-    Log("node post-load rescue stage=%s", stage.c_str());
-}
-
-static std::string GetLastNodePostLoadStage() {
-    std::lock_guard<std::mutex> lock(g_nodePostLoadStageMutex);
-    return g_lastNodePostLoadStage;
-}
-
-static bool ReadNodeLoadEnvironmentStringResult(void* value, std::string* out) {
-    void* context = reinterpret_cast<void*>(
-        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
-    if (!context) {
-        context = reinterpret_cast<void*>(
-            g_lastNodeNewContextResult.load(std::memory_order_relaxed));
+        return g_lastNodePostLoadStage;
     }
 
-    char result[2048];
-    if (!ReadV8StringValue(context, value, result, sizeof(result))) {
-        return false;
-    }
-    if (out) {
-        *out = result;
-    }
-    return true;
-}
-
-static void RecordNodePreLoadProbeResult(void* value) {
-    std::string result;
-    if (ReadNodeLoadEnvironmentStringResult(value, &result)) {
+    static bool ReadNodeLoadEnvironmentStringResult(void *value, std::string *out)
+    {
+        void *context = reinterpret_cast<void *>(
+            g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+        if (!context)
         {
-            std::lock_guard<std::mutex> lock(
-                g_nodePreLoadProbeResultMutex);
-            g_lastNodePreLoadProbeResult = result;
+            context = reinterpret_cast<void *>(
+                g_lastNodeNewContextResult.load(std::memory_order_relaxed));
         }
-        g_nodePreLoadProbeResultReads.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node preload probe result=%s", result.c_str());
-    } else {
-        g_nodePreLoadProbeResultReadFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node preload probe result unreadable value=%p", value);
-    }
-}
 
-static std::string GetLastNodePreLoadProbeResult() {
-    std::lock_guard<std::mutex> lock(g_nodePreLoadProbeResultMutex);
-    return g_lastNodePreLoadProbeResult;
-}
-
-static void RecordNodePostLoadTraceResult(void* value) {
-    std::string result;
-    if (ReadNodeLoadEnvironmentStringResult(value, &result)) {
+        char result[2048];
+        if (!ReadV8StringValue(context, value, result, sizeof(result)))
         {
-            std::lock_guard<std::mutex> lock(
-                g_nodePostLoadTraceResultMutex);
-            g_lastNodePostLoadTraceResult = result;
+            return false;
         }
-        g_nodePostLoadTraceResultReads.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node post-load trace result=%s", result.c_str());
-    } else {
-        g_nodePostLoadTraceResultReadFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node post-load trace result unreadable value=%p", value);
+        if (out)
+        {
+            *out = result;
+        }
+        return true;
     }
-}
 
-static std::string GetLastNodePostLoadTraceResult() {
-    std::lock_guard<std::mutex> lock(g_nodePostLoadTraceResultMutex);
-    return g_lastNodePostLoadTraceResult;
-}
-
-static std::string SanitizeStatText(const std::string& value,
-                                    size_t maxLength) {
-    std::string result;
-    result.reserve(value.size() < maxLength ? value.size() : maxLength);
-    for (char ch : value) {
-        if (result.size() >= maxLength) {
-            break;
+    static void RecordNodePreLoadProbeResult(void *value)
+    {
+        std::string result;
+        if (ReadNodeLoadEnvironmentStringResult(value, &result))
+        {
+            {
+                std::lock_guard<std::mutex> lock(
+                    g_nodePreLoadProbeResultMutex);
+                g_lastNodePreLoadProbeResult = result;
+            }
+            g_nodePreLoadProbeResultReads.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node preload probe result=%s", result.c_str());
         }
-        const unsigned char uch = static_cast<unsigned char>(ch);
-        if (ch == '\n' || ch == '\r' || ch == '\t') {
-            result.push_back(' ');
-        } else if (uch < 0x20 || uch == 0x7f) {
-            result.push_back('?');
-        } else {
-            result.push_back(ch);
+        else
+        {
+            g_nodePreLoadProbeResultReadFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node preload probe result unreadable value=%p", value);
         }
     }
-    return result;
-}
 
-static std::string DumpPointerSlots(const void* ptr, size_t slotCount) {
-    if (!ptr) {
-        return "<null>";
+    static std::string GetLastNodePreLoadProbeResult()
+    {
+        std::lock_guard<std::mutex> lock(g_nodePreLoadProbeResultMutex);
+        return g_lastNodePreLoadProbeResult;
     }
-    const auto* slots = reinterpret_cast<const uintptr_t*>(ptr);
-    std::string dump;
-    char item[64];
-    for (size_t i = 0; i < slotCount; ++i) {
-        snprintf(item, sizeof(item), "%s%llu=0x%016llx",
-                 dump.empty() ? "" : ",",
-                 static_cast<unsigned long long>(i),
-                 static_cast<unsigned long long>(slots[i]));
-        dump += item;
-        if (dump.size() > 900) {
-            dump.resize(900);
-            break;
+
+    static void RecordNodePostLoadTraceResult(void *value)
+    {
+        std::string result;
+        if (ReadNodeLoadEnvironmentStringResult(value, &result))
+        {
+            {
+                std::lock_guard<std::mutex> lock(
+                    g_nodePostLoadTraceResultMutex);
+                g_lastNodePostLoadTraceResult = result;
+            }
+            g_nodePostLoadTraceResultReads.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node post-load trace result=%s", result.c_str());
+        }
+        else
+        {
+            g_nodePostLoadTraceResultReadFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node post-load trace result unreadable value=%p", value);
         }
     }
-    return dump;
-}
 
-static std::string ReadCompileFunctionSourceSummary(void* context,
-                                                    void* source) {
-    if (!context || !source) {
-        g_v8CompileFunctionSourceReadFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        return "<missing-context-or-source>";
+    static std::string GetLastNodePostLoadTraceResult()
+    {
+        std::lock_guard<std::mutex> lock(g_nodePostLoadTraceResultMutex);
+        return g_lastNodePostLoadTraceResult;
     }
 
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!g_v8ContextGetIsolate || !g_v8ValueIsString ||
-        !g_v8StringWriteUtf8) {
-        g_v8CompileFunctionSourceReadFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        return "<missing-v8-string-symbols>";
+    static std::string SanitizeStatText(const std::string &value,
+                                        size_t maxLength)
+    {
+        std::string result;
+        result.reserve(value.size() < maxLength ? value.size() : maxLength);
+        for (char ch : value)
+        {
+            if (result.size() >= maxLength)
+            {
+                break;
+            }
+            const unsigned char uch = static_cast<unsigned char>(ch);
+            if (ch == '\n' || ch == '\r' || ch == '\t')
+            {
+                result.push_back(' ');
+            }
+            else if (uch < 0x20 || uch == 0x7f)
+            {
+                result.push_back('?');
+            }
+            else
+            {
+                result.push_back(ch);
+            }
+        }
+        return result;
     }
 
-    void* isolate = g_v8ContextGetIsolate(context);
-    void* sourceString = *reinterpret_cast<void**>(source);
-    if (!isolate || !sourceString || !g_v8ValueIsString(sourceString)) {
-        g_v8CompileFunctionSourceReadFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        return "<source-slot0-not-string>";
+    static std::string DumpPointerSlots(const void *ptr, size_t slotCount)
+    {
+        if (!ptr)
+        {
+            return "<null>";
+        }
+        const auto *slots = reinterpret_cast<const uintptr_t *>(ptr);
+        std::string dump;
+        char item[64];
+        for (size_t i = 0; i < slotCount; ++i)
+        {
+            snprintf(item, sizeof(item), "%s%llu=0x%016llx",
+                     dump.empty() ? "" : ",",
+                     static_cast<unsigned long long>(i),
+                     static_cast<unsigned long long>(slots[i]));
+            dump += item;
+            if (dump.size() > 900)
+            {
+                dump.resize(900);
+                break;
+            }
+        }
+        return dump;
     }
 
-    int utf8Length = -1;
-    if (g_v8StringUtf8Length) {
-        utf8Length = g_v8StringUtf8Length(sourceString, isolate);
-    }
-    size_t bufferSize = kMaxCompileFunctionSourceSampleBytes;
-    if (utf8Length >= 0 &&
-        static_cast<size_t>(utf8Length) + 1 < bufferSize) {
-        bufferSize = static_cast<size_t>(utf8Length) + 1;
-    }
-    if (bufferSize < 2) {
-        bufferSize = 2;
+    static std::string ReadCompileFunctionSourceSummary(void *context,
+                                                        void *source)
+    {
+        if (!context || !source)
+        {
+            g_v8CompileFunctionSourceReadFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            return "<missing-context-or-source>";
+        }
+
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!g_v8ContextGetIsolate || !g_v8ValueIsString ||
+            !g_v8StringWriteUtf8)
+        {
+            g_v8CompileFunctionSourceReadFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            return "<missing-v8-string-symbols>";
+        }
+
+        void *isolate = g_v8ContextGetIsolate(context);
+        void *sourceString = *reinterpret_cast<void **>(source);
+        if (!isolate || !sourceString || !g_v8ValueIsString(sourceString))
+        {
+            g_v8CompileFunctionSourceReadFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            return "<source-slot0-not-string>";
+        }
+
+        int utf8Length = -1;
+        if (g_v8StringUtf8Length)
+        {
+            utf8Length = g_v8StringUtf8Length(sourceString, isolate);
+        }
+        size_t bufferSize = kMaxCompileFunctionSourceSampleBytes;
+        if (utf8Length >= 0 &&
+            static_cast<size_t>(utf8Length) + 1 < bufferSize)
+        {
+            bufferSize = static_cast<size_t>(utf8Length) + 1;
+        }
+        if (bufferSize < 2)
+        {
+            bufferSize = 2;
+        }
+
+        std::vector<char> buffer(bufferSize, '\0');
+        int charsWritten = 0;
+        const int bytesWritten = g_v8StringWriteUtf8(
+            sourceString, isolate, buffer.data(),
+            static_cast<int>(buffer.size() - 1), &charsWritten, 0);
+        if (bytesWritten <= 0)
+        {
+            g_v8CompileFunctionSourceReadFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            return "<write-utf8-failed>";
+        }
+        const size_t clamped =
+            static_cast<size_t>(bytesWritten) < buffer.size()
+                ? static_cast<size_t>(bytesWritten)
+                : buffer.size() - 1;
+        buffer[clamped] = '\0';
+        std::string sample(buffer.data(), clamped);
+
+        const bool hasA = sample.find("[OHcode] A") != std::string::npos;
+        const bool hasD = sample.find("[OHcode] D") != std::string::npos;
+        const bool hasO = sample.find("[OHcode] O ") != std::string::npos;
+        const bool hasRescueStage =
+            sample.rfind("\"use strict\";/*[OHcodeStage]", 0) == 0;
+        const bool hasResetSearchPaths =
+            sample.find("reset-search-paths") != std::string::npos;
+        const bool truncated =
+            utf8Length >= 0 && static_cast<size_t>(utf8Length) >= bufferSize;
+
+        std::string summary = "utf8Length=" + std::to_string(utf8Length) +
+                              " sampled=" + std::to_string(clamped) +
+                              " truncated=" + (truncated ? "1" : "0") +
+                              " hasA=" + (hasA ? "1" : "0") +
+                              " hasD=" + (hasD ? "1" : "0") +
+                              " hasO=" + (hasO ? "1" : "0") +
+                              " hasRescueStage=" + (hasRescueStage ? "1" : "0") +
+                              " hasResetSearchPaths=" + (hasResetSearchPaths ? "1" : "0") +
+                              " head=" + SanitizeStatText(sample, 260);
+
+        size_t marker = sample.find("[OHcode]");
+        if (marker == std::string::npos)
+        {
+            marker = sample.find("[OHcodeStage]");
+        }
+        if (marker != std::string::npos && summary.size() < 1500)
+        {
+            const size_t start = marker > 80 ? marker - 80 : 0;
+            summary += " marker=" +
+                       SanitizeStatText(sample.substr(start, 260), 320);
+        }
+
+        if (summary.size() > 1800)
+        {
+            summary.resize(1800);
+        }
+        g_v8CompileFunctionSourceReads.fetch_add(1, std::memory_order_relaxed);
+        return summary;
     }
 
-    std::vector<char> buffer(bufferSize, '\0');
-    int charsWritten = 0;
-    const int bytesWritten = g_v8StringWriteUtf8(
-        sourceString, isolate, buffer.data(),
-        static_cast<int>(buffer.size() - 1), &charsWritten, 0);
-    if (bytesWritten <= 0) {
-        g_v8CompileFunctionSourceReadFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        return "<write-utf8-failed>";
-    }
-    const size_t clamped =
-        static_cast<size_t>(bytesWritten) < buffer.size()
-            ? static_cast<size_t>(bytesWritten)
-            : buffer.size() - 1;
-    buffer[clamped] = '\0';
-    std::string sample(buffer.data(), clamped);
+    static void RecordV8CompileFunctionSource(void *context, void *source)
+    {
+        std::string slots = DumpPointerSlots(source, 10);
+        std::string summary = ReadCompileFunctionSourceSummary(context, source);
+        const bool hasMarker =
+            summary.find("hasA=1") != std::string::npos ||
+            summary.find("hasD=1") != std::string::npos ||
+            summary.find("hasO=1") != std::string::npos ||
+            summary.find("hasRescueStage=1") != std::string::npos;
+        const bool hasResetSearchPaths =
+            summary.find("hasResetSearchPaths=1") != std::string::npos;
+        if (hasMarker)
+        {
+            g_v8CompileFunctionMarkerHits.fetch_add(1,
+                                                    std::memory_order_relaxed);
+        }
+        if (hasResetSearchPaths)
+        {
+            g_v8CompileFunctionResetSearchPathHits.fetch_add(
+                1, std::memory_order_relaxed);
+        }
 
-    const bool hasA = sample.find("[OHcode] A") != std::string::npos;
-    const bool hasD = sample.find("[OHcode] D") != std::string::npos;
-    const bool hasO = sample.find("[OHcode] O ") != std::string::npos;
-    const bool hasRescueStage =
-        sample.rfind("\"use strict\";/*[OHcodeStage]", 0) == 0;
-    const bool hasResetSearchPaths =
-        sample.find("reset-search-paths") != std::string::npos;
-    const bool truncated =
-        utf8Length >= 0 && static_cast<size_t>(utf8Length) >= bufferSize;
-
-    std::string summary = "utf8Length=" + std::to_string(utf8Length) +
-        " sampled=" + std::to_string(clamped) +
-        " truncated=" + (truncated ? "1" : "0") +
-        " hasA=" + (hasA ? "1" : "0") +
-        " hasD=" + (hasD ? "1" : "0") +
-        " hasO=" + (hasO ? "1" : "0") +
-        " hasRescueStage=" + (hasRescueStage ? "1" : "0") +
-        " hasResetSearchPaths=" + (hasResetSearchPaths ? "1" : "0") +
-        " head=" + SanitizeStatText(sample, 260);
-
-    size_t marker = sample.find("[OHcode]");
-    if (marker == std::string::npos) {
-        marker = sample.find("[OHcodeStage]");
-    }
-    if (marker != std::string::npos && summary.size() < 1500) {
-        const size_t start = marker > 80 ? marker - 80 : 0;
-        summary += " marker=" +
-            SanitizeStatText(sample.substr(start, 260), 320);
-    }
-
-    if (summary.size() > 1800) {
-        summary.resize(1800);
-    }
-    g_v8CompileFunctionSourceReads.fetch_add(1, std::memory_order_relaxed);
-    return summary;
-}
-
-static void RecordV8CompileFunctionSource(void* context, void* source) {
-    std::string slots = DumpPointerSlots(source, 10);
-    std::string summary = ReadCompileFunctionSourceSummary(context, source);
-    const bool hasMarker =
-        summary.find("hasA=1") != std::string::npos ||
-        summary.find("hasD=1") != std::string::npos ||
-        summary.find("hasO=1") != std::string::npos ||
-        summary.find("hasRescueStage=1") != std::string::npos;
-    const bool hasResetSearchPaths =
-        summary.find("hasResetSearchPaths=1") != std::string::npos;
-    if (hasMarker) {
-        g_v8CompileFunctionMarkerHits.fetch_add(1,
-                                                std::memory_order_relaxed);
-    }
-    if (hasResetSearchPaths) {
-        g_v8CompileFunctionResetSearchPathHits.fetch_add(
-            1, std::memory_order_relaxed);
+        const uint64_t call =
+            g_v8CompileFunctionCalls.load(std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
+            if (g_firstV8CompileFunctionSource.empty())
+            {
+                g_firstV8CompileFunctionSource = summary;
+            }
+            if (hasMarker || hasResetSearchPaths)
+            {
+                g_interestingV8CompileFunctionSource = summary;
+            }
+            if (g_v8CompileFunctionSourceSequence.size() < 6000)
+            {
+                std::string item = std::to_string(call) + ":" + summary;
+                if (item.size() > 360)
+                {
+                    item.resize(360);
+                }
+                if (!g_v8CompileFunctionSourceSequence.empty())
+                {
+                    g_v8CompileFunctionSourceSequence += " | ";
+                }
+                g_v8CompileFunctionSourceSequence += item;
+            }
+            g_lastV8CompileFunctionSourceSlots = std::move(slots);
+            g_lastV8CompileFunctionSource = std::move(summary);
+        }
     }
 
-    const uint64_t call =
-        g_v8CompileFunctionCalls.load(std::memory_order_relaxed);
+    static std::string GetLastV8CompileFunctionSource()
     {
         std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
-        if (g_firstV8CompileFunctionSource.empty()) {
-            g_firstV8CompileFunctionSource = summary;
-        }
-        if (hasMarker || hasResetSearchPaths) {
-            g_interestingV8CompileFunctionSource = summary;
-        }
-        if (g_v8CompileFunctionSourceSequence.size() < 6000) {
-            std::string item = std::to_string(call) + ":" + summary;
-            if (item.size() > 360) {
-                item.resize(360);
-            }
-            if (!g_v8CompileFunctionSourceSequence.empty()) {
-                g_v8CompileFunctionSourceSequence += " | ";
-            }
-            g_v8CompileFunctionSourceSequence += item;
-        }
-        g_lastV8CompileFunctionSourceSlots = std::move(slots);
-        g_lastV8CompileFunctionSource = std::move(summary);
-    }
-}
-
-static std::string GetLastV8CompileFunctionSource() {
-    std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
-    return g_lastV8CompileFunctionSource;
-}
-
-static std::string GetLastV8CompileFunctionSourceSlots() {
-    std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
-    return g_lastV8CompileFunctionSourceSlots;
-}
-
-static std::string GetFirstV8CompileFunctionSource() {
-    std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
-    return g_firstV8CompileFunctionSource;
-}
-
-static std::string GetInterestingV8CompileFunctionSource() {
-    std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
-    return g_interestingV8CompileFunctionSource;
-}
-
-static std::string GetV8CompileFunctionSourceSequence() {
-    std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
-    return g_v8CompileFunctionSourceSequence;
-}
-
-static std::string SummarizeStringVectorForStats(const void* vectorPtr,
-                                                 size_t maxItems,
-                                                 std::string* secondItem) {
-    if (secondItem) {
-        secondItem->clear();
-    }
-    if (!vectorPtr) {
-        return "<null>";
+        return g_lastV8CompileFunctionSource;
     }
 
-    const auto& values =
-        *reinterpret_cast<const AdapterArgVector*>(vectorPtr);
-    const size_t count = values.size();
-    if (count > 128) {
-        g_nodeCreateEnvironmentArgTraceFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        char buffer[96];
-        snprintf(buffer, sizeof(buffer), "count=%llu <too-large>",
-                 static_cast<unsigned long long>(count));
-        return buffer;
-    }
-
-    if (secondItem && count > 1) {
-        *secondItem = SanitizeStatText(values[1], 320);
-    }
-
-    std::string summary = "count=" + std::to_string(count);
-    const size_t limit = count < maxItems ? count : maxItems;
-    for (size_t i = 0; i < limit; ++i) {
-        char prefix[32];
-        snprintf(prefix, sizeof(prefix), "|%llu:",
-                 static_cast<unsigned long long>(i));
-        summary += prefix;
-        summary += SanitizeStatText(values[i], 240);
-        if (summary.size() > 1800) {
-            summary.resize(1800);
-            break;
-        }
-    }
-    if (count > limit && summary.size() < 1800) {
-        summary += "|...";
-    }
-    return summary;
-}
-
-static void RecordNodeCreateEnvironmentArgs(void* args, void* execArgs,
-                                            uint64_t callIndex) {
-    std::string initScript;
-    std::string argsSummary =
-        SummarizeStringVectorForStats(args, 10, &initScript);
-    std::string execArgsSummary =
-        SummarizeStringVectorForStats(execArgs, 10, nullptr);
+    static std::string GetLastV8CompileFunctionSourceSlots()
     {
-        std::lock_guard<std::mutex> lock(
-            g_nodeCreateEnvironmentArgTraceMutex);
-        g_lastNodeCreateEnvironmentArgs = argsSummary;
-        g_lastNodeCreateEnvironmentExecArgs = execArgsSummary;
-        g_lastNodeCreateEnvironmentInitScript = initScript;
+        std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
+        return g_lastV8CompileFunctionSourceSlots;
     }
 
-    if (callIndex <= 5) {
-        Log("node::CreateEnvironment args[%llu] init=%s args=%s execArgs=%s",
-            static_cast<unsigned long long>(callIndex),
-            initScript.empty() ? "<empty>" : initScript.c_str(),
-            argsSummary.c_str(), execArgsSummary.c_str());
+    static std::string GetFirstV8CompileFunctionSource()
+    {
+        std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
+        return g_firstV8CompileFunctionSource;
     }
-}
 
-static std::string GetLastNodeCreateEnvironmentArgs() {
-    std::lock_guard<std::mutex> lock(g_nodeCreateEnvironmentArgTraceMutex);
-    return g_lastNodeCreateEnvironmentArgs;
-}
-
-static std::string GetLastNodeCreateEnvironmentExecArgs() {
-    std::lock_guard<std::mutex> lock(g_nodeCreateEnvironmentArgTraceMutex);
-    return g_lastNodeCreateEnvironmentExecArgs;
-}
-
-static std::string GetLastNodeCreateEnvironmentInitScript() {
-    std::lock_guard<std::mutex> lock(g_nodeCreateEnvironmentArgTraceMutex);
-    return g_lastNodeCreateEnvironmentInitScript;
-}
-
-static bool WriteNodeArgvPreloadFile() {
-    FILE* file = fopen(kNodeArgvPreloadPath, "wb");
-    if (!file) {
-        Log("node argv preload open failed path=%s errno=%d",
-            kNodeArgvPreloadPath, errno);
-        return false;
+    static std::string GetInterestingV8CompileFunctionSource()
+    {
+        std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
+        return g_interestingV8CompileFunctionSource;
     }
-    const size_t length = strlen(kNodeArgvPreloadScript);
-    const size_t written = fwrite(kNodeArgvPreloadScript, 1, length, file);
-    const int closeResult = fclose(file);
-    if (written != length || closeResult != 0) {
-        Log("node argv preload write failed path=%s bytes=%llu/%llu errno=%d",
-            kNodeArgvPreloadPath,
-            static_cast<unsigned long long>(written),
-            static_cast<unsigned long long>(length), errno);
-        return false;
-    }
-    Log("node argv preload ready path=%s bytes=%llu",
-        kNodeArgvPreloadPath, static_cast<unsigned long long>(length));
-    return true;
-}
 
-static bool ForceEnterNodeMainContext() {
-    g_forcedContextEnterAttempts.fetch_add(1, std::memory_order_relaxed);
-    std::call_once(g_v8ContextEnterOnce, []() {
+    static std::string GetV8CompileFunctionSourceSequence()
+    {
+        std::lock_guard<std::mutex> lock(g_v8CompileFunctionTraceMutex);
+        return g_v8CompileFunctionSourceSequence;
+    }
+
+    static std::string SummarizeStringVectorForStats(const void *vectorPtr,
+                                                     size_t maxItems,
+                                                     std::string *secondItem)
+    {
+        if (secondItem)
+        {
+            secondItem->clear();
+        }
+        if (!vectorPtr)
+        {
+            return "<null>";
+        }
+
+        const auto &values =
+            *reinterpret_cast<const AdapterArgVector *>(vectorPtr);
+        const size_t count = values.size();
+        if (count > 128)
+        {
+            g_nodeCreateEnvironmentArgTraceFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            char buffer[96];
+            snprintf(buffer, sizeof(buffer), "count=%llu <too-large>",
+                     static_cast<unsigned long long>(count));
+            return buffer;
+        }
+
+        if (secondItem && count > 1)
+        {
+            *secondItem = SanitizeStatText(values[1], 320);
+        }
+
+        std::string summary = "count=" + std::to_string(count);
+        const size_t limit = count < maxItems ? count : maxItems;
+        for (size_t i = 0; i < limit; ++i)
+        {
+            char prefix[32];
+            snprintf(prefix, sizeof(prefix), "|%llu:",
+                     static_cast<unsigned long long>(i));
+            summary += prefix;
+            summary += SanitizeStatText(values[i], 240);
+            if (summary.size() > 1800)
+            {
+                summary.resize(1800);
+                break;
+            }
+        }
+        if (count > limit && summary.size() < 1800)
+        {
+            summary += "|...";
+        }
+        return summary;
+    }
+
+    static void RecordNodeCreateEnvironmentArgs(void *args, void *execArgs,
+                                                uint64_t callIndex)
+    {
+        std::string initScript;
+        std::string argsSummary =
+            SummarizeStringVectorForStats(args, 10, &initScript);
+        std::string execArgsSummary =
+            SummarizeStringVectorForStats(execArgs, 10, nullptr);
+        {
+            std::lock_guard<std::mutex> lock(
+                g_nodeCreateEnvironmentArgTraceMutex);
+            g_lastNodeCreateEnvironmentArgs = argsSummary;
+            g_lastNodeCreateEnvironmentExecArgs = execArgsSummary;
+            g_lastNodeCreateEnvironmentInitScript = initScript;
+        }
+
+        if (callIndex <= 5)
+        {
+            Log("node::CreateEnvironment args[%llu] init=%s args=%s execArgs=%s",
+                static_cast<unsigned long long>(callIndex),
+                initScript.empty() ? "<empty>" : initScript.c_str(),
+                argsSummary.c_str(), execArgsSummary.c_str());
+        }
+    }
+
+    static std::string GetLastNodeCreateEnvironmentArgs()
+    {
+        std::lock_guard<std::mutex> lock(g_nodeCreateEnvironmentArgTraceMutex);
+        return g_lastNodeCreateEnvironmentArgs;
+    }
+
+    static std::string GetLastNodeCreateEnvironmentExecArgs()
+    {
+        std::lock_guard<std::mutex> lock(g_nodeCreateEnvironmentArgTraceMutex);
+        return g_lastNodeCreateEnvironmentExecArgs;
+    }
+
+    static std::string GetLastNodeCreateEnvironmentInitScript()
+    {
+        std::lock_guard<std::mutex> lock(g_nodeCreateEnvironmentArgTraceMutex);
+        return g_lastNodeCreateEnvironmentInitScript;
+    }
+
+    static bool WriteNodeArgvPreloadFile()
+    {
+        FILE *file = fopen(kNodeArgvPreloadPath, "wb");
+        if (!file)
+        {
+            Log("node argv preload open failed path=%s errno=%d",
+                kNodeArgvPreloadPath, errno);
+            return false;
+        }
+        const size_t length = strlen(kNodeArgvPreloadScript);
+        const size_t written = fwrite(kNodeArgvPreloadScript, 1, length, file);
+        const int closeResult = fclose(file);
+        if (written != length || closeResult != 0)
+        {
+            Log("node argv preload write failed path=%s bytes=%llu/%llu errno=%d",
+                kNodeArgvPreloadPath,
+                static_cast<unsigned long long>(written),
+                static_cast<unsigned long long>(length), errno);
+            return false;
+        }
+        Log("node argv preload ready path=%s bytes=%llu",
+            kNodeArgvPreloadPath, static_cast<unsigned long long>(length));
+        return true;
+    }
+
+    static bool ForceEnterNodeMainContext()
+    {
+        g_forcedContextEnterAttempts.fetch_add(1, std::memory_order_relaxed);
+        std::call_once(g_v8ContextEnterOnce, []()
+                       {
         g_v8ContextEnter = reinterpret_cast<V8ContextEnterFn>(
             dlsym(RTLD_NEXT, "_ZN2v87Context5EnterEv"));
         if (!g_v8ContextEnter) {
             g_v8ContextEnter = reinterpret_cast<V8ContextEnterFn>(
                 dlsym(RTLD_DEFAULT, "_ZN2v87Context5EnterEv"));
+        } });
+        void *context = reinterpret_cast<void *>(
+            g_lastNodeNewContextResult.load(std::memory_order_relaxed));
+        if (!g_v8ContextEnter || !context)
+        {
+            Log("forced context enter unavailable context=%p fn=%p",
+                context, reinterpret_cast<void *>(g_v8ContextEnter));
+            return false;
         }
-    });
-    void* context = reinterpret_cast<void*>(
-        g_lastNodeNewContextResult.load(std::memory_order_relaxed));
-    if (!g_v8ContextEnter || !context) {
-        Log("forced context enter unavailable context=%p fn=%p",
-            context, reinterpret_cast<void*>(g_v8ContextEnter));
-        return false;
+        g_v8ContextEnter(context);
+        g_forcedContextEnterSuccesses.fetch_add(1, std::memory_order_relaxed);
+        Log("forced context enter succeeded context=%p", context);
+        return true;
     }
-    g_v8ContextEnter(context);
-    g_forcedContextEnterSuccesses.fetch_add(1, std::memory_order_relaxed);
-    Log("forced context enter succeeded context=%p", context);
-    return true;
-}
 
-static void* RunDirectV8BootstrapScript(void* processObject,
-                                        void* nativeRequire) {
-    std::call_once(g_v8DirectScriptSymbolsOnce, []() {
+    static void *RunDirectV8BootstrapScript(void *processObject,
+                                            void *nativeRequire)
+    {
+        std::call_once(g_v8DirectScriptSymbolsOnce, []()
+                       {
         g_v8DirectStringNewFromUtf8 =
             reinterpret_cast<V8StringNewFromUtf8Fn>(ResolveElectronExport(
                 "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
@@ -2731,146 +3009,163 @@ static void* RunDirectV8BootstrapScript(void* processObject,
                 nullptr));
         g_v8DirectScriptRun =
             reinterpret_cast<V8ScriptRunFn>(ResolveElectronExport(
-                "_ZN2v86Script3RunENS_5LocalINS_7ContextEEE", nullptr));
-    });
+                "_ZN2v86Script3RunENS_5LocalINS_7ContextEEE", nullptr)); });
 
-    void* isolate = reinterpret_cast<void*>(
-        g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
-    void* context = reinterpret_cast<void*>(
-        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
-    if (!isolate || !context || !g_v8DirectStringNewFromUtf8 ||
-        !g_v8DirectScriptCompile || !g_v8DirectScriptRun) {
-        Log("direct V8 bootstrap unavailable isolate=%p context=%p string=%p "
-            "compile=%p run=%p",
-            isolate, context,
-            reinterpret_cast<void*>(g_v8DirectStringNewFromUtf8),
-            reinterpret_cast<void*>(g_v8DirectScriptCompile),
-            reinterpret_cast<void*>(g_v8DirectScriptRun));
-        return nullptr;
-    }
+        void *isolate = reinterpret_cast<void *>(
+            g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
+        void *context = reinterpret_cast<void *>(
+            g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+        if (!isolate || !context || !g_v8DirectStringNewFromUtf8 ||
+            !g_v8DirectScriptCompile || !g_v8DirectScriptRun)
+        {
+            Log("direct V8 bootstrap unavailable isolate=%p context=%p string=%p "
+                "compile=%p run=%p",
+                isolate, context,
+                reinterpret_cast<void *>(g_v8DirectStringNewFromUtf8),
+                reinterpret_cast<void *>(g_v8DirectScriptCompile),
+                reinterpret_cast<void *>(g_v8DirectScriptRun));
+            return nullptr;
+        }
 
-    void* source = g_v8DirectStringNewFromUtf8(
-        isolate, kNodeDirectBootstrapScript, 0, -1);
-    if (!source) {
-        Log("direct V8 bootstrap failed to create source string");
-        return nullptr;
-    }
-    void* script = g_v8DirectScriptCompile(context, source, nullptr);
-    if (!script) {
-        Log("direct V8 bootstrap compile returned empty context=%p source=%p",
-            context, source);
-        return nullptr;
-    }
-    void* function = g_v8DirectScriptRun(script, context);
-    if (!function || !g_v8FunctionCall) {
-        Log("direct V8 bootstrap function unavailable value=%p call=%p",
-            function, reinterpret_cast<void*>(g_v8FunctionCall));
-        return nullptr;
-    }
-    void* receiver = g_v8ContextGlobal(context);
-    void* arguments[] = {processObject, nativeRequire};
-    void* value = g_v8FunctionCall(
-        function, context, receiver, 2, arguments);
-    Log("direct V8 bootstrap call returned value=%p context=%p function=%p",
-        value, context, function);
-    std::string result;
-    if (ReadNodeLoadEnvironmentStringResult(value, &result)) {
-        Log("direct V8 bootstrap result=%s", result.c_str());
-    } else {
-        Log("direct V8 bootstrap result unreadable value=%p", value);
-    }
-    return value;
-}
-
-static void* ResolveElectronOffset(uintptr_t offset);
-
-static bool BootstrapMissingNodeInternalLoaders(void* environment) {
-    if (!environment) {
-        return false;
-    }
-
-    auto* environmentBytes = static_cast<uint8_t*>(environment);
-    void* realm = *reinterpret_cast<void**>(environmentBytes + 0xa70);
-    auto bootstrap = reinterpret_cast<NodeRealmBootstrapInternalLoadersFn>(
-        ResolveElectronOffset(kNodeRealmBootstrapInternalLoadersOffset));
-    if (!realm || !bootstrap) {
-        Log("Node internal-loader bootstrap unavailable env=%p realm=%p "
-            "function=%p",
-            environment, realm, reinterpret_cast<void*>(bootstrap));
-        return false;
+        void *source = g_v8DirectStringNewFromUtf8(
+            isolate, kNodeDirectBootstrapScript, 0, -1);
+        if (!source)
+        {
+            Log("direct V8 bootstrap failed to create source string");
+            return nullptr;
+        }
+        void *script = g_v8DirectScriptCompile(context, source, nullptr);
+        if (!script)
+        {
+            Log("direct V8 bootstrap compile returned empty context=%p source=%p",
+                context, source);
+            return nullptr;
+        }
+        void *function = g_v8DirectScriptRun(script, context);
+        if (!function || !g_v8FunctionCall)
+        {
+            Log("direct V8 bootstrap function unavailable value=%p call=%p",
+                function, reinterpret_cast<void *>(g_v8FunctionCall));
+            return nullptr;
+        }
+        void *receiver = g_v8ContextGlobal(context);
+        void *arguments[] = {processObject, nativeRequire};
+        void *value = g_v8FunctionCall(
+            function, context, receiver, 2, arguments);
+        Log("direct V8 bootstrap call returned value=%p context=%p function=%p",
+            value, context, function);
+        std::string result;
+        if (ReadNodeLoadEnvironmentStringResult(value, &result))
+        {
+            Log("direct V8 bootstrap result=%s", result.c_str());
+        }
+        else
+        {
+            Log("direct V8 bootstrap result unreadable value=%p", value);
+        }
+        return value;
     }
 
-    Log("running Node Realm::BootstrapInternalLoaders realm=%p function=%p",
-        realm, reinterpret_cast<void*>(bootstrap));
-    void* result = bootstrap(realm);
-    Log("Node Realm::BootstrapInternalLoaders returned value=%p realm=%p",
-        result, realm);
-    return result != nullptr;
-}
+    static void *ResolveElectronOffset(uintptr_t offset);
 
-static void* RunNodeStartExecutionBootstrap(
-    const NodeStartExecutionCallbackInfoView& info) {
-    void* context = reinterpret_cast<void*>(
-        g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
-    std::call_once(g_v8AppSearchPathSymbolsOnce,
-                   ResolveV8AppSearchPathSymbols);
-    if (!context || !info.firstValue || !info.secondValue ||
-        !g_v8ContextGetIsolate || !g_v8ContextGlobal ||
-        !g_v8ValueIsFunction || !g_v8FunctionCall || !g_v8CreateHandle) {
-        Log("node bootstrap callback unavailable context=%p first=%p "
-            "second=%p global=%p isFunction=%p call=%p",
-            context, info.firstValue, info.secondValue,
-            reinterpret_cast<void*>(g_v8ContextGlobal),
-            reinterpret_cast<void*>(g_v8ValueIsFunction),
-            reinterpret_cast<void*>(g_v8FunctionCall));
-        return nullptr;
+    static bool BootstrapMissingNodeInternalLoaders(void *environment)
+    {
+        if (!environment)
+        {
+            return false;
+        }
+
+        auto *environmentBytes = static_cast<uint8_t *>(environment);
+        void *realm = *reinterpret_cast<void **>(environmentBytes + 0xa70);
+        auto bootstrap = reinterpret_cast<NodeRealmBootstrapInternalLoadersFn>(
+            ResolveElectronOffset(kNodeRealmBootstrapInternalLoadersOffset));
+        if (!realm || !bootstrap)
+        {
+            Log("Node internal-loader bootstrap unavailable env=%p realm=%p "
+                "function=%p",
+                environment, realm, reinterpret_cast<void *>(bootstrap));
+            return false;
+        }
+
+        Log("running Node Realm::BootstrapInternalLoaders realm=%p function=%p",
+            realm, reinterpret_cast<void *>(bootstrap));
+        void *result = bootstrap(realm);
+        Log("Node Realm::BootstrapInternalLoaders returned value=%p realm=%p",
+            result, realm);
+        return result != nullptr;
     }
 
-    void* isolate = g_v8ContextGetIsolate(context);
-    const uintptr_t firstTagged =
-        *reinterpret_cast<const uintptr_t*>(info.firstValue);
-    const uintptr_t secondTagged =
-        *reinterpret_cast<const uintptr_t*>(info.secondValue);
-    void* firstLocal = g_v8CreateHandle(isolate, firstTagged);
-    void* secondLocal = g_v8CreateHandle(isolate, secondTagged);
-    const bool firstIsFunction =
-        firstLocal && g_v8ValueIsFunction(firstLocal);
-    const bool secondIsFunction =
-        secondLocal && g_v8ValueIsFunction(secondLocal);
-    void* nativeRequire = firstIsFunction ? firstLocal : secondLocal;
-    void* processObject = firstIsFunction ? secondLocal : firstLocal;
-    Log("node bootstrap persistent values first=%p tagged=0x%llx local=%p "
-        "function=%d second=%p tagged=0x%llx local=%p function=%d "
-        "process=%p require=%p",
-        info.firstValue, static_cast<unsigned long long>(firstTagged),
-        firstLocal, firstIsFunction, info.secondValue,
-        static_cast<unsigned long long>(secondTagged), secondLocal,
-        secondIsFunction, processObject, nativeRequire);
-    if (firstIsFunction == secondIsFunction) {
-        Log("node bootstrap callback could not uniquely identify native require");
-        return nullptr;
-    }
-    return RunDirectV8BootstrapScript(processObject, nativeRequire);
-}
+    static void *RunNodeStartExecutionBootstrap(
+        const NodeStartExecutionCallbackInfoView &info)
+    {
+        void *context = reinterpret_cast<void *>(
+            g_lastNodeCreateEnvironmentContext.load(std::memory_order_relaxed));
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        if (!context || !info.firstValue || !info.secondValue ||
+            !g_v8ContextGetIsolate || !g_v8ContextGlobal ||
+            !g_v8ValueIsFunction || !g_v8FunctionCall || !g_v8CreateHandle)
+        {
+            Log("node bootstrap callback unavailable context=%p first=%p "
+                "second=%p global=%p isFunction=%p call=%p",
+                context, info.firstValue, info.secondValue,
+                reinterpret_cast<void *>(g_v8ContextGlobal),
+                reinterpret_cast<void *>(g_v8ValueIsFunction),
+                reinterpret_cast<void *>(g_v8FunctionCall));
+            return nullptr;
+        }
 
-extern "C" void* OHcodeNodeStartExecutionThunk(
-    void* callbackStorage,
-    const NodeStartExecutionCallbackInfoView* info) {
-    Log("node start-execution thunk entered callback=%p info=%p",
-        callbackStorage, info);
-    if (!info) {
-        return nullptr;
+        void *isolate = g_v8ContextGetIsolate(context);
+        const uintptr_t firstTagged =
+            *reinterpret_cast<const uintptr_t *>(info.firstValue);
+        const uintptr_t secondTagged =
+            *reinterpret_cast<const uintptr_t *>(info.secondValue);
+        void *firstLocal = g_v8CreateHandle(isolate, firstTagged);
+        void *secondLocal = g_v8CreateHandle(isolate, secondTagged);
+        const bool firstIsFunction =
+            firstLocal && g_v8ValueIsFunction(firstLocal);
+        const bool secondIsFunction =
+            secondLocal && g_v8ValueIsFunction(secondLocal);
+        void *nativeRequire = firstIsFunction ? firstLocal : secondLocal;
+        void *processObject = firstIsFunction ? secondLocal : firstLocal;
+        Log("node bootstrap persistent values first=%p tagged=0x%llx local=%p "
+            "function=%d second=%p tagged=0x%llx local=%p function=%d "
+            "process=%p require=%p",
+            info.firstValue, static_cast<unsigned long long>(firstTagged),
+            firstLocal, firstIsFunction, info.secondValue,
+            static_cast<unsigned long long>(secondTagged), secondLocal,
+            secondIsFunction, processObject, nativeRequire);
+        if (firstIsFunction == secondIsFunction)
+        {
+            Log("node bootstrap callback could not uniquely identify native require");
+            return nullptr;
+        }
+        return RunDirectV8BootstrapScript(processObject, nativeRequire);
     }
-    return RunNodeStartExecutionBootstrap(*info);
-}
 
-static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
-    if (void* gotReal =
-            g_gotRealNodeLoadEnvironmentString.load(
-                std::memory_order_acquire)) {
-        return reinterpret_cast<NodeLoadEnvironmentStringFn>(gotReal);
+    extern "C" void *OHcodeNodeStartExecutionThunk(
+        void *callbackStorage,
+        const NodeStartExecutionCallbackInfoView *info)
+    {
+        Log("node start-execution thunk entered callback=%p info=%p",
+            callbackStorage, info);
+        if (!info)
+        {
+            return nullptr;
+        }
+        return RunNodeStartExecutionBootstrap(*info);
     }
-    std::call_once(g_realNodeLoadEnvironmentStringOnce, []() {
+
+    static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString()
+    {
+        if (void *gotReal =
+                g_gotRealNodeLoadEnvironmentString.load(
+                    std::memory_order_acquire))
+        {
+            return reinterpret_cast<NodeLoadEnvironmentStringFn>(gotReal);
+        }
+        std::call_once(g_realNodeLoadEnvironmentStringOnce, []()
+                       {
         g_realNodeLoadEnvironmentString =
             reinterpret_cast<NodeLoadEnvironmentStringFn>(ResolveElectronExport(
                 "_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc",
@@ -2878,373 +3173,430 @@ static NodeLoadEnvironmentStringFn GetRealNodeLoadEnvironmentString() {
                     &_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc)));
         if (!g_realNodeLoadEnvironmentString) {
             Log("WARNING: node::LoadEnvironment(string) real symbol not found");
-        }
-    });
-    return g_realNodeLoadEnvironmentString;
-}
-
-static NodeLoadEnvironmentCallbackFn GetRealNodeLoadEnvironmentCallback() {
-    if (void* gotReal =
-            g_gotRealNodeLoadEnvironmentCallback.load(
-                std::memory_order_acquire)) {
-        return reinterpret_cast<NodeLoadEnvironmentCallbackFn>(gotReal);
+        } });
+        return g_realNodeLoadEnvironmentString;
     }
-    std::call_once(g_realNodeLoadEnvironmentCallbackOnce, []() {
+
+    static NodeLoadEnvironmentCallbackFn GetRealNodeLoadEnvironmentCallback()
+    {
+        if (void *gotReal =
+                g_gotRealNodeLoadEnvironmentCallback.load(
+                    std::memory_order_acquire))
+        {
+            return reinterpret_cast<NodeLoadEnvironmentCallbackFn>(gotReal);
+        }
+        std::call_once(g_realNodeLoadEnvironmentCallbackOnce, []()
+                       {
         g_realNodeLoadEnvironmentCallback =
             reinterpret_cast<NodeLoadEnvironmentCallbackFn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE"));
         if (!g_realNodeLoadEnvironmentCallback) {
             Log("WARNING: node::LoadEnvironment(callback) real symbol not found");
+        } });
+        return g_realNodeLoadEnvironmentCallback;
+    }
+
+    static void MaybeRunNodePreLoadProbe(void *environment,
+                                         uint64_t callbackCallIndex)
+    {
+        if (!environment || callbackCallIndex != 1)
+        {
+            return;
         }
-    });
-    return g_realNodeLoadEnvironmentCallback;
-}
 
-static void MaybeRunNodePreLoadProbe(void* environment,
-                                     uint64_t callbackCallIndex) {
-    if (!environment || callbackCallIndex != 1) {
-        return;
+        NodeLoadEnvironmentStringFn realLoadEnvironmentString =
+            GetRealNodeLoadEnvironmentString();
+        if (!realLoadEnvironmentString)
+        {
+            g_nodePreLoadProbeFailures.fetch_add(1, std::memory_order_relaxed);
+            Log("node preload probe skipped: LoadEnvironment(string) missing");
+            return;
+        }
+
+        g_nodePreLoadProbeAttempts.fetch_add(1, std::memory_order_relaxed);
+        void *value =
+            realLoadEnvironmentString(environment, kNodePreLoadProbeScript);
+        if (!value)
+        {
+            g_nodePreLoadProbeFailures.fetch_add(1, std::memory_order_relaxed);
+            Log("node preload probe returned empty env=%p", environment);
+            return;
+        }
+
+        g_nodePreLoadProbeSuccesses.fetch_add(1, std::memory_order_relaxed);
+        RecordNodePreLoadProbeResult(value);
+        Log("node preload probe returned value=%p env=%p", value, environment);
     }
 
-    NodeLoadEnvironmentStringFn realLoadEnvironmentString =
-        GetRealNodeLoadEnvironmentString();
-    if (!realLoadEnvironmentString) {
-        g_nodePreLoadProbeFailures.fetch_add(1, std::memory_order_relaxed);
-        Log("node preload probe skipped: LoadEnvironment(string) missing");
-        return;
+    static void MaybeRunNodePostLoadTrace(void *environment,
+                                          uint64_t callbackCallIndex)
+    {
+        if (!environment || callbackCallIndex != 1)
+        {
+            return;
+        }
+
+        NodeLoadEnvironmentStringFn realLoadEnvironmentString =
+            GetRealNodeLoadEnvironmentString();
+        if (!realLoadEnvironmentString)
+        {
+            g_nodePostLoadTraceFailures.fetch_add(1, std::memory_order_relaxed);
+            Log("node post-load trace skipped: LoadEnvironment(string) missing");
+            return;
+        }
+
+        g_nodePostLoadTraceAttempts.fetch_add(1, std::memory_order_relaxed);
+        void *value =
+            realLoadEnvironmentString(environment, kNodePostLoadTraceScript);
+        CaptureNodePostLoadStage();
+        if (!value)
+        {
+            g_nodePostLoadTraceFailures.fetch_add(1, std::memory_order_relaxed);
+            Log("node post-load trace returned empty env=%p", environment);
+            return;
+        }
+
+        g_nodePostLoadTraceSuccesses.fetch_add(1, std::memory_order_relaxed);
+        RecordNodePostLoadTraceResult(value);
+        Log("node post-load trace returned value=%p env=%p", value, environment);
     }
 
-    g_nodePreLoadProbeAttempts.fetch_add(1, std::memory_order_relaxed);
-    void* value =
-        realLoadEnvironmentString(environment, kNodePreLoadProbeScript);
-    if (!value) {
-        g_nodePreLoadProbeFailures.fetch_add(1, std::memory_order_relaxed);
-        Log("node preload probe returned empty env=%p", environment);
-        return;
+    static NodePlatformForIsolateFn GetRealNodePlatformForIsolate()
+    {
+        if (void *trampoline = g_nodePlatformForIsolateInlineTrampoline.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<NodePlatformForIsolateFn>(trampoline);
+        }
+        return g_realNodePlatformForIsolate;
     }
 
-    g_nodePreLoadProbeSuccesses.fetch_add(1, std::memory_order_relaxed);
-    RecordNodePreLoadProbeResult(value);
-    Log("node preload probe returned value=%p env=%p", value, environment);
-}
-
-static void MaybeRunNodePostLoadTrace(void* environment,
-                                      uint64_t callbackCallIndex) {
-    if (!environment || callbackCallIndex != 1) {
-        return;
-    }
-
-    NodeLoadEnvironmentStringFn realLoadEnvironmentString =
-        GetRealNodeLoadEnvironmentString();
-    if (!realLoadEnvironmentString) {
-        g_nodePostLoadTraceFailures.fetch_add(1, std::memory_order_relaxed);
-        Log("node post-load trace skipped: LoadEnvironment(string) missing");
-        return;
-    }
-
-    g_nodePostLoadTraceAttempts.fetch_add(1, std::memory_order_relaxed);
-    void* value =
-        realLoadEnvironmentString(environment, kNodePostLoadTraceScript);
-    CaptureNodePostLoadStage();
-    if (!value) {
-        g_nodePostLoadTraceFailures.fetch_add(1, std::memory_order_relaxed);
-        Log("node post-load trace returned empty env=%p", environment);
-        return;
-    }
-
-    g_nodePostLoadTraceSuccesses.fetch_add(1, std::memory_order_relaxed);
-    RecordNodePostLoadTraceResult(value);
-    Log("node post-load trace returned value=%p env=%p", value, environment);
-}
-
-static NodePlatformForIsolateFn GetRealNodePlatformForIsolate() {
-    if (void* trampoline = g_nodePlatformForIsolateInlineTrampoline.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<NodePlatformForIsolateFn>(trampoline);
-    }
-    return g_realNodePlatformForIsolate;
-}
-
-static AdapterStartChildProcess2Fn GetRealAdapterStartGpuProcess() {
-    if (void* gotReal =
-            g_gotRealAdapterStartGpuProcess.load(std::memory_order_acquire)) {
-        return reinterpret_cast<AdapterStartChildProcess2Fn>(gotReal);
-    }
-    std::call_once(g_realAdapterStartGpuProcessOnce, []() {
+    static AdapterStartChildProcess2Fn GetRealAdapterStartGpuProcess()
+    {
+        if (void *gotReal =
+                g_gotRealAdapterStartGpuProcess.load(std::memory_order_acquire))
+        {
+            return reinterpret_cast<AdapterStartChildProcess2Fn>(gotReal);
+        }
+        std::call_once(g_realAdapterStartGpuProcessOnce, []()
+                       {
         g_realAdapterStartGpuProcess =
             reinterpret_cast<AdapterStartChildProcess2Fn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE"));
         if (!g_realAdapterStartGpuProcess) {
             Log("WARNING: adapter StartGpuProcess real symbol not found");
-        }
-    });
-    return g_realAdapterStartGpuProcess;
-}
-
-static AdapterStartChildProcess2Fn GetRealAdapterStartLegacyChildProcess() {
-    if (void* gotReal = g_gotRealAdapterStartLegacyChildProcess.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<AdapterStartChildProcess2Fn>(gotReal);
+        } });
+        return g_realAdapterStartGpuProcess;
     }
-    std::call_once(g_realAdapterStartLegacyChildProcessOnce, []() {
+
+    static AdapterStartChildProcess2Fn GetRealAdapterStartLegacyChildProcess()
+    {
+        if (void *gotReal = g_gotRealAdapterStartLegacyChildProcess.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<AdapterStartChildProcess2Fn>(gotReal);
+        }
+        std::call_once(g_realAdapterStartLegacyChildProcessOnce, []()
+                       {
         g_realAdapterStartLegacyChildProcess =
             reinterpret_cast<AdapterStartChildProcess2Fn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE"));
         if (!g_realAdapterStartLegacyChildProcess) {
             Log("WARNING: adapter StartLegacyChildProcess real symbol not found");
-        }
-    });
-    return g_realAdapterStartLegacyChildProcess;
-}
-
-static AdapterStartChildProcess3Fn GetRealAdapterStartNormalChildProcess() {
-    if (void* gotReal = g_gotRealAdapterStartNormalChildProcess.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<AdapterStartChildProcess3Fn>(gotReal);
+        } });
+        return g_realAdapterStartLegacyChildProcess;
     }
-    std::call_once(g_realAdapterStartNormalChildProcessOnce, []() {
+
+    static AdapterStartChildProcess3Fn GetRealAdapterStartNormalChildProcess()
+    {
+        if (void *gotReal = g_gotRealAdapterStartNormalChildProcess.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<AdapterStartChildProcess3Fn>(gotReal);
+        }
+        std::call_once(g_realAdapterStartNormalChildProcessOnce, []()
+                       {
         g_realAdapterStartNormalChildProcess =
             reinterpret_cast<AdapterStartChildProcess3Fn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_"));
         if (!g_realAdapterStartNormalChildProcess) {
             Log("WARNING: adapter StartNormalChildProcess real symbol not found");
-        }
-    });
-    return g_realAdapterStartNormalChildProcess;
-}
-
-static AdapterStartChildProcess3Fn GetRealAdapterStartIsolateChildProcess() {
-    if (void* gotReal = g_gotRealAdapterStartIsolateChildProcess.load(
-            std::memory_order_acquire)) {
-        return reinterpret_cast<AdapterStartChildProcess3Fn>(gotReal);
+        } });
+        return g_realAdapterStartNormalChildProcess;
     }
-    std::call_once(g_realAdapterStartIsolateChildProcessOnce, []() {
+
+    static AdapterStartChildProcess3Fn GetRealAdapterStartIsolateChildProcess()
+    {
+        if (void *gotReal = g_gotRealAdapterStartIsolateChildProcess.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<AdapterStartChildProcess3Fn>(gotReal);
+        }
+        std::call_once(g_realAdapterStartIsolateChildProcessOnce, []()
+                       {
         g_realAdapterStartIsolateChildProcess =
             reinterpret_cast<AdapterStartChildProcess3Fn>(dlsym(
                 RTLD_NEXT,
                 "_ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_"));
         if (!g_realAdapterStartIsolateChildProcess) {
             Log("WARNING: adapter StartIsolateChildProcess real symbol not found");
+        } });
+        return g_realAdapterStartIsolateChildProcess;
+    }
+
+    static bool AdapterArgsContainCrashpadHandler(const AdapterArgVector &args)
+    {
+        for (const std::string &arg : args)
+        {
+            if (arg == "--type=crashpad-handler" ||
+                arg.find("chrome_crashpad_handler") != std::string::npos ||
+                arg.find("crashpad-handler") != std::string::npos)
+            {
+                return true;
+            }
         }
-    });
-    return g_realAdapterStartIsolateChildProcess;
-}
+        return false;
+    }
 
-static bool AdapterArgsContainCrashpadHandler(const AdapterArgVector& args) {
-    for (const std::string& arg : args) {
-        if (arg == "--type=crashpad-handler" ||
-            arg.find("chrome_crashpad_handler") != std::string::npos ||
-            arg.find("crashpad-handler") != std::string::npos) {
-            return true;
+    static bool ShouldBlockAdapterChildProcess(const AdapterArgVector &args)
+    {
+        std::call_once(g_adapterChildHookConfigOnce, InitAdapterChildHookConfig);
+        return g_adapterCrashpadBlockEnabled.load(std::memory_order_relaxed) &&
+               AdapterArgsContainCrashpadHandler(args);
+    }
+
+    static uint32_t GetPatchedAdapterChildProcessSlots()
+    {
+        return g_patchedAdapterStartGpuProcessSlots.load(
+                   std::memory_order_relaxed) +
+               g_patchedAdapterStartLegacyChildProcessSlots.load(
+                   std::memory_order_relaxed) +
+               g_patchedAdapterStartNormalChildProcessSlots.load(
+                   std::memory_order_relaxed) +
+               g_patchedAdapterStartIsolateChildProcessSlots.load(
+                   std::memory_order_relaxed);
+    }
+
+    struct ElectronOffsetLookup
+    {
+        uintptr_t offset;
+        uintptr_t address;
+    };
+
+    static int ResolveElectronOffsetCallback(dl_phdr_info *info, size_t,
+                                             void *data)
+    {
+        if (!info || !info->dlpi_name || !strstr(info->dlpi_name, "libelectron.so"))
+        {
+            return 0;
+        }
+        auto *lookup = reinterpret_cast<ElectronOffsetLookup *>(data);
+        lookup->address = static_cast<uintptr_t>(info->dlpi_addr) + lookup->offset;
+        return 1;
+    }
+
+    static void *ResolveElectronOffset(uintptr_t offset)
+    {
+        ElectronOffsetLookup lookup = {offset, 0};
+        dl_iterate_phdr(ResolveElectronOffsetCallback, &lookup);
+        return reinterpret_cast<void *>(lookup.address);
+    }
+
+    static uintptr_t GetElectronCallerOffset(void *raw_return_address)
+    {
+        if (!raw_return_address)
+        {
+            return 0;
+        }
+
+        void *extracted = __builtin_extract_return_addr(raw_return_address);
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase ||
+            !strstr(info.dli_fname, "libelectron.so"))
+        {
+            return 0;
+        }
+        return reinterpret_cast<uintptr_t>(extracted) -
+               reinterpret_cast<uintptr_t>(info.dli_fbase);
+    }
+
+    static void TraceV8ObjectSetPrivateName(const char *privateName,
+                                            uintptr_t callerOffset)
+    {
+        const uint32_t index = g_v8ObjectSetPrivateNameTraceCount.fetch_add(
+                                   1, std::memory_order_relaxed) +
+                               1;
+        if (index > 16)
+        {
+            return;
+        }
+
+        char item[192];
+        snprintf(item, sizeof(item), "%u:%s@0x%llx", index,
+                 privateName ? privateName : "<null>",
+                 static_cast<unsigned long long>(callerOffset));
+        {
+            std::lock_guard<std::mutex> lock(g_v8ObjectSetPrivateTraceMutex);
+            if (!g_v8ObjectSetPrivateNames.empty())
+            {
+                g_v8ObjectSetPrivateNames += ";";
+            }
+            g_v8ObjectSetPrivateNames += item;
+        }
+
+        if (index <= 8)
+        {
+            Log("v8::Object::SetPrivate key[%u]=%s caller=0x%llx", index,
+                privateName ? privateName : "<null>",
+                static_cast<unsigned long long>(callerOffset));
         }
     }
-    return false;
-}
 
-static bool ShouldBlockAdapterChildProcess(const AdapterArgVector& args) {
-    std::call_once(g_adapterChildHookConfigOnce, InitAdapterChildHookConfig);
-    return g_adapterCrashpadBlockEnabled.load(std::memory_order_relaxed) &&
-           AdapterArgsContainCrashpadHandler(args);
-}
-
-static uint32_t GetPatchedAdapterChildProcessSlots() {
-    return g_patchedAdapterStartGpuProcessSlots.load(
-               std::memory_order_relaxed) +
-           g_patchedAdapterStartLegacyChildProcessSlots.load(
-               std::memory_order_relaxed) +
-           g_patchedAdapterStartNormalChildProcessSlots.load(
-               std::memory_order_relaxed) +
-           g_patchedAdapterStartIsolateChildProcessSlots.load(
-               std::memory_order_relaxed);
-}
-
-struct ElectronOffsetLookup {
-    uintptr_t offset;
-    uintptr_t address;
-};
-
-static int ResolveElectronOffsetCallback(dl_phdr_info* info, size_t,
-                                         void* data) {
-    if (!info || !info->dlpi_name || !strstr(info->dlpi_name, "libelectron.so")) {
-        return 0;
-    }
-    auto* lookup = reinterpret_cast<ElectronOffsetLookup*>(data);
-    lookup->address = static_cast<uintptr_t>(info->dlpi_addr) + lookup->offset;
-    return 1;
-}
-
-static void* ResolveElectronOffset(uintptr_t offset) {
-    ElectronOffsetLookup lookup = {offset, 0};
-    dl_iterate_phdr(ResolveElectronOffsetCallback, &lookup);
-    return reinterpret_cast<void*>(lookup.address);
-}
-
-static uintptr_t GetElectronCallerOffset(void* raw_return_address) {
-    if (!raw_return_address) {
-        return 0;
-    }
-
-    void* extracted = __builtin_extract_return_addr(raw_return_address);
-    Dl_info info;
-    memset(&info, 0, sizeof(info));
-    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase ||
-        !strstr(info.dli_fname, "libelectron.so")) {
-        return 0;
-    }
-    return reinterpret_cast<uintptr_t>(extracted) -
-           reinterpret_cast<uintptr_t>(info.dli_fbase);
-}
-
-static void TraceV8ObjectSetPrivateName(const char* privateName,
-                                        uintptr_t callerOffset) {
-    const uint32_t index = g_v8ObjectSetPrivateNameTraceCount.fetch_add(
-                               1, std::memory_order_relaxed) +
-                           1;
-    if (index > 16) {
-        return;
-    }
-
-    char item[192];
-    snprintf(item, sizeof(item), "%u:%s@0x%llx", index,
-             privateName ? privateName : "<null>",
-             static_cast<unsigned long long>(callerOffset));
+    static std::string GetV8ObjectSetPrivateNames()
     {
         std::lock_guard<std::mutex> lock(g_v8ObjectSetPrivateTraceMutex);
-        if (!g_v8ObjectSetPrivateNames.empty()) {
-            g_v8ObjectSetPrivateNames += ";";
+        return g_v8ObjectSetPrivateNames;
+    }
+
+    static void CaptureNodePreLoadProbeHiddenValue(void *context,
+                                                   const char *privateName,
+                                                   void *value)
+    {
+        constexpr const char *kPrefix = "ohcodePreProbe:";
+        if (!privateName || strncmp(privateName, kPrefix, strlen(kPrefix)) != 0)
+        {
+            return;
         }
-        g_v8ObjectSetPrivateNames += item;
+
+        char valueText[1024];
+        if (!ReadV8StringValue(context, value, valueText, sizeof(valueText)))
+        {
+            snprintf(valueText, sizeof(valueText), "<unreadable:%p>", value);
+        }
+
+        char item[1280];
+        snprintf(item, sizeof(item), "%s=%s", privateName, valueText);
+        {
+            std::lock_guard<std::mutex> lock(g_nodePreLoadProbeHiddenMutex);
+            g_lastNodePreLoadProbeHiddenValue = item;
+        }
+        const uint64_t index =
+            g_nodePreLoadProbeHiddenWrites.fetch_add(
+                1, std::memory_order_relaxed) +
+            1;
+        if (index <= 12)
+        {
+            Log("node preload probe hidden[%llu] %s",
+                static_cast<unsigned long long>(index), item);
+        }
     }
 
-    if (index <= 8) {
-        Log("v8::Object::SetPrivate key[%u]=%s caller=0x%llx", index,
-            privateName ? privateName : "<null>",
-            static_cast<unsigned long long>(callerOffset));
-    }
-}
-
-static std::string GetV8ObjectSetPrivateNames() {
-    std::lock_guard<std::mutex> lock(g_v8ObjectSetPrivateTraceMutex);
-    return g_v8ObjectSetPrivateNames;
-}
-
-static void CaptureNodePreLoadProbeHiddenValue(void* context,
-                                               const char* privateName,
-                                               void* value) {
-    constexpr const char* kPrefix = "ohcodePreProbe:";
-    if (!privateName || strncmp(privateName, kPrefix, strlen(kPrefix)) != 0) {
-        return;
-    }
-
-    char valueText[1024];
-    if (!ReadV8StringValue(context, value, valueText, sizeof(valueText))) {
-        snprintf(valueText, sizeof(valueText), "<unreadable:%p>", value);
-    }
-
-    char item[1280];
-    snprintf(item, sizeof(item), "%s=%s", privateName, valueText);
+    static std::string GetLastNodePreLoadProbeHiddenValue()
     {
         std::lock_guard<std::mutex> lock(g_nodePreLoadProbeHiddenMutex);
-        g_lastNodePreLoadProbeHiddenValue = item;
-    }
-    const uint64_t index =
-        g_nodePreLoadProbeHiddenWrites.fetch_add(
-            1, std::memory_order_relaxed) +
-        1;
-    if (index <= 12) {
-        Log("node preload probe hidden[%llu] %s",
-            static_cast<unsigned long long>(index), item);
-    }
-}
-
-static std::string GetLastNodePreLoadProbeHiddenValue() {
-    std::lock_guard<std::mutex> lock(g_nodePreLoadProbeHiddenMutex);
-    return g_lastNodePreLoadProbeHiddenValue;
-}
-
-static void TraceV8ObjectDefineOwnPropertyName(const char* name,
-                                               const char* value,
-                                               int attributes,
-                                               uintptr_t callerOffset) {
-    const uint32_t index =
-        g_v8ObjectDefineOwnPropertyNameTraceCount.fetch_add(
-            1, std::memory_order_relaxed) +
-        1;
-    if (index > 24) {
-        return;
+        return g_lastNodePreLoadProbeHiddenValue;
     }
 
-    char safeValue[160];
-    if (value && value[0] != '\0') {
-        snprintf(safeValue, sizeof(safeValue), "=%s", value);
-    } else {
-        safeValue[0] = '\0';
+    static void TraceV8ObjectDefineOwnPropertyName(const char *name,
+                                                   const char *value,
+                                                   int attributes,
+                                                   uintptr_t callerOffset)
+    {
+        const uint32_t index =
+            g_v8ObjectDefineOwnPropertyNameTraceCount.fetch_add(
+                1, std::memory_order_relaxed) +
+            1;
+        if (index > 24)
+        {
+            return;
+        }
+
+        char safeValue[160];
+        if (value && value[0] != '\0')
+        {
+            snprintf(safeValue, sizeof(safeValue), "=%s", value);
+        }
+        else
+        {
+            safeValue[0] = '\0';
+        }
+
+        char item[320];
+        snprintf(item, sizeof(item), "%u:%s%s attr=%d@0x%llx", index,
+                 name ? name : "<null>", safeValue, attributes,
+                 static_cast<unsigned long long>(callerOffset));
+        {
+            std::lock_guard<std::mutex> lock(
+                g_v8ObjectDefineOwnPropertyTraceMutex);
+            if (!g_v8ObjectDefineOwnPropertyNames.empty())
+            {
+                g_v8ObjectDefineOwnPropertyNames += ";";
+            }
+            g_v8ObjectDefineOwnPropertyNames += item;
+        }
+
+        if (index <= 12)
+        {
+            Log("v8::Object::DefineOwnProperty key[%u]=%s%s attr=%d caller=0x%llx",
+                index, name ? name : "<null>", safeValue, attributes,
+                static_cast<unsigned long long>(callerOffset));
+        }
     }
 
-    char item[320];
-    snprintf(item, sizeof(item), "%u:%s%s attr=%d@0x%llx", index,
-             name ? name : "<null>", safeValue, attributes,
-             static_cast<unsigned long long>(callerOffset));
+    static std::string GetV8ObjectDefineOwnPropertyNames()
     {
         std::lock_guard<std::mutex> lock(
             g_v8ObjectDefineOwnPropertyTraceMutex);
-        if (!g_v8ObjectDefineOwnPropertyNames.empty()) {
-            g_v8ObjectDefineOwnPropertyNames += ";";
+        return g_v8ObjectDefineOwnPropertyNames;
+    }
+
+    static void RecordDefinedResourcesPath(const char *path)
+    {
+        std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
+        g_lastDefinedResourcesPath = path ? path : "";
+    }
+
+    static std::string GetLastDefinedResourcesPath()
+    {
+        std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
+        return g_lastDefinedResourcesPath;
+    }
+
+    static void RecordBrowserInitDefineO(const char *value)
+    {
+        {
+            std::lock_guard<std::mutex> lock(g_browserInitDefineOMutex);
+            g_lastBrowserInitDefineO = value ? value : "";
         }
-        g_v8ObjectDefineOwnPropertyNames += item;
+        const uint64_t index =
+            g_browserInitDefineOCalls.fetch_add(1, std::memory_order_relaxed) +
+            1;
+        if (index <= 5)
+        {
+            Log("browser_init define O[%llu]=%s",
+                static_cast<unsigned long long>(index), value ? value : "");
+        }
     }
 
-    if (index <= 12) {
-        Log("v8::Object::DefineOwnProperty key[%u]=%s%s attr=%d caller=0x%llx",
-            index, name ? name : "<null>", safeValue, attributes,
-            static_cast<unsigned long long>(callerOffset));
-    }
-}
-
-static std::string GetV8ObjectDefineOwnPropertyNames() {
-    std::lock_guard<std::mutex> lock(
-        g_v8ObjectDefineOwnPropertyTraceMutex);
-    return g_v8ObjectDefineOwnPropertyNames;
-}
-
-static void RecordDefinedResourcesPath(const char* path) {
-    std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
-    g_lastDefinedResourcesPath = path ? path : "";
-}
-
-static std::string GetLastDefinedResourcesPath() {
-    std::lock_guard<std::mutex> lock(g_resourcesPathTraceMutex);
-    return g_lastDefinedResourcesPath;
-}
-
-static void RecordBrowserInitDefineO(const char* value) {
+    static std::string GetLastBrowserInitDefineO()
     {
         std::lock_guard<std::mutex> lock(g_browserInitDefineOMutex);
-        g_lastBrowserInitDefineO = value ? value : "";
+        return g_lastBrowserInitDefineO;
     }
-    const uint64_t index =
-        g_browserInitDefineOCalls.fetch_add(1, std::memory_order_relaxed) +
-        1;
-    if (index <= 5) {
-        Log("browser_init define O[%llu]=%s",
-            static_cast<unsigned long long>(index), value ? value : "");
-    }
-}
 
-static std::string GetLastBrowserInitDefineO() {
-    std::lock_guard<std::mutex> lock(g_browserInitDefineOMutex);
-    return g_lastBrowserInitDefineO;
-}
-
-static bool IsBrowserInitStageDefineName(const char* name) {
-    if (!name || name[0] == '\0' || name[1] != '\0') {
-        return false;
-    }
-    switch (name[0]) {
+    static bool IsBrowserInitStageDefineName(const char *name)
+    {
+        if (!name || name[0] == '\0' || name[1] != '\0')
+        {
+            return false;
+        }
+        switch (name[0])
+        {
         case 'A':
         case 'B':
         case 'C':
@@ -3255,1460 +3607,1583 @@ static bool IsBrowserInitStageDefineName(const char* name) {
             return true;
         default:
             return false;
+        }
     }
-}
 
-static void RecordBrowserInitStageDefine(const char* name,
-                                         const char* value) {
-    char item[192];
-    snprintf(item, sizeof(item), "%s=%s", name ? name : "<null>",
-             value ? value : "");
+    static void RecordBrowserInitStageDefine(const char *name,
+                                             const char *value)
+    {
+        char item[192];
+        snprintf(item, sizeof(item), "%s=%s", name ? name : "<null>",
+                 value ? value : "");
+        {
+            std::lock_guard<std::mutex> lock(g_browserInitStageDefineMutex);
+            if (!g_browserInitStageDefines.empty())
+            {
+                g_browserInitStageDefines += ";";
+            }
+            g_browserInitStageDefines += item;
+        }
+        const uint64_t index =
+            g_browserInitStageDefineCalls.fetch_add(1,
+                                                    std::memory_order_relaxed) +
+            1;
+        if (index <= 12)
+        {
+            Log("browser_init stage define[%llu] %s",
+                static_cast<unsigned long long>(index), item);
+        }
+    }
+
+    static std::string GetBrowserInitStageDefines()
     {
         std::lock_guard<std::mutex> lock(g_browserInitStageDefineMutex);
-        if (!g_browserInitStageDefines.empty()) {
-            g_browserInitStageDefines += ";";
-        }
-        g_browserInitStageDefines += item;
-    }
-    const uint64_t index =
-        g_browserInitStageDefineCalls.fetch_add(1,
-                                                std::memory_order_relaxed) +
-        1;
-    if (index <= 12) {
-        Log("browser_init stage define[%llu] %s",
-            static_cast<unsigned long long>(index), item);
-    }
-}
-
-static std::string GetBrowserInitStageDefines() {
-    std::lock_guard<std::mutex> lock(g_browserInitStageDefineMutex);
-    return g_browserInitStageDefines;
-}
-
-static void ResolveNodePlatformHookSymbols() {
-    g_v8ContextGetIsolate = reinterpret_cast<V8ContextGetIsolateFn>(
-        dlsym(RTLD_DEFAULT, "_ZN2v87Context10GetIsolateEv"));
-    g_v8GetCurrentPlatform = reinterpret_cast<V8GetCurrentPlatformFn>(
-        dlsym(RTLD_DEFAULT, "_ZN2v88internal2V818GetCurrentPlatformEv"));
-    g_uvDefaultLoop = reinterpret_cast<UvDefaultLoopFn>(
-        dlsym(RTLD_DEFAULT, "uv_default_loop"));
-
-    if (!g_v8GetCurrentPlatform || !g_uvDefaultLoop) {
-        g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
-        Log("WARNING: NodePlatform hook symbols missing: contextGetIsolate=%p "
-            "getCurrentPlatform=%p uvDefaultLoop=%p",
-            reinterpret_cast<void*>(g_v8ContextGetIsolate),
-            reinterpret_cast<void*>(g_v8GetCurrentPlatform),
-            reinterpret_cast<void*>(g_uvDefaultLoop));
-    }
-}
-
-static void ResolveNodePlatformLookupSymbols() {
-    g_uvMutexLock =
-        reinterpret_cast<UvMutexFn>(dlsym(RTLD_DEFAULT, "uv_mutex_lock"));
-    g_uvMutexUnlock =
-        reinterpret_cast<UvMutexFn>(dlsym(RTLD_DEFAULT, "uv_mutex_unlock"));
-    g_nodePlatformMapLookup = reinterpret_cast<NodePlatformMapLookupFn>(
-        ResolveElectronOffset(kNodePlatformMapLookupOffset));
-    g_nodePlatformMapLookupAux =
-        ResolveElectronOffset(kNodePlatformMapLookupAuxOffset);
-    if (!g_uvMutexLock || !g_uvMutexUnlock || !g_nodePlatformMapLookup ||
-        !g_nodePlatformMapLookupAux) {
-        g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
-        Log("WARNING: NodePlatform lookup symbols missing: lock=%p unlock=%p "
-            "lookup=%p aux=%p",
-            reinterpret_cast<void*>(g_uvMutexLock),
-            reinterpret_cast<void*>(g_uvMutexUnlock),
-            reinterpret_cast<void*>(g_nodePlatformMapLookup),
-            g_nodePlatformMapLookupAux);
-    }
-}
-
-static NodePlatformRegisterIsolateFn
-ResolveNodePlatformRegisterIsolate(void* platform) {
-    if (!platform) {
-        return nullptr;
+        return g_browserInitStageDefines;
     }
 
-    void** const vtable = *reinterpret_cast<void***>(platform);
-    if (!vtable) {
-        return nullptr;
-    }
+    static void ResolveNodePlatformHookSymbols()
+    {
+        g_v8ContextGetIsolate = reinterpret_cast<V8ContextGetIsolateFn>(
+            dlsym(RTLD_DEFAULT, "_ZN2v87Context10GetIsolateEv"));
+        g_v8GetCurrentPlatform = reinterpret_cast<V8GetCurrentPlatformFn>(
+            dlsym(RTLD_DEFAULT, "_ZN2v88internal2V818GetCurrentPlatformEv"));
+        g_uvDefaultLoop = reinterpret_cast<UvDefaultLoopFn>(
+            dlsym(RTLD_DEFAULT, "uv_default_loop"));
 
-    return reinterpret_cast<NodePlatformRegisterIsolateFn>(
-        vtable[kNodePlatformRegisterIsolateVtableOffset / sizeof(void*)]);
-}
-
-static bool ReserveNodePlatformHookIsolate(void* isolate) {
-    for (size_t i = 0; i < kMaxNodePlatformHookIsolates; ++i) {
-        void* current =
-            g_nodePlatformRegisteredIsolates[i].load(std::memory_order_acquire);
-        if (current == isolate) {
-            return false;
+        if (!g_v8GetCurrentPlatform || !g_uvDefaultLoop)
+        {
+            g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
+            Log("WARNING: NodePlatform hook symbols missing: contextGetIsolate=%p "
+                "getCurrentPlatform=%p uvDefaultLoop=%p",
+                reinterpret_cast<void *>(g_v8ContextGetIsolate),
+                reinterpret_cast<void *>(g_v8GetCurrentPlatform),
+                reinterpret_cast<void *>(g_uvDefaultLoop));
         }
     }
 
-    for (size_t i = 0; i < kMaxNodePlatformHookIsolates; ++i) {
-        void* expected = nullptr;
-        if (g_nodePlatformRegisteredIsolates[i].compare_exchange_strong(
-                expected, isolate, std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
-            return true;
-        }
-        if (expected == isolate) {
-            return false;
+    static void ResolveNodePlatformLookupSymbols()
+    {
+        g_uvMutexLock =
+            reinterpret_cast<UvMutexFn>(dlsym(RTLD_DEFAULT, "uv_mutex_lock"));
+        g_uvMutexUnlock =
+            reinterpret_cast<UvMutexFn>(dlsym(RTLD_DEFAULT, "uv_mutex_unlock"));
+        g_nodePlatformMapLookup = reinterpret_cast<NodePlatformMapLookupFn>(
+            ResolveElectronOffset(kNodePlatformMapLookupOffset));
+        g_nodePlatformMapLookupAux =
+            ResolveElectronOffset(kNodePlatformMapLookupAuxOffset);
+        if (!g_uvMutexLock || !g_uvMutexUnlock || !g_nodePlatformMapLookup ||
+            !g_nodePlatformMapLookupAux)
+        {
+            g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
+            Log("WARNING: NodePlatform lookup symbols missing: lock=%p unlock=%p "
+                "lookup=%p aux=%p",
+                reinterpret_cast<void *>(g_uvMutexLock),
+                reinterpret_cast<void *>(g_uvMutexUnlock),
+                reinterpret_cast<void *>(g_nodePlatformMapLookup),
+                g_nodePlatformMapLookupAux);
         }
     }
-    return false;
-}
 
-static bool ShouldRegisterNodePlatformForCurrentThread() {
-    char name[64] = {0};
-#if defined(__APPLE__)
-    const int rc = pthread_getname_np(name, sizeof(name));
-#else
-    const int rc = pthread_getname_np(pthread_self(), name, sizeof(name));
-#endif
-    if (rc != 0 || name[0] == '\0') {
+    static NodePlatformRegisterIsolateFn
+    ResolveNodePlatformRegisterIsolate(void *platform)
+    {
+        if (!platform)
+        {
+            return nullptr;
+        }
+
+        void **const vtable = *reinterpret_cast<void ***>(platform);
+        if (!vtable)
+        {
+            return nullptr;
+        }
+
+        return reinterpret_cast<NodePlatformRegisterIsolateFn>(
+            vtable[kNodePlatformRegisterIsolateVtableOffset / sizeof(void *)]);
+    }
+
+    static bool ReserveNodePlatformHookIsolate(void *isolate)
+    {
+        for (size_t i = 0; i < kMaxNodePlatformHookIsolates; ++i)
+        {
+            void *current =
+                g_nodePlatformRegisteredIsolates[i].load(std::memory_order_acquire);
+            if (current == isolate)
+            {
+                return false;
+            }
+        }
+
+        for (size_t i = 0; i < kMaxNodePlatformHookIsolates; ++i)
+        {
+            void *expected = nullptr;
+            if (g_nodePlatformRegisteredIsolates[i].compare_exchange_strong(
+                    expected, isolate, std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+            {
+                return true;
+            }
+            if (expected == isolate)
+            {
+                return false;
+            }
+        }
         return false;
     }
 
-    return strcmp(name, "Chrome_InProcRe") == 0 ||
-           strncmp(name, "Chrome_InProcRe", 15) == 0;
-}
+    static bool ShouldRegisterNodePlatformForCurrentThread()
+    {
+        char name[64] = {0};
+#if defined(__APPLE__)
+        const int rc = pthread_getname_np(name, sizeof(name));
+#else
+        const int rc = pthread_getname_np(pthread_self(), name, sizeof(name));
+#endif
+        if (rc != 0 || name[0] == '\0')
+        {
+            return false;
+        }
+
+        return strcmp(name, "Chrome_InProcRe") == 0 ||
+               strncmp(name, "Chrome_InProcRe", 15) == 0;
+    }
 
 #if defined(__aarch64__)
-__attribute__((naked)) static void FakeNodePlatformGetForegroundTaskRunner() {
-    __asm__ volatile(
-        "bti c\n"
-        "stp xzr, xzr, [x8]\n"
-        "ret\n");
-}
+    __attribute__((naked)) static void FakeNodePlatformGetForegroundTaskRunner()
+    {
+        __asm__ volatile(
+            "bti c\n"
+            "stp xzr, xzr, [x8]\n"
+            "ret\n");
+    }
 
-__attribute__((naked)) static void FakeNodePlatformReturnFalse() {
-    __asm__ volatile(
-        "bti c\n"
-        "mov w0, wzr\n"
-        "ret\n");
-}
+    __attribute__((naked)) static void FakeNodePlatformReturnFalse()
+    {
+        __asm__ volatile(
+            "bti c\n"
+            "mov w0, wzr\n"
+            "ret\n");
+    }
 #else
-static void FakeNodePlatformGetForegroundTaskRunner() {}
-static void FakeNodePlatformReturnFalse() {}
+    static void FakeNodePlatformGetForegroundTaskRunner() {}
+    static void FakeNodePlatformReturnFalse() {}
 #endif
 
-static void* g_fakeNodePlatformDataVtable[] = {
-    reinterpret_cast<void*>(&FakeNodePlatformGetForegroundTaskRunner),
-    reinterpret_cast<void*>(&FakeNodePlatformReturnFalse),
-};
+    static void *g_fakeNodePlatformDataVtable[] = {
+        reinterpret_cast<void *>(&FakeNodePlatformGetForegroundTaskRunner),
+        reinterpret_cast<void *>(&FakeNodePlatformReturnFalse),
+    };
 
-struct FakeNodePlatformData {
-    void** vtable;
-};
+    struct FakeNodePlatformData
+    {
+        void **vtable;
+    };
 
-static FakeNodePlatformData g_fakeNodePlatformData = {
-    g_fakeNodePlatformDataVtable,
-};
+    static FakeNodePlatformData g_fakeNodePlatformData = {
+        g_fakeNodePlatformDataVtable,
+    };
 
-static void CacheNodePlatformData(void* platform, void* data) {
-    if (!platform || !data || data == &g_fakeNodePlatformData) {
-        return;
-    }
-    g_lastNodePlatformDataPlatform.store(platform, std::memory_order_release);
-    g_lastNodePlatformData.store(data, std::memory_order_release);
-    g_lastNodePlatformDataAddress.store(reinterpret_cast<uintptr_t>(data),
-                                        std::memory_order_relaxed);
-}
-
-static void* GetCachedNodePlatformData(void* platform) {
-    void* data = g_lastNodePlatformData.load(std::memory_order_acquire);
-    if (!data) {
-        return nullptr;
-    }
-    void* cachedPlatform =
-        g_lastNodePlatformDataPlatform.load(std::memory_order_acquire);
-    if (cachedPlatform && cachedPlatform != platform) {
-        return nullptr;
-    }
-    return data;
-}
-
-static void* TryLookupNodePlatformDataNoAbort(void* platform, void* isolate) {
-    if (!platform || !isolate) {
-        return nullptr;
+    static void CacheNodePlatformData(void *platform, void *data)
+    {
+        if (!platform || !data || data == &g_fakeNodePlatformData)
+        {
+            return;
+        }
+        g_lastNodePlatformDataPlatform.store(platform, std::memory_order_release);
+        g_lastNodePlatformData.store(data, std::memory_order_release);
+        g_lastNodePlatformDataAddress.store(reinterpret_cast<uintptr_t>(data),
+                                            std::memory_order_relaxed);
     }
 
-    std::call_once(g_nodePlatformLookupSymbolsOnce,
-                   ResolveNodePlatformLookupSymbols);
-    if (!g_uvMutexLock || !g_uvMutexUnlock || !g_nodePlatformMapLookup ||
-        !g_nodePlatformMapLookupAux) {
-        return nullptr;
-    }
-
-    void* key = isolate;
-    void* lookupScratch = &key;
-    void* nodeScratch = nullptr;
-    auto* base = reinterpret_cast<uint8_t*>(platform);
-    void* mutex = base + kNodePlatformMutexOffset;
-    void* map = base + kNodePlatformMapOffset;
-
-    g_uvMutexLock(mutex);
-    void* node = g_nodePlatformMapLookup(map, &key,
-                                         g_nodePlatformMapLookupAux,
-                                         &lookupScratch, &nodeScratch);
-    void* data = nullptr;
-    if (node) {
-        data = *reinterpret_cast<void**>(
-            reinterpret_cast<uint8_t*>(node) +
-            kNodePlatformLookupDataOffset);
-        // Keep the control-block read in step with libelectron's lookup
-        // layout. The raw data pointer is owned by the platform map.
-        (void)*reinterpret_cast<void**>(
-            reinterpret_cast<uint8_t*>(node) +
-            kNodePlatformLookupControlOffset);
-    }
-    g_uvMutexUnlock(mutex);
-
-    if (data) {
-        g_nodePlatformLookupHits.fetch_add(1, std::memory_order_relaxed);
-        CacheNodePlatformData(platform, data);
-    } else {
-        g_nodePlatformLookupMisses.fetch_add(1, std::memory_order_relaxed);
-    }
-    return data;
-}
-
-static bool RegisterNodePlatformForLookup(void* platform, void* isolate) {
-    if (!platform || !isolate) {
-        return false;
-    }
-
-    std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
-    if (!g_uvDefaultLoop) {
-        return false;
-    }
-
-    NodePlatformRegisterIsolateFn registerIsolate =
-        ResolveNodePlatformRegisterIsolate(platform);
-    g_lastNodePlatformRegisterAddress.store(
-        reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(registerIsolate)),
-        std::memory_order_relaxed);
-    if (!registerIsolate) {
-        g_nodePlatformRegisterMissingVtable.fetch_add(
-            1, std::memory_order_relaxed);
-        return false;
-    }
-
-    void* loop = g_uvDefaultLoop();
-    if (!loop) {
-        return false;
-    }
-
-    if (!ReserveNodePlatformHookIsolate(isolate)) {
-        g_nodePlatformRegisterDuplicateSkips.fetch_add(
-            1, std::memory_order_relaxed);
-        return false;
-    }
-
-    g_nodePlatformRegisterAttempts.fetch_add(1, std::memory_order_relaxed);
-    registerIsolate(platform, isolate, loop);
-    g_nodePlatformRegisterSuccesses.fetch_add(1, std::memory_order_relaxed);
-    Log("NodePlatform registered missing isolate from lookup isolate=%p "
-        "platform=%p register=%p loop=%p",
-        isolate, platform, reinterpret_cast<void*>(registerIsolate), loop);
-    return true;
-}
-
-static void EnsureNodePlatformRegisteredForIsolate(void* platform,
-                                                   void* isolate,
-                                                   bool allowAnyThread = false) {
-    std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
-    if (!g_nodePlatformHookEnabled.load(std::memory_order_relaxed) ||
-        !isolate) {
-        return;
-    }
-    if (!allowAnyThread && !ShouldRegisterNodePlatformForCurrentThread()) {
-        return;
-    }
-
-    std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
-    if (!g_uvDefaultLoop) {
-        return;
-    }
-
-    if (!platform && g_v8GetCurrentPlatform) {
-        platform = g_v8GetCurrentPlatform();
-    }
-    void* loop = g_uvDefaultLoop();
-    g_lastNodePlatformIsolate.store(reinterpret_cast<uintptr_t>(isolate),
-                                    std::memory_order_relaxed);
-    g_lastNodePlatformAddress.store(reinterpret_cast<uintptr_t>(platform),
-                                    std::memory_order_relaxed);
-    if (!isolate || !platform || !loop) {
-        g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
-        return;
-    }
-
-    NodePlatformRegisterIsolateFn registerIsolate =
-        ResolveNodePlatformRegisterIsolate(platform);
-    g_lastNodePlatformRegisterAddress.store(
-        reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(registerIsolate)),
-        std::memory_order_relaxed);
-    if (!registerIsolate) {
-        g_nodePlatformRegisterMissingVtable.fetch_add(
-            1, std::memory_order_relaxed);
-        g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
-        return;
-    }
-
-    if (!ReserveNodePlatformHookIsolate(isolate)) {
-        g_nodePlatformRegisterDuplicateSkips.fetch_add(
-            1, std::memory_order_relaxed);
-        return;
-    }
-
-    g_nodePlatformRegisterAttempts.fetch_add(1, std::memory_order_relaxed);
-    registerIsolate(platform, isolate, loop);
-    g_nodePlatformRegisterSuccesses.fetch_add(1, std::memory_order_relaxed);
-    Log("NodePlatform registered renderer isolate=%p platform=%p "
-        "register=%p loop=%p",
-        isolate, platform, reinterpret_cast<void*>(registerIsolate), loop);
-}
-
-static void EnsureNodePlatformRegisteredForContext(void* context) {
-    if (!context) {
-        return;
-    }
-
-    std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
-    if (!g_v8ContextGetIsolate) {
-        return;
-    }
-
-    void* isolate = g_v8ContextGetIsolate(context);
-    void* platform = g_v8GetCurrentPlatform ? g_v8GetCurrentPlatform() : nullptr;
-    EnsureNodePlatformRegisteredForIsolate(platform, isolate);
-}
-
-static void* NodePlatformForIsolateLookupHook(void* platform, void* isolate) {
-    g_nodePlatformForIsolateCalls.fetch_add(1, std::memory_order_relaxed);
-    g_lastNodePlatformIsolate.store(reinterpret_cast<uintptr_t>(isolate),
-                                    std::memory_order_relaxed);
-    g_lastNodePlatformAddress.store(reinterpret_cast<uintptr_t>(platform),
-                                    std::memory_order_relaxed);
-
-    void* data = TryLookupNodePlatformDataNoAbort(platform, isolate);
-    if (data) {
+    static void *GetCachedNodePlatformData(void *platform)
+    {
+        void *data = g_lastNodePlatformData.load(std::memory_order_acquire);
+        if (!data)
+        {
+            return nullptr;
+        }
+        void *cachedPlatform =
+            g_lastNodePlatformDataPlatform.load(std::memory_order_acquire);
+        if (cachedPlatform && cachedPlatform != platform)
+        {
+            return nullptr;
+        }
         return data;
     }
 
-    std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
-    if (!g_insideNodePlatformForIsolateHook &&
-        g_nodePlatformRegisterOnLookupEnabled.load(
-            std::memory_order_relaxed)) {
-        g_insideNodePlatformForIsolateHook = true;
-        RegisterNodePlatformForLookup(platform, isolate);
-        g_insideNodePlatformForIsolateHook = false;
+    static void *TryLookupNodePlatformDataNoAbort(void *platform, void *isolate)
+    {
+        if (!platform || !isolate)
+        {
+            return nullptr;
+        }
 
-        data = TryLookupNodePlatformDataNoAbort(platform, isolate);
-        if (data) {
+        std::call_once(g_nodePlatformLookupSymbolsOnce,
+                       ResolveNodePlatformLookupSymbols);
+        if (!g_uvMutexLock || !g_uvMutexUnlock || !g_nodePlatformMapLookup ||
+            !g_nodePlatformMapLookupAux)
+        {
+            return nullptr;
+        }
+
+        void *key = isolate;
+        void *lookupScratch = &key;
+        void *nodeScratch = nullptr;
+        auto *base = reinterpret_cast<uint8_t *>(platform);
+        void *mutex = base + kNodePlatformMutexOffset;
+        void *map = base + kNodePlatformMapOffset;
+
+        g_uvMutexLock(mutex);
+        void *node = g_nodePlatformMapLookup(map, &key,
+                                             g_nodePlatformMapLookupAux,
+                                             &lookupScratch, &nodeScratch);
+        void *data = nullptr;
+        if (node)
+        {
+            data = *reinterpret_cast<void **>(
+                reinterpret_cast<uint8_t *>(node) +
+                kNodePlatformLookupDataOffset);
+            // Keep the control-block read in step with libelectron's lookup
+            // layout. The raw data pointer is owned by the platform map.
+            (void)*reinterpret_cast<void **>(
+                reinterpret_cast<uint8_t *>(node) +
+                kNodePlatformLookupControlOffset);
+        }
+        g_uvMutexUnlock(mutex);
+
+        if (data)
+        {
+            g_nodePlatformLookupHits.fetch_add(1, std::memory_order_relaxed);
+            CacheNodePlatformData(platform, data);
+        }
+        else
+        {
+            g_nodePlatformLookupMisses.fetch_add(1, std::memory_order_relaxed);
+        }
+        return data;
+    }
+
+    static bool RegisterNodePlatformForLookup(void *platform, void *isolate)
+    {
+        if (!platform || !isolate)
+        {
+            return false;
+        }
+
+        std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
+        if (!g_uvDefaultLoop)
+        {
+            return false;
+        }
+
+        NodePlatformRegisterIsolateFn registerIsolate =
+            ResolveNodePlatformRegisterIsolate(platform);
+        g_lastNodePlatformRegisterAddress.store(
+            reinterpret_cast<uintptr_t>(reinterpret_cast<void *>(registerIsolate)),
+            std::memory_order_relaxed);
+        if (!registerIsolate)
+        {
+            g_nodePlatformRegisterMissingVtable.fetch_add(
+                1, std::memory_order_relaxed);
+            return false;
+        }
+
+        void *loop = g_uvDefaultLoop();
+        if (!loop)
+        {
+            return false;
+        }
+
+        if (!ReserveNodePlatformHookIsolate(isolate))
+        {
+            g_nodePlatformRegisterDuplicateSkips.fetch_add(
+                1, std::memory_order_relaxed);
+            return false;
+        }
+
+        g_nodePlatformRegisterAttempts.fetch_add(1, std::memory_order_relaxed);
+        registerIsolate(platform, isolate, loop);
+        g_nodePlatformRegisterSuccesses.fetch_add(1, std::memory_order_relaxed);
+        Log("NodePlatform registered missing isolate from lookup isolate=%p "
+            "platform=%p register=%p loop=%p",
+            isolate, platform, reinterpret_cast<void *>(registerIsolate), loop);
+        return true;
+    }
+
+    static void EnsureNodePlatformRegisteredForIsolate(void *platform,
+                                                       void *isolate,
+                                                       bool allowAnyThread = false)
+    {
+        std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
+        if (!g_nodePlatformHookEnabled.load(std::memory_order_relaxed) ||
+            !isolate)
+        {
+            return;
+        }
+        if (!allowAnyThread && !ShouldRegisterNodePlatformForCurrentThread())
+        {
+            return;
+        }
+
+        std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
+        if (!g_uvDefaultLoop)
+        {
+            return;
+        }
+
+        if (!platform && g_v8GetCurrentPlatform)
+        {
+            platform = g_v8GetCurrentPlatform();
+        }
+        void *loop = g_uvDefaultLoop();
+        g_lastNodePlatformIsolate.store(reinterpret_cast<uintptr_t>(isolate),
+                                        std::memory_order_relaxed);
+        g_lastNodePlatformAddress.store(reinterpret_cast<uintptr_t>(platform),
+                                        std::memory_order_relaxed);
+        if (!isolate || !platform || !loop)
+        {
+            g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
+            return;
+        }
+
+        NodePlatformRegisterIsolateFn registerIsolate =
+            ResolveNodePlatformRegisterIsolate(platform);
+        g_lastNodePlatformRegisterAddress.store(
+            reinterpret_cast<uintptr_t>(reinterpret_cast<void *>(registerIsolate)),
+            std::memory_order_relaxed);
+        if (!registerIsolate)
+        {
+            g_nodePlatformRegisterMissingVtable.fetch_add(
+                1, std::memory_order_relaxed);
+            g_nodePlatformResolveFailed.store(true, std::memory_order_relaxed);
+            return;
+        }
+
+        if (!ReserveNodePlatformHookIsolate(isolate))
+        {
+            g_nodePlatformRegisterDuplicateSkips.fetch_add(
+                1, std::memory_order_relaxed);
+            return;
+        }
+
+        g_nodePlatformRegisterAttempts.fetch_add(1, std::memory_order_relaxed);
+        registerIsolate(platform, isolate, loop);
+        g_nodePlatformRegisterSuccesses.fetch_add(1, std::memory_order_relaxed);
+        Log("NodePlatform registered renderer isolate=%p platform=%p "
+            "register=%p loop=%p",
+            isolate, platform, reinterpret_cast<void *>(registerIsolate), loop);
+    }
+
+    static void EnsureNodePlatformRegisteredForContext(void *context)
+    {
+        if (!context)
+        {
+            return;
+        }
+
+        std::call_once(g_nodePlatformSymbolsOnce, ResolveNodePlatformHookSymbols);
+        if (!g_v8ContextGetIsolate)
+        {
+            return;
+        }
+
+        void *isolate = g_v8ContextGetIsolate(context);
+        void *platform = g_v8GetCurrentPlatform ? g_v8GetCurrentPlatform() : nullptr;
+        EnsureNodePlatformRegisteredForIsolate(platform, isolate);
+    }
+
+    static void *NodePlatformForIsolateLookupHook(void *platform, void *isolate)
+    {
+        g_nodePlatformForIsolateCalls.fetch_add(1, std::memory_order_relaxed);
+        g_lastNodePlatformIsolate.store(reinterpret_cast<uintptr_t>(isolate),
+                                        std::memory_order_relaxed);
+        g_lastNodePlatformAddress.store(reinterpret_cast<uintptr_t>(platform),
+                                        std::memory_order_relaxed);
+
+        void *data = TryLookupNodePlatformDataNoAbort(platform, isolate);
+        if (data)
+        {
             return data;
         }
-    }
 
-    if (void* cached = GetCachedNodePlatformData(platform)) {
-        g_nodePlatformLookupFallbacks.fetch_add(
+        std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
+        if (!g_insideNodePlatformForIsolateHook &&
+            g_nodePlatformRegisterOnLookupEnabled.load(
+                std::memory_order_relaxed))
+        {
+            g_insideNodePlatformForIsolateHook = true;
+            RegisterNodePlatformForLookup(platform, isolate);
+            g_insideNodePlatformForIsolateHook = false;
+
+            data = TryLookupNodePlatformDataNoAbort(platform, isolate);
+            if (data)
+            {
+                return data;
+            }
+        }
+
+        if (void *cached = GetCachedNodePlatformData(platform))
+        {
+            g_nodePlatformLookupFallbacks.fetch_add(
+                1, std::memory_order_relaxed);
+            return cached;
+        }
+
+        g_nodePlatformLookupFakeFallbacks.fetch_add(
             1, std::memory_order_relaxed);
-        return cached;
+        return &g_fakeNodePlatformData;
     }
 
-    g_nodePlatformLookupFakeFallbacks.fetch_add(
-        1, std::memory_order_relaxed);
-    return &g_fakeNodePlatformData;
-}
-
-static bool IsAarch64Bl(uint32_t instruction) {
-    return (instruction & 0xfc000000u) == 0x94000000u;
-}
-
-static uint32_t ReadInstruction(uintptr_t address) {
-    uint32_t instruction = 0;
-    memcpy(&instruction, reinterpret_cast<const void*>(address),
-           sizeof(instruction));
-    return instruction;
-}
-
-static bool MatchesChromeIoThreadEpollDisassembly(uintptr_t return_address) {
-    if (return_address < 12) {
-        return false;
+    static bool IsAarch64Bl(uint32_t instruction)
+    {
+        return (instruction & 0xfc000000u) == 0x94000000u;
     }
 
-    const uintptr_t call_address = return_address - 4;
-    return ReadInstruction(call_address - 8) == 0x29430262u &&
-           ReadInstruction(call_address - 4) == 0x1a89b103u &&
-           IsAarch64Bl(ReadInstruction(call_address)) &&
-           ReadInstruction(return_address) == 0x3100041fu;
-}
-
-static bool IsChromeIoThread() {
-    if (!g_requireChromeIoThreadName.load(std::memory_order_relaxed)) {
-        return true;
+    static uint32_t ReadInstruction(uintptr_t address)
+    {
+        uint32_t instruction = 0;
+        memcpy(&instruction, reinterpret_cast<const void *>(address),
+               sizeof(instruction));
+        return instruction;
     }
 
-    char name[64] = {0};
+    static bool MatchesChromeIoThreadEpollDisassembly(uintptr_t return_address)
+    {
+        if (return_address < 12)
+        {
+            return false;
+        }
+
+        const uintptr_t call_address = return_address - 4;
+        return ReadInstruction(call_address - 8) == 0x29430262u &&
+               ReadInstruction(call_address - 4) == 0x1a89b103u &&
+               IsAarch64Bl(ReadInstruction(call_address)) &&
+               ReadInstruction(return_address) == 0x3100041fu;
+    }
+
+    static bool IsChromeIoThread()
+    {
+        if (!g_requireChromeIoThreadName.load(std::memory_order_relaxed))
+        {
+            return true;
+        }
+
+        char name[64] = {0};
 #if defined(__APPLE__)
-    const int rc = pthread_getname_np(name, sizeof(name));
+        const int rc = pthread_getname_np(name, sizeof(name));
 #else
-    const int rc = pthread_getname_np(pthread_self(), name, sizeof(name));
+        const int rc = pthread_getname_np(pthread_self(), name, sizeof(name));
 #endif
-    if (rc != 0 || name[0] == '\0') {
-        // Some HarmonyOS builds do not expose thread names through pthread.
-        // The caller-PC disassembly match is still specific enough to use.
-        return true;
-    }
-    return strcmp(name, "Chrome_IOThread") == 0;
-}
-
-static bool IsTargetElectronEpollWaitCaller(void* raw_return_address) {
-    if (!raw_return_address) {
-        return false;
-    }
-
-    void* extracted = __builtin_extract_return_addr(raw_return_address);
-    const uintptr_t return_address = reinterpret_cast<uintptr_t>(extracted);
-
-    Dl_info info;
-    memset(&info, 0, sizeof(info));
-    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase) {
-        return false;
-    }
-    if (!strstr(info.dli_fname, "libelectron.so")) {
-        return false;
-    }
-
-    const uintptr_t caller_offset =
-        return_address - reinterpret_cast<uintptr_t>(info.dli_fbase);
-    g_lastEpollCallerOffset.store(caller_offset, std::memory_order_relaxed);
-
-    if (!MatchesChromeIoThreadEpollDisassembly(return_address)) {
-        return false;
-    }
-
-    return IsChromeIoThread();
-}
-
-static bool MatchesElectronV8InitializeDisassembly(uintptr_t return_address) {
-    if (return_address < 12) {
-        return false;
-    }
-
-    const uintptr_t call_address = return_address - 4;
-    return ReadInstruction(call_address - 8) == 0xf9400680u &&
-           ReadInstruction(call_address - 4) == 0xf94002a1u &&
-           IsAarch64Bl(ReadInstruction(call_address)) &&
-           ReadInstruction(return_address) == 0x94001526u;
-}
-
-static bool IsTargetElectronV8InitializeCaller(void* raw_return_address) {
-    if (!raw_return_address) {
-        return false;
-    }
-
-    void* extracted = __builtin_extract_return_addr(raw_return_address);
-    const uintptr_t return_address = reinterpret_cast<uintptr_t>(extracted);
-
-    Dl_info info;
-    memset(&info, 0, sizeof(info));
-    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase) {
-        return false;
-    }
-    if (!strstr(info.dli_fname, "libelectron.so")) {
-        return false;
-    }
-
-    const uintptr_t caller_offset =
-        return_address - reinterpret_cast<uintptr_t>(info.dli_fbase);
-    g_lastV8InitializeCallerOffset.store(caller_offset,
-                                         std::memory_order_relaxed);
-
-    return caller_offset == kElectronV8InitializeReturnOffset &&
-           MatchesElectronV8InitializeDisassembly(return_address);
-}
-
-static bool IsTargetSnapshotAllocationCaller(void* raw_return_address) {
-    if (!raw_return_address) {
-        return false;
-    }
-
-    void* extracted = __builtin_extract_return_addr(raw_return_address);
-    const uintptr_t return_address = reinterpret_cast<uintptr_t>(extracted);
-
-    Dl_info info;
-    memset(&info, 0, sizeof(info));
-    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase) {
-        return false;
-    }
-    if (!strstr(info.dli_fname, "libelectron.so")) {
-        return false;
-    }
-
-    const uintptr_t caller_offset =
-        return_address - reinterpret_cast<uintptr_t>(info.dli_fbase);
-    g_lastSnapshotAllocCallerOffset.store(caller_offset,
-                                          std::memory_order_relaxed);
-
-    return caller_offset == kSnapshotVectorAllocReturnOffset ||
-           caller_offset == kSnapshotVectorRetryAllocReturnOffset ||
-           caller_offset == kSnapshotDataAllocReturnOffset;
-}
-
-static bool TrackMmapAllocation(void* ptr, size_t size) {
-    void* const reserved = reinterpret_cast<void*>(
-        static_cast<uintptr_t>(kReservedMmapAllocationPtrValue));
-    for (size_t i = 0; i < kMaxTrackedMmapAllocations; ++i) {
-        void* expected = nullptr;
-        if (g_mmapAllocationPtrs[i].compare_exchange_strong(
-                expected, reserved, std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
-            g_mmapAllocationSizes[i].store(size, std::memory_order_release);
-            g_activeMmapAllocationCount.fetch_add(1,
-                                                  std::memory_order_release);
-            g_mmapAllocationPtrs[i].store(ptr, std::memory_order_release);
+        if (rc != 0 || name[0] == '\0')
+        {
+            // Some HarmonyOS builds do not expose thread names through pthread.
+            // The caller-PC disassembly match is still specific enough to use.
             return true;
         }
+        return strcmp(name, "Chrome_IOThread") == 0;
     }
-    return false;
-}
 
-static bool TakeMmapAllocation(void* ptr, size_t* size) {
-    if (g_activeMmapAllocationCount.load(std::memory_order_acquire) == 0) {
+    static bool IsTargetElectronEpollWaitCaller(void *raw_return_address)
+    {
+        if (!raw_return_address)
+        {
+            return false;
+        }
+
+        void *extracted = __builtin_extract_return_addr(raw_return_address);
+        const uintptr_t return_address = reinterpret_cast<uintptr_t>(extracted);
+
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase)
+        {
+            return false;
+        }
+        if (!strstr(info.dli_fname, "libelectron.so"))
+        {
+            return false;
+        }
+
+        const uintptr_t caller_offset =
+            return_address - reinterpret_cast<uintptr_t>(info.dli_fbase);
+        g_lastEpollCallerOffset.store(caller_offset, std::memory_order_relaxed);
+
+        if (!MatchesChromeIoThreadEpollDisassembly(return_address))
+        {
+            return false;
+        }
+
+        return IsChromeIoThread();
+    }
+
+    static bool MatchesElectronV8InitializeDisassembly(uintptr_t return_address)
+    {
+        if (return_address < 12)
+        {
+            return false;
+        }
+
+        const uintptr_t call_address = return_address - 4;
+        return ReadInstruction(call_address - 8) == 0xf9400680u &&
+               ReadInstruction(call_address - 4) == 0xf94002a1u &&
+               IsAarch64Bl(ReadInstruction(call_address)) &&
+               ReadInstruction(return_address) == 0x94001526u;
+    }
+
+    static bool IsTargetElectronV8InitializeCaller(void *raw_return_address)
+    {
+        if (!raw_return_address)
+        {
+            return false;
+        }
+
+        void *extracted = __builtin_extract_return_addr(raw_return_address);
+        const uintptr_t return_address = reinterpret_cast<uintptr_t>(extracted);
+
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase)
+        {
+            return false;
+        }
+        if (!strstr(info.dli_fname, "libelectron.so"))
+        {
+            return false;
+        }
+
+        const uintptr_t caller_offset =
+            return_address - reinterpret_cast<uintptr_t>(info.dli_fbase);
+        g_lastV8InitializeCallerOffset.store(caller_offset,
+                                             std::memory_order_relaxed);
+
+        return caller_offset == kElectronV8InitializeReturnOffset &&
+               MatchesElectronV8InitializeDisassembly(return_address);
+    }
+
+    static bool IsTargetSnapshotAllocationCaller(void *raw_return_address)
+    {
+        if (!raw_return_address)
+        {
+            return false;
+        }
+
+        void *extracted = __builtin_extract_return_addr(raw_return_address);
+        const uintptr_t return_address = reinterpret_cast<uintptr_t>(extracted);
+
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase)
+        {
+            return false;
+        }
+        if (!strstr(info.dli_fname, "libelectron.so"))
+        {
+            return false;
+        }
+
+        const uintptr_t caller_offset =
+            return_address - reinterpret_cast<uintptr_t>(info.dli_fbase);
+        g_lastSnapshotAllocCallerOffset.store(caller_offset,
+                                              std::memory_order_relaxed);
+
+        return caller_offset == kSnapshotVectorAllocReturnOffset ||
+               caller_offset == kSnapshotVectorRetryAllocReturnOffset ||
+               caller_offset == kSnapshotDataAllocReturnOffset;
+    }
+
+    static bool TrackMmapAllocation(void *ptr, size_t size)
+    {
+        void *const reserved = reinterpret_cast<void *>(
+            static_cast<uintptr_t>(kReservedMmapAllocationPtrValue));
+        for (size_t i = 0; i < kMaxTrackedMmapAllocations; ++i)
+        {
+            void *expected = nullptr;
+            if (g_mmapAllocationPtrs[i].compare_exchange_strong(
+                    expected, reserved, std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+            {
+                g_mmapAllocationSizes[i].store(size, std::memory_order_release);
+                g_activeMmapAllocationCount.fetch_add(1,
+                                                      std::memory_order_release);
+                g_mmapAllocationPtrs[i].store(ptr, std::memory_order_release);
+                return true;
+            }
+        }
         return false;
     }
 
-    for (size_t i = 0; i < kMaxTrackedMmapAllocations; ++i) {
-        void* current = g_mmapAllocationPtrs[i].load(std::memory_order_acquire);
-        if (current == ptr &&
-            g_mmapAllocationPtrs[i].compare_exchange_strong(
-                current, nullptr, std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
-            *size = g_mmapAllocationSizes[i].load(std::memory_order_acquire);
-            g_mmapAllocationSizes[i].store(0, std::memory_order_release);
-            g_activeMmapAllocationCount.fetch_sub(1,
-                                                  std::memory_order_acq_rel);
-            return true;
+    static bool TakeMmapAllocation(void *ptr, size_t *size)
+    {
+        if (g_activeMmapAllocationCount.load(std::memory_order_acquire) == 0)
+        {
+            return false;
         }
-    }
-    return false;
-}
 
-static void* TrySnapshotMmapFallback(size_t size) {
-    std::call_once(g_snapshotAllocConfigOnce, InitSnapshotAllocHookConfig);
-
-    if (!g_snapshotMmapFallbackEnabled.load(std::memory_order_relaxed)) {
-        return nullptr;
-    }
-    const size_t minBytes = static_cast<size_t>(
-        g_snapshotMmapMinBytes.load(std::memory_order_relaxed));
-    const size_t maxBytes = static_cast<size_t>(
-        g_snapshotMmapMaxBytes.load(std::memory_order_relaxed));
-    if (size < minBytes || size > maxBytes) {
-        return nullptr;
-    }
-
-    void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) {
-        g_snapshotMmapFallbackFailures.fetch_add(1,
-                                                 std::memory_order_relaxed);
-        return nullptr;
+        for (size_t i = 0; i < kMaxTrackedMmapAllocations; ++i)
+        {
+            void *current = g_mmapAllocationPtrs[i].load(std::memory_order_acquire);
+            if (current == ptr &&
+                g_mmapAllocationPtrs[i].compare_exchange_strong(
+                    current, nullptr, std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+            {
+                *size = g_mmapAllocationSizes[i].load(std::memory_order_acquire);
+                g_mmapAllocationSizes[i].store(0, std::memory_order_release);
+                g_activeMmapAllocationCount.fetch_sub(1,
+                                                      std::memory_order_acq_rel);
+                return true;
+            }
+        }
+        return false;
     }
 
-    if (!TrackMmapAllocation(ptr, size)) {
-        munmap(ptr, size);
-        g_snapshotMmapFallbackFailures.fetch_add(1,
-                                                 std::memory_order_relaxed);
-        return nullptr;
-    }
+    static void *TrySnapshotMmapFallback(size_t size)
+    {
+        std::call_once(g_snapshotAllocConfigOnce, InitSnapshotAllocHookConfig);
 
-    g_snapshotMmapFallbacks.fetch_add(1, std::memory_order_relaxed);
-    g_snapshotMmapBytes.fetch_add(size, std::memory_order_relaxed);
-    Log("snapshot allocation mmap fallback: ptr=%p size=%zu caller=0x%zx",
-        ptr, size,
-        static_cast<size_t>(
-            g_lastSnapshotAllocCallerOffset.load(std::memory_order_relaxed)));
-    return ptr;
-}
+        if (!g_snapshotMmapFallbackEnabled.load(std::memory_order_relaxed))
+        {
+            return nullptr;
+        }
+        const size_t minBytes = static_cast<size_t>(
+            g_snapshotMmapMinBytes.load(std::memory_order_relaxed));
+        const size_t maxBytes = static_cast<size_t>(
+            g_snapshotMmapMaxBytes.load(std::memory_order_relaxed));
+        if (size < minBytes || size > maxBytes)
+        {
+            return nullptr;
+        }
 
-static void* NothrowNewWithSnapshotFallback(NothrowNewFn realNew,
-                                            size_t size,
-                                            const void* nothrowTag,
-                                            void* returnAddress) noexcept {
-    void* ptr = realNew ? realNew(size, nothrowTag) : nullptr;
-    if (ptr) {
+        void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (ptr == MAP_FAILED)
+        {
+            g_snapshotMmapFallbackFailures.fetch_add(1,
+                                                     std::memory_order_relaxed);
+            return nullptr;
+        }
+
+        if (!TrackMmapAllocation(ptr, size))
+        {
+            munmap(ptr, size);
+            g_snapshotMmapFallbackFailures.fetch_add(1,
+                                                     std::memory_order_relaxed);
+            return nullptr;
+        }
+
+        g_snapshotMmapFallbacks.fetch_add(1, std::memory_order_relaxed);
+        g_snapshotMmapBytes.fetch_add(size, std::memory_order_relaxed);
+        Log("snapshot allocation mmap fallback: ptr=%p size=%zu caller=0x%zx",
+            ptr, size,
+            static_cast<size_t>(
+                g_lastSnapshotAllocCallerOffset.load(std::memory_order_relaxed)));
         return ptr;
     }
 
-    if (!IsTargetSnapshotAllocationCaller(returnAddress)) {
-        return nullptr;
+    static void *NothrowNewWithSnapshotFallback(NothrowNewFn realNew,
+                                                size_t size,
+                                                const void *nothrowTag,
+                                                void *returnAddress) noexcept
+    {
+        void *ptr = realNew ? realNew(size, nothrowTag) : nullptr;
+        if (ptr)
+        {
+            return ptr;
+        }
+
+        if (!IsTargetSnapshotAllocationCaller(returnAddress))
+        {
+            return nullptr;
+        }
+
+        g_snapshotNothrowNewFailures.fetch_add(1, std::memory_order_relaxed);
+        return TrySnapshotMmapFallback(size);
     }
 
-    g_snapshotNothrowNewFailures.fetch_add(1, std::memory_order_relaxed);
-    return TrySnapshotMmapFallback(size);
-}
+    static std::string GetConfiguredV8StartupFlags()
+    {
+        std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
+        std::lock_guard<std::mutex> lock(g_v8FlagsMutex);
+        if (g_v8StartupFlags.empty())
+        {
+            g_v8StartupFlags = kDefaultV8StartupFlags;
+            g_v8StartupFlagsUsingDefault.store(true, std::memory_order_relaxed);
+            g_v8StartupFlagsLength.store(StringLengthForStats(g_v8StartupFlags),
+                                         std::memory_order_relaxed);
+        }
+        return g_v8StartupFlags;
+    }
 
-static std::string GetConfiguredV8StartupFlags() {
-    std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
-    std::lock_guard<std::mutex> lock(g_v8FlagsMutex);
-    if (g_v8StartupFlags.empty()) {
-        g_v8StartupFlags = kDefaultV8StartupFlags;
-        g_v8StartupFlagsUsingDefault.store(true, std::memory_order_relaxed);
-        g_v8StartupFlagsLength.store(StringLengthForStats(g_v8StartupFlags),
+    static void ApplyV8StartupFlagsOnce()
+    {
+        g_v8StartupFlagsApplyAttempts.fetch_add(1, std::memory_order_relaxed);
+        if (g_v8StartupFlagsApplied.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+        const std::string flags = GetConfiguredV8StartupFlags();
+        g_v8StartupFlagsLength.store(StringLengthForStats(flags),
                                      std::memory_order_relaxed);
-    }
-    return g_v8StartupFlags;
-}
-
-static void ApplyV8StartupFlagsOnce() {
-    g_v8StartupFlagsApplyAttempts.fetch_add(1, std::memory_order_relaxed);
-    if (g_v8StartupFlagsApplied.load(std::memory_order_relaxed)) {
-        return;
-    }
-    const std::string flags = GetConfiguredV8StartupFlags();
-    g_v8StartupFlagsLength.store(StringLengthForStats(flags),
-                                 std::memory_order_relaxed);
-    if (flags.empty()) {
-        g_v8StartupFlagsEmptySkips.fetch_add(1, std::memory_order_relaxed);
-        Log("V8 startup flags disabled");
-        return;
-    }
-
-    auto setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
-        dlsym(RTLD_NEXT, "_ZN2v82V818SetFlagsFromStringEPKc"));
-    if (!setFlags) {
-        setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
-            dlsym(RTLD_DEFAULT, "_ZN2v82V818SetFlagsFromStringEPKc"));
-    }
-    if (!setFlags) {
-        g_v8StartupFlagsResolveFailed.store(true, std::memory_order_relaxed);
-        Log("WARNING: v8::V8::SetFlagsFromString real symbol not found");
-        return;
-    }
-
-    g_v8StartupFlagsSymbolResolved.store(true, std::memory_order_relaxed);
-    setFlags(flags.c_str());
-    g_v8StartupFlagsApplied.store(true, std::memory_order_relaxed);
-    Log("V8 startup flags applied: %s", flags.c_str());
-}
-
-static void UpdateMaxConcurrentV8Initializations(uint32_t active) {
-    uint32_t current =
-        g_maxConcurrentV8Initializations.load(std::memory_order_relaxed);
-    while (active > current &&
-           !g_maxConcurrentV8Initializations.compare_exchange_weak(
-               current, active, std::memory_order_relaxed,
-               std::memory_order_relaxed)) {
-    }
-}
-
-class ScopedV8InitializationCounter {
-public:
-    ScopedV8InitializationCounter() {
-        const uint32_t active =
-            g_activeV8Initializations.fetch_add(1,
-                                                std::memory_order_relaxed) +
-            1;
-        UpdateMaxConcurrentV8Initializations(active);
-    }
-
-    ~ScopedV8InitializationCounter() {
-        g_activeV8Initializations.fetch_sub(1, std::memory_order_relaxed);
-    }
-};
-
-static bool CallRealV8IsolateInitialize(V8IsolateInitializeFn realInitialize,
-                                        void* isolate,
-                                        const void* params) {
-    ScopedV8InitializationCounter counter;
-    const bool ok = realInitialize(isolate, params);
-    if (!ok) {
-        g_v8InitializeFailures.fetch_add(1, std::memory_order_relaxed);
-        const bool sameSnapshotIsolate =
-            g_lastV8InitWithSnapshotIsolate.load(
-                std::memory_order_relaxed) ==
-            reinterpret_cast<uintptr_t>(isolate);
-        const bool snapshotInitSucceeded =
-            sameSnapshotIsolate &&
-            g_lastV8InitWithSnapshotResult.load(
-                std::memory_order_relaxed);
-        if (g_forceV8InitializeSuccess.load(std::memory_order_relaxed) &&
-            snapshotInitSucceeded) {
-            g_v8InitializeForcedSuccesses.fetch_add(
-                1, std::memory_order_relaxed);
-            Log("v8::Isolate::Initialize returned false; forcing success "
-                "after successful InitWithSnapshot isolate=%p params=%p",
-                isolate, params);
-            return true;
+        if (flags.empty())
+        {
+            g_v8StartupFlagsEmptySkips.fetch_add(1, std::memory_order_relaxed);
+            Log("V8 startup flags disabled");
+            return;
         }
-        if (g_forceV8InitializeSuccess.load(std::memory_order_relaxed)) {
-            Log("v8::Isolate::Initialize returned false; not forcing because "
-                "InitWithSnapshot did not succeed for this isolate "
-                "isolate=%p params=%p lastSnapshotIsolate=%p "
-                "lastSnapshotResult=%d",
-                isolate, params,
-                reinterpret_cast<void*>(
-                    g_lastV8InitWithSnapshotIsolate.load(
-                        std::memory_order_relaxed)),
-                g_lastV8InitWithSnapshotResult.load(
-                    std::memory_order_relaxed) ? 1 : 0);
+
+        auto setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
+            dlsym(RTLD_NEXT, "_ZN2v82V818SetFlagsFromStringEPKc"));
+        if (!setFlags)
+        {
+            setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
+                dlsym(RTLD_DEFAULT, "_ZN2v82V818SetFlagsFromStringEPKc"));
         }
-        Log("v8::Isolate::Initialize returned false; returning failure "
-            "isolate=%p params=%p",
-            isolate, params);
-    }
-    return ok;
-}
+        if (!setFlags)
+        {
+            g_v8StartupFlagsResolveFailed.store(true, std::memory_order_relaxed);
+            Log("WARNING: v8::V8::SetFlagsFromString real symbol not found");
+            return;
+        }
 
-static void StoreV8CreateParamsSlotsHex(void** slots) {
-    std::string dump;
-    dump.reserve(kV8CreateParamsSlotDumpCount * 24);
-    for (size_t i = 0; i < kV8CreateParamsSlotDumpCount; ++i) {
-        char item[40];
-        const uintptr_t value = reinterpret_cast<uintptr_t>(slots[i]);
-        snprintf(item, sizeof(item), "%s%zu=0x%016llx",
-                 i == 0 ? "" : ",", i,
-                 static_cast<unsigned long long>(value));
-        dump += item;
+        g_v8StartupFlagsSymbolResolved.store(true, std::memory_order_relaxed);
+        setFlags(flags.c_str());
+        g_v8StartupFlagsApplied.store(true, std::memory_order_relaxed);
+        Log("V8 startup flags applied: %s", flags.c_str());
     }
 
-    std::lock_guard<std::mutex> lock(g_createParamsDumpMutex);
-    g_lastV8CreateParamsSlotsHex = dump;
-}
-
-static std::string GetV8CreateParamsSlotsHex() {
-    std::lock_guard<std::mutex> lock(g_createParamsDumpMutex);
-    return g_lastV8CreateParamsSlotsHex;
-}
-
-static void StoreV8ExternalStartupDataPath(const char* path) {
-    std::lock_guard<std::mutex> lock(g_v8ExternalStartupDataPathMutex);
-    g_lastV8ExternalStartupDataPath = path ? path : "";
-}
-
-static std::string GetV8ExternalStartupDataPath() {
-    std::lock_guard<std::mutex> lock(g_v8ExternalStartupDataPathMutex);
-    return g_lastV8ExternalStartupDataPath;
-}
-
-static void StoreSnapshotBlobReplacementPath(const std::string& path) {
-    std::lock_guard<std::mutex> lock(g_snapshotBlobReplacementPathMutex);
-    g_snapshotBlobReplacementPath = path;
-}
-
-static std::string GetSnapshotBlobReplacementPath() {
-    std::lock_guard<std::mutex> lock(g_snapshotBlobReplacementPathMutex);
-    return g_snapshotBlobReplacementPath;
-}
-
-static bool ReadFileToVector(const std::string& path,
-                             std::vector<char>* output) {
-    FILE* file = fopen(path.c_str(), "rb");
-    if (!file) {
-        Log("failed to open startup snapshot blob path=%s errno=%d",
-            path.c_str(), errno);
-        return false;
+    static void UpdateMaxConcurrentV8Initializations(uint32_t active)
+    {
+        uint32_t current =
+            g_maxConcurrentV8Initializations.load(std::memory_order_relaxed);
+        while (active > current &&
+               !g_maxConcurrentV8Initializations.compare_exchange_weak(
+                   current, active, std::memory_order_relaxed,
+                   std::memory_order_relaxed))
+        {
+        }
     }
 
-    if (fseek(file, 0, SEEK_END) != 0) {
-        Log("failed to seek startup snapshot blob path=%s errno=%d",
-            path.c_str(), errno);
+    class ScopedV8InitializationCounter
+    {
+    public:
+        ScopedV8InitializationCounter()
+        {
+            const uint32_t active =
+                g_activeV8Initializations.fetch_add(1,
+                                                    std::memory_order_relaxed) +
+                1;
+            UpdateMaxConcurrentV8Initializations(active);
+        }
+
+        ~ScopedV8InitializationCounter()
+        {
+            g_activeV8Initializations.fetch_sub(1, std::memory_order_relaxed);
+        }
+    };
+
+    static void CallRealV8IsolateInitialize(V8IsolateInitializeFn realInitialize,
+                                            void *isolate,
+                                            const void *params)
+    {
+        ScopedV8InitializationCounter counter;
+        realInitialize(isolate, params);
+    }
+
+    static void StoreV8CreateParamsSlotsHex(void **slots)
+    {
+        std::string dump;
+        dump.reserve(kV8CreateParamsSlotDumpCount * 24);
+        for (size_t i = 0; i < kV8CreateParamsSlotDumpCount; ++i)
+        {
+            char item[40];
+            const uintptr_t value = reinterpret_cast<uintptr_t>(slots[i]);
+            snprintf(item, sizeof(item), "%s%zu=0x%016llx",
+                     i == 0 ? "" : ",", i,
+                     static_cast<unsigned long long>(value));
+            dump += item;
+        }
+
+        std::lock_guard<std::mutex> lock(g_createParamsDumpMutex);
+        g_lastV8CreateParamsSlotsHex = dump;
+    }
+
+    static std::string GetV8CreateParamsSlotsHex()
+    {
+        std::lock_guard<std::mutex> lock(g_createParamsDumpMutex);
+        return g_lastV8CreateParamsSlotsHex;
+    }
+
+    static void StoreV8ExternalStartupDataPath(const char *path)
+    {
+        std::lock_guard<std::mutex> lock(g_v8ExternalStartupDataPathMutex);
+        g_lastV8ExternalStartupDataPath = path ? path : "";
+    }
+
+    static std::string GetV8ExternalStartupDataPath()
+    {
+        std::lock_guard<std::mutex> lock(g_v8ExternalStartupDataPathMutex);
+        return g_lastV8ExternalStartupDataPath;
+    }
+
+    static void StoreSnapshotBlobReplacementPath(const std::string &path)
+    {
+        std::lock_guard<std::mutex> lock(g_snapshotBlobReplacementPathMutex);
+        g_snapshotBlobReplacementPath = path;
+    }
+
+    static std::string GetSnapshotBlobReplacementPath()
+    {
+        std::lock_guard<std::mutex> lock(g_snapshotBlobReplacementPathMutex);
+        return g_snapshotBlobReplacementPath;
+    }
+
+    static bool ReadFileToVector(const std::string &path,
+                                 std::vector<char> *output)
+    {
+        FILE *file = fopen(path.c_str(), "rb");
+        if (!file)
+        {
+            Log("failed to open startup snapshot blob path=%s errno=%d",
+                path.c_str(), errno);
+            return false;
+        }
+
+        if (fseek(file, 0, SEEK_END) != 0)
+        {
+            Log("failed to seek startup snapshot blob path=%s errno=%d",
+                path.c_str(), errno);
+            fclose(file);
+            return false;
+        }
+        const long size = ftell(file);
+        if (size <= 0)
+        {
+            Log("invalid startup snapshot blob size path=%s size=%ld",
+                path.c_str(), size);
+            fclose(file);
+            return false;
+        }
+        rewind(file);
+
+        std::vector<char> buffer(static_cast<size_t>(size));
+        const size_t read =
+            fread(buffer.data(), 1, buffer.size(), file);
         fclose(file);
-        return false;
+        if (read != buffer.size())
+        {
+            Log("failed to read startup snapshot blob path=%s read=%zu size=%zu",
+                path.c_str(), read, buffer.size());
+            return false;
+        }
+
+        *output = std::move(buffer);
+        return true;
     }
-    const long size = ftell(file);
-    if (size <= 0) {
-        Log("invalid startup snapshot blob size path=%s size=%ld",
-            path.c_str(), size);
+
+    static std::string GetBundleResourceDirFromCommandLine()
+    {
+        constexpr const char *kPrefix = "--bundle-installation-dir=";
+        constexpr size_t kMaxCmdlineBytes = 16384;
+        FILE *file = fopen("/proc/self/cmdline", "rb");
+        if (!file)
+        {
+            return kDefaultElectronResourceDir;
+        }
+
+        std::vector<char> buffer(kMaxCmdlineBytes);
+        const size_t bytes = fread(buffer.data(), 1, buffer.size() - 1, file);
         fclose(file);
-        return false;
-    }
-    rewind(file);
+        buffer[bytes] = '\0';
 
-    std::vector<char> buffer(static_cast<size_t>(size));
-    const size_t read =
-        fread(buffer.data(), 1, buffer.size(), file);
-    fclose(file);
-    if (read != buffer.size()) {
-        Log("failed to read startup snapshot blob path=%s read=%zu size=%zu",
-            path.c_str(), read, buffer.size());
-        return false;
-    }
+        size_t offset = 0;
+        while (offset < bytes)
+        {
+            const char *arg = buffer.data() + offset;
+            const size_t length = strnlen(arg, bytes - offset);
+            if (strncmp(arg, kPrefix, strlen(kPrefix)) == 0)
+            {
+                const char *value = arg + strlen(kPrefix);
+                if (value[0] != '\0')
+                {
+                    return value;
+                }
+            }
+            offset += length + 1;
+        }
 
-    *output = std::move(buffer);
-    return true;
-}
-
-static std::string GetBundleResourceDirFromCommandLine() {
-    constexpr const char* kPrefix = "--bundle-installation-dir=";
-    constexpr size_t kMaxCmdlineBytes = 16384;
-    FILE* file = fopen("/proc/self/cmdline", "rb");
-    if (!file) {
         return kDefaultElectronResourceDir;
     }
 
-    std::vector<char> buffer(kMaxCmdlineBytes);
-    const size_t bytes = fread(buffer.data(), 1, buffer.size() - 1, file);
-    fclose(file);
-    buffer[bytes] = '\0';
-
-    size_t offset = 0;
-    while (offset < bytes) {
-        const char* arg = buffer.data() + offset;
-        const size_t length = strnlen(arg, bytes - offset);
-        if (strncmp(arg, kPrefix, strlen(kPrefix)) == 0) {
-            const char* value = arg + strlen(kPrefix);
-            if (value[0] != '\0') {
-                return value;
-            }
+    static std::string GetStartupSnapshotBlobPath()
+    {
+        std::string dir = GetBundleResourceDirFromCommandLine();
+        if (!dir.empty() && dir.back() != '/')
+        {
+            dir += '/';
         }
-        offset += length + 1;
+        dir += kStartupSnapshotBlobFileName;
+        return dir;
     }
 
-    return kDefaultElectronResourceDir;
-}
+    static void LoadBaseStartupBlobOnce()
+    {
+        const std::string path = GetStartupSnapshotBlobPath();
+        StoreSnapshotBlobReplacementPath(path);
+        if (!ReadFileToVector(path, &g_baseStartupBlobBytes))
+        {
+            g_snapshotBlobReplacementFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            return;
+        }
 
-static std::string GetStartupSnapshotBlobPath() {
-    std::string dir = GetBundleResourceDirFromCommandLine();
-    if (!dir.empty() && dir.back() != '/') {
-        dir += '/';
-    }
-    dir += kStartupSnapshotBlobFileName;
-    return dir;
-}
-
-static void LoadBaseStartupBlobOnce() {
-    const std::string path = GetStartupSnapshotBlobPath();
-    StoreSnapshotBlobReplacementPath(path);
-    if (!ReadFileToVector(path, &g_baseStartupBlobBytes)) {
-        g_snapshotBlobReplacementFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        return;
-    }
-
-    g_baseStartupBlobData.data = g_baseStartupBlobBytes.data();
-    g_baseStartupBlobData.raw_size =
-        static_cast<int>(g_baseStartupBlobBytes.size());
-    g_baseStartupBlobRawSize.store(g_baseStartupBlobData.raw_size,
-                                   std::memory_order_relaxed);
-    Log("loaded replacement startup snapshot blob path=%s raw_size=%d",
-        path.c_str(), g_baseStartupBlobData.raw_size);
-}
-
-static V8StartupDataView* GetBaseStartupBlob() {
-    std::call_once(g_baseStartupBlobOnce, LoadBaseStartupBlobOnce);
-    if (!g_baseStartupBlobData.data || g_baseStartupBlobData.raw_size <= 0) {
-        return nullptr;
-    }
-    return &g_baseStartupBlobData;
-}
-
-static void RecordV8SnapshotDataBlob(void* blob) {
-    g_lastV8SnapshotDataBlobAddress.store(reinterpret_cast<uintptr_t>(blob),
-                                          std::memory_order_relaxed);
-    if (!blob) {
-        g_lastV8SnapshotDataBlobDataAddress.store(0,
-                                                  std::memory_order_relaxed);
-        g_lastV8SnapshotDataBlobRawSize.store(0, std::memory_order_relaxed);
-        return;
+        g_baseStartupBlobData.data = g_baseStartupBlobBytes.data();
+        g_baseStartupBlobData.raw_size =
+            static_cast<int>(g_baseStartupBlobBytes.size());
+        g_baseStartupBlobRawSize.store(g_baseStartupBlobData.raw_size,
+                                       std::memory_order_relaxed);
+        Log("loaded replacement startup snapshot blob path=%s raw_size=%d",
+            path.c_str(), g_baseStartupBlobData.raw_size);
     }
 
-    auto* startupData = reinterpret_cast<V8StartupDataView*>(blob);
-    g_lastV8SnapshotDataBlobDataAddress.store(
-        reinterpret_cast<uintptr_t>(startupData->data),
-        std::memory_order_relaxed);
-    g_lastV8SnapshotDataBlobRawSize.store(startupData->raw_size,
-                                          std::memory_order_relaxed);
-}
+    static V8StartupDataView *GetBaseStartupBlob()
+    {
+        std::call_once(g_baseStartupBlobOnce, LoadBaseStartupBlobOnce);
+        if (!g_baseStartupBlobData.data || g_baseStartupBlobData.raw_size <= 0)
+        {
+            return nullptr;
+        }
+        return &g_baseStartupBlobData;
+    }
 
-static void RecordEffectiveV8SnapshotDataBlob(void* blob) {
-    g_lastEffectiveV8SnapshotDataBlobAddress.store(
-        reinterpret_cast<uintptr_t>(blob), std::memory_order_relaxed);
-    if (!blob) {
+    static void RecordV8SnapshotDataBlob(void *blob)
+    {
+        g_lastV8SnapshotDataBlobAddress.store(reinterpret_cast<uintptr_t>(blob),
+                                              std::memory_order_relaxed);
+        if (!blob)
+        {
+            g_lastV8SnapshotDataBlobDataAddress.store(0,
+                                                      std::memory_order_relaxed);
+            g_lastV8SnapshotDataBlobRawSize.store(0, std::memory_order_relaxed);
+            return;
+        }
+
+        auto *startupData = reinterpret_cast<V8StartupDataView *>(blob);
+        g_lastV8SnapshotDataBlobDataAddress.store(
+            reinterpret_cast<uintptr_t>(startupData->data),
+            std::memory_order_relaxed);
+        g_lastV8SnapshotDataBlobRawSize.store(startupData->raw_size,
+                                              std::memory_order_relaxed);
+    }
+
+    static void RecordEffectiveV8SnapshotDataBlob(void *blob)
+    {
+        g_lastEffectiveV8SnapshotDataBlobAddress.store(
+            reinterpret_cast<uintptr_t>(blob), std::memory_order_relaxed);
+        if (!blob)
+        {
+            g_lastEffectiveV8SnapshotDataBlobDataAddress.store(
+                0, std::memory_order_relaxed);
+            g_lastEffectiveV8SnapshotDataBlobRawSize.store(
+                0, std::memory_order_relaxed);
+            return;
+        }
+
+        auto *startupData = reinterpret_cast<V8StartupDataView *>(blob);
         g_lastEffectiveV8SnapshotDataBlobDataAddress.store(
-            0, std::memory_order_relaxed);
+            reinterpret_cast<uintptr_t>(startupData->data),
+            std::memory_order_relaxed);
         g_lastEffectiveV8SnapshotDataBlobRawSize.store(
-            0, std::memory_order_relaxed);
-        return;
+            startupData->raw_size, std::memory_order_relaxed);
     }
 
-    auto* startupData = reinterpret_cast<V8StartupDataView*>(blob);
-    g_lastEffectiveV8SnapshotDataBlobDataAddress.store(
-        reinterpret_cast<uintptr_t>(startupData->data),
-        std::memory_order_relaxed);
-    g_lastEffectiveV8SnapshotDataBlobRawSize.store(
-        startupData->raw_size, std::memory_order_relaxed);
-}
+    static void RecordV8InitWithSnapshotCaller(void *raw_return_address)
+    {
+        if (!raw_return_address)
+        {
+            g_lastV8InitWithSnapshotCallerOffset.store(
+                0, std::memory_order_relaxed);
+            return;
+        }
 
-static void RecordV8InitWithSnapshotCaller(void* raw_return_address) {
-    if (!raw_return_address) {
+        void *extracted = __builtin_extract_return_addr(raw_return_address);
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase ||
+            !strstr(info.dli_fname, "libelectron.so"))
+        {
+            g_lastV8InitWithSnapshotCallerOffset.store(
+                0, std::memory_order_relaxed);
+            return;
+        }
+
         g_lastV8InitWithSnapshotCallerOffset.store(
-            0, std::memory_order_relaxed);
-        return;
+            reinterpret_cast<uintptr_t>(extracted) -
+                reinterpret_cast<uintptr_t>(info.dli_fbase),
+            std::memory_order_relaxed);
     }
 
-    void* extracted = __builtin_extract_return_addr(raw_return_address);
-    Dl_info info;
-    memset(&info, 0, sizeof(info));
-    if (dladdr(extracted, &info) == 0 || !info.dli_fname || !info.dli_fbase ||
-        !strstr(info.dli_fname, "libelectron.so")) {
-        g_lastV8InitWithSnapshotCallerOffset.store(
-            0, std::memory_order_relaxed);
-        return;
+    static void RecordSnapshotDataView(
+        void *snapshotData,
+        std::atomic<uintptr_t> *objectAddress,
+        std::atomic<uintptr_t> *dataAddress,
+        std::atomic<uint32_t> *length)
+    {
+        objectAddress->store(reinterpret_cast<uintptr_t>(snapshotData),
+                             std::memory_order_relaxed);
+        if (!snapshotData)
+        {
+            dataAddress->store(0, std::memory_order_relaxed);
+            length->store(0, std::memory_order_relaxed);
+            return;
+        }
+
+        auto *view = reinterpret_cast<V8SnapshotDataView *>(snapshotData);
+        dataAddress->store(reinterpret_cast<uintptr_t>(view->data),
+                           std::memory_order_relaxed);
+        length->store(view->length, std::memory_order_relaxed);
     }
 
-    g_lastV8InitWithSnapshotCallerOffset.store(
-        reinterpret_cast<uintptr_t>(extracted) -
-            reinterpret_cast<uintptr_t>(info.dli_fbase),
-        std::memory_order_relaxed);
-}
-
-static void RecordSnapshotDataView(
-    void* snapshotData,
-    std::atomic<uintptr_t>* objectAddress,
-    std::atomic<uintptr_t>* dataAddress,
-    std::atomic<uint32_t>* length) {
-    objectAddress->store(reinterpret_cast<uintptr_t>(snapshotData),
-                         std::memory_order_relaxed);
-    if (!snapshotData) {
-        dataAddress->store(0, std::memory_order_relaxed);
-        length->store(0, std::memory_order_relaxed);
-        return;
+    static void RecordV8InitWithSnapshotArgs(void *isolate,
+                                             void *readOnlySnapshot,
+                                             void *sharedSnapshot,
+                                             void *startupSnapshot,
+                                             bool canRehash,
+                                             void *returnAddress)
+    {
+        g_lastV8InitWithSnapshotIsolate.store(
+            reinterpret_cast<uintptr_t>(isolate), std::memory_order_relaxed);
+        RecordSnapshotDataView(readOnlySnapshot,
+                               &g_lastV8InitWithSnapshotReadOnlyAddress,
+                               &g_lastV8InitWithSnapshotReadOnlyDataAddress,
+                               &g_lastV8InitWithSnapshotReadOnlyLength);
+        RecordSnapshotDataView(sharedSnapshot,
+                               &g_lastV8InitWithSnapshotSharedAddress,
+                               &g_lastV8InitWithSnapshotSharedDataAddress,
+                               &g_lastV8InitWithSnapshotSharedLength);
+        RecordSnapshotDataView(startupSnapshot,
+                               &g_lastV8InitWithSnapshotStartupAddress,
+                               &g_lastV8InitWithSnapshotStartupDataAddress,
+                               &g_lastV8InitWithSnapshotStartupLength);
+        g_lastV8InitWithSnapshotCanRehash.store(canRehash,
+                                                std::memory_order_relaxed);
+        RecordV8InitWithSnapshotCaller(returnAddress);
     }
 
-    auto* view = reinterpret_cast<V8SnapshotDataView*>(snapshotData);
-    dataAddress->store(reinterpret_cast<uintptr_t>(view->data),
-                       std::memory_order_relaxed);
-    length->store(view->length, std::memory_order_relaxed);
-}
+    static void *MaybeReplaceContextSnapshotBlob(void *blob)
+    {
+        if (!g_replaceContextSnapshotWithStartup.load(std::memory_order_relaxed) ||
+            !blob)
+        {
+            return blob;
+        }
 
-static void RecordV8InitWithSnapshotArgs(void* isolate,
-                                         void* readOnlySnapshot,
-                                         void* sharedSnapshot,
-                                         void* startupSnapshot,
-                                         bool canRehash,
-                                         void* returnAddress) {
-    g_lastV8InitWithSnapshotIsolate.store(
-        reinterpret_cast<uintptr_t>(isolate), std::memory_order_relaxed);
-    RecordSnapshotDataView(readOnlySnapshot,
-                           &g_lastV8InitWithSnapshotReadOnlyAddress,
-                           &g_lastV8InitWithSnapshotReadOnlyDataAddress,
-                           &g_lastV8InitWithSnapshotReadOnlyLength);
-    RecordSnapshotDataView(sharedSnapshot,
-                           &g_lastV8InitWithSnapshotSharedAddress,
-                           &g_lastV8InitWithSnapshotSharedDataAddress,
-                           &g_lastV8InitWithSnapshotSharedLength);
-    RecordSnapshotDataView(startupSnapshot,
-                           &g_lastV8InitWithSnapshotStartupAddress,
-                           &g_lastV8InitWithSnapshotStartupDataAddress,
-                           &g_lastV8InitWithSnapshotStartupLength);
-    g_lastV8InitWithSnapshotCanRehash.store(canRehash,
-                                            std::memory_order_relaxed);
-    RecordV8InitWithSnapshotCaller(returnAddress);
-}
+        auto *startupData = reinterpret_cast<V8StartupDataView *>(blob);
+        if (startupData->raw_size < kContextSnapshotReplacementMinBytes)
+        {
+            return blob;
+        }
 
-static void* MaybeReplaceContextSnapshotBlob(void* blob) {
-    if (!g_replaceContextSnapshotWithStartup.load(std::memory_order_relaxed) ||
-        !blob) {
-        return blob;
-    }
-
-    auto* startupData = reinterpret_cast<V8StartupDataView*>(blob);
-    if (startupData->raw_size < kContextSnapshotReplacementMinBytes) {
-        return blob;
-    }
-
-    g_snapshotBlobReplacementAttempts.fetch_add(
-        1, std::memory_order_relaxed);
-    V8StartupDataView* replacement = GetBaseStartupBlob();
-    if (!replacement) {
-        g_snapshotBlobReplacementFailures.fetch_add(
+        g_snapshotBlobReplacementAttempts.fetch_add(
             1, std::memory_order_relaxed);
-        Log("startup snapshot replacement failed original_raw_size=%d",
-            startupData->raw_size);
-        return blob;
+        V8StartupDataView *replacement = GetBaseStartupBlob();
+        if (!replacement)
+        {
+            g_snapshotBlobReplacementFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("startup snapshot replacement failed original_raw_size=%d",
+                startupData->raw_size);
+            return blob;
+        }
+
+        g_snapshotBlobReplacements.fetch_add(1, std::memory_order_relaxed);
+        Log("replacing V8 snapshot blob original_raw_size=%d replacement_raw_size=%d",
+            startupData->raw_size, replacement->raw_size);
+        return replacement;
     }
 
-    g_snapshotBlobReplacements.fetch_add(1, std::memory_order_relaxed);
-    Log("replacing V8 snapshot blob original_raw_size=%d replacement_raw_size=%d",
-        startupData->raw_size, replacement->raw_size);
-    return replacement;
-}
+    static void InspectV8CreateParams(const void *params, bool targetCaller)
+    {
+        g_lastV8CreateParamsAddress.store(reinterpret_cast<uintptr_t>(params),
+                                          std::memory_order_relaxed);
+        if (!params)
+        {
+            g_lastV8SnapshotBlobAddress.store(0, std::memory_order_relaxed);
+            g_v8SnapshotBlobNulls.fetch_add(1, std::memory_order_relaxed);
+            std::lock_guard<std::mutex> lock(g_createParamsDumpMutex);
+            g_lastV8CreateParamsSlotsHex.clear();
+            return;
+        }
 
-static void InspectV8CreateParams(const void* params, bool targetCaller) {
-    g_lastV8CreateParamsAddress.store(reinterpret_cast<uintptr_t>(params),
-                                      std::memory_order_relaxed);
-    if (!params) {
-        g_lastV8SnapshotBlobAddress.store(0, std::memory_order_relaxed);
-        g_v8SnapshotBlobNulls.fetch_add(1, std::memory_order_relaxed);
-        std::lock_guard<std::mutex> lock(g_createParamsDumpMutex);
-        g_lastV8CreateParamsSlotsHex.clear();
-        return;
+        auto **slots = reinterpret_cast<void **>(const_cast<void *>(params));
+        StoreV8CreateParamsSlotsHex(slots);
+        g_lastV8CreateParamsSlot0.store(reinterpret_cast<uintptr_t>(slots[0]),
+                                        std::memory_order_relaxed);
+        g_lastV8CreateParamsSlot1.store(reinterpret_cast<uintptr_t>(slots[1]),
+                                        std::memory_order_relaxed);
+        g_lastV8CreateParamsSlot2.store(reinterpret_cast<uintptr_t>(slots[2]),
+                                        std::memory_order_relaxed);
+        g_lastV8CreateParamsSlot3.store(reinterpret_cast<uintptr_t>(slots[3]),
+                                        std::memory_order_relaxed);
+        g_lastV8CreateParamsSlot4.store(reinterpret_cast<uintptr_t>(slots[4]),
+                                        std::memory_order_relaxed);
+        g_lastV8CreateParamsSlot5.store(reinterpret_cast<uintptr_t>(slots[5]),
+                                        std::memory_order_relaxed);
+
+        // This is retained only as the legacy probe field from nosnapshot1. The
+        // slot is part of ResourceConstraints on this build, not snapshot_blob.
+        void *snapshotBlob = nullptr;
+        g_lastV8SnapshotBlobAddress.store(reinterpret_cast<uintptr_t>(snapshotBlob),
+                                          std::memory_order_relaxed);
+        if (!snapshotBlob)
+        {
+            g_v8SnapshotBlobNulls.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+
+        if (targetCaller &&
+            g_disableNodeStartupSnapshot.load(std::memory_order_relaxed))
+        {
+            g_v8SnapshotBlobClears.fetch_add(1, std::memory_order_relaxed);
+            Log("would clear V8 CreateParams snapshot_blob params=%p blob=%p",
+                params, snapshotBlob);
+        }
     }
 
-    auto** slots = reinterpret_cast<void**>(const_cast<void*>(params));
-    StoreV8CreateParamsSlotsHex(slots);
-    g_lastV8CreateParamsSlot0.store(reinterpret_cast<uintptr_t>(slots[0]),
-                                    std::memory_order_relaxed);
-    g_lastV8CreateParamsSlot1.store(reinterpret_cast<uintptr_t>(slots[1]),
-                                    std::memory_order_relaxed);
-    g_lastV8CreateParamsSlot2.store(reinterpret_cast<uintptr_t>(slots[2]),
-                                    std::memory_order_relaxed);
-    g_lastV8CreateParamsSlot3.store(reinterpret_cast<uintptr_t>(slots[3]),
-                                    std::memory_order_relaxed);
-    g_lastV8CreateParamsSlot4.store(reinterpret_cast<uintptr_t>(slots[4]),
-                                    std::memory_order_relaxed);
-    g_lastV8CreateParamsSlot5.store(reinterpret_cast<uintptr_t>(slots[5]),
-                                    std::memory_order_relaxed);
-
-    // This is retained only as the legacy probe field from nosnapshot1. The
-    // slot is part of ResourceConstraints on this build, not snapshot_blob.
-    void* snapshotBlob = nullptr;
-    g_lastV8SnapshotBlobAddress.store(reinterpret_cast<uintptr_t>(snapshotBlob),
-                                      std::memory_order_relaxed);
-    if (!snapshotBlob) {
-        g_v8SnapshotBlobNulls.fetch_add(1, std::memory_order_relaxed);
-        return;
+    static void SetBool(napi_env env, napi_value object, const char *key,
+                        bool value)
+    {
+        napi_value jsValue;
+        napi_get_boolean(env, value, &jsValue);
+        napi_set_named_property(env, object, key, jsValue);
     }
 
-    if (targetCaller &&
-        g_disableNodeStartupSnapshot.load(std::memory_order_relaxed)) {
-        g_v8SnapshotBlobClears.fetch_add(1, std::memory_order_relaxed);
-        Log("would clear V8 CreateParams snapshot_blob params=%p blob=%p",
-            params, snapshotBlob);
+    static void SetInt(napi_env env, napi_value object, const char *key,
+                       int32_t value)
+    {
+        napi_value jsValue;
+        napi_create_int32(env, value, &jsValue);
+        napi_set_named_property(env, object, key, jsValue);
     }
-}
 
-static void SetBool(napi_env env, napi_value object, const char* key,
-                    bool value) {
-    napi_value jsValue;
-    napi_get_boolean(env, value, &jsValue);
-    napi_set_named_property(env, object, key, jsValue);
-}
-
-static void SetInt(napi_env env, napi_value object, const char* key,
-                   int32_t value) {
-    napi_value jsValue;
-    napi_create_int32(env, value, &jsValue);
-    napi_set_named_property(env, object, key, jsValue);
-}
-
-static void SetUint32(napi_env env, napi_value object, const char* key,
-                      uint32_t value) {
-    napi_value jsValue;
-    napi_create_uint32(env, value, &jsValue);
-    napi_set_named_property(env, object, key, jsValue);
-}
-
-static void SetUint64(napi_env env, napi_value object, const char* key,
-                      uint64_t value) {
-    napi_value jsValue;
-    napi_create_double(env, static_cast<double>(value), &jsValue);
-    napi_set_named_property(env, object, key, jsValue);
-}
-
-static void SetString(napi_env env, napi_value object, const char* key,
-                      const std::string& value) {
-    napi_value jsValue;
-    napi_create_string_utf8(env, value.c_str(), value.size(), &jsValue);
-    napi_set_named_property(env, object, key, jsValue);
-}
-
-static std::string GetClampedEnvString(const char* name) {
-    const char* value = name ? getenv(name) : nullptr;
-    if (!value) {
-        return "";
+    static void SetUint32(napi_env env, napi_value object, const char *key,
+                          uint32_t value)
+    {
+        napi_value jsValue;
+        napi_create_uint32(env, value, &jsValue);
+        napi_set_named_property(env, object, key, jsValue);
     }
-    std::string result(value);
-    if (result.size() > 1800) {
-        result.resize(1800);
+
+    static void SetUint64(napi_env env, napi_value object, const char *key,
+                          uint64_t value)
+    {
+        napi_value jsValue;
+        napi_create_double(env, static_cast<double>(value), &jsValue);
+        napi_set_named_property(env, object, key, jsValue);
     }
-    return result;
-}
 
-static void AppendV8StartupDataStats(napi_env env, napi_value result) {
-    SetUint64(env, result, "v8SetSnapshotDataBlobCalls",
-              g_v8SetSnapshotDataBlobCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8SnapshotDataBlobAddress",
-              g_lastV8SnapshotDataBlobAddress.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8SnapshotDataBlobDataAddress",
-              g_lastV8SnapshotDataBlobDataAddress.load(
-                  std::memory_order_relaxed));
-    SetInt(env, result, "lastV8SnapshotDataBlobRawSize",
-           g_lastV8SnapshotDataBlobRawSize.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastEffectiveV8SnapshotDataBlobAddress",
-              g_lastEffectiveV8SnapshotDataBlobAddress.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastEffectiveV8SnapshotDataBlobDataAddress",
-              g_lastEffectiveV8SnapshotDataBlobDataAddress.load(
-                  std::memory_order_relaxed));
-    SetInt(env, result, "lastEffectiveV8SnapshotDataBlobRawSize",
-           g_lastEffectiveV8SnapshotDataBlobRawSize.load(
-               std::memory_order_relaxed));
-    SetBool(env, result, "replaceContextSnapshotWithStartup",
-            g_replaceContextSnapshotWithStartup.load(
-                std::memory_order_relaxed));
-    SetBool(env, result, "skipV8SnapshotDataBlob",
-            g_skipV8SnapshotDataBlob.load(std::memory_order_relaxed));
-    SetUint64(env, result, "snapshotBlobSkips",
-              g_snapshotBlobSkips.load(std::memory_order_relaxed));
-    SetUint64(env, result, "snapshotBlobReplacementAttempts",
-              g_snapshotBlobReplacementAttempts.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "snapshotBlobReplacements",
-              g_snapshotBlobReplacements.load(std::memory_order_relaxed));
-    SetUint64(env, result, "snapshotBlobReplacementFailures",
-              g_snapshotBlobReplacementFailures.load(
-                  std::memory_order_relaxed));
-    SetInt(env, result, "baseStartupBlobRawSize",
-           g_baseStartupBlobRawSize.load(std::memory_order_relaxed));
-    SetString(env, result, "snapshotBlobReplacementPath",
-              GetSnapshotBlobReplacementPath());
-    SetUint64(env, result, "v8InitializeExternalStartupDataCalls",
-              g_v8InitializeExternalStartupDataCalls.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8InitializeExternalStartupDataFromFileCalls",
-              g_v8InitializeExternalStartupDataFromFileCalls.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "lastV8ExternalStartupDataPath",
-              GetV8ExternalStartupDataPath());
-    SetUint64(env, result, "v8InitWithSnapshotCalls",
-              g_v8InitWithSnapshotCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "v8InitWithSnapshotSuccesses",
-              g_v8InitWithSnapshotSuccesses.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8InitWithSnapshotFailures",
-              g_v8InitWithSnapshotFailures.load(std::memory_order_relaxed));
-    SetUint32(env, result, "lastV8InitWithSnapshotCallerOffset",
-              static_cast<uint32_t>(
-                  g_lastV8InitWithSnapshotCallerOffset.load(
-                      std::memory_order_relaxed)));
-    SetUint64(env, result, "lastV8InitWithSnapshotIsolate",
-              g_lastV8InitWithSnapshotIsolate.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8InitWithSnapshotReadOnlyAddress",
-              g_lastV8InitWithSnapshotReadOnlyAddress.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8InitWithSnapshotReadOnlyDataAddress",
-              g_lastV8InitWithSnapshotReadOnlyDataAddress.load(
-                  std::memory_order_relaxed));
-    SetUint32(env, result, "lastV8InitWithSnapshotReadOnlyLength",
-              g_lastV8InitWithSnapshotReadOnlyLength.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8InitWithSnapshotSharedAddress",
-              g_lastV8InitWithSnapshotSharedAddress.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8InitWithSnapshotSharedDataAddress",
-              g_lastV8InitWithSnapshotSharedDataAddress.load(
-                  std::memory_order_relaxed));
-    SetUint32(env, result, "lastV8InitWithSnapshotSharedLength",
-              g_lastV8InitWithSnapshotSharedLength.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8InitWithSnapshotStartupAddress",
-              g_lastV8InitWithSnapshotStartupAddress.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8InitWithSnapshotStartupDataAddress",
-              g_lastV8InitWithSnapshotStartupDataAddress.load(
-                  std::memory_order_relaxed));
-    SetUint32(env, result, "lastV8InitWithSnapshotStartupLength",
-              g_lastV8InitWithSnapshotStartupLength.load(
-                  std::memory_order_relaxed));
-    SetBool(env, result, "lastV8InitWithSnapshotCanRehash",
-            g_lastV8InitWithSnapshotCanRehash.load(
-                std::memory_order_relaxed));
-    SetBool(env, result, "lastV8InitWithSnapshotResult",
-            g_lastV8InitWithSnapshotResult.load(std::memory_order_relaxed));
-}
+    static void SetString(napi_env env, napi_value object, const char *key,
+                          const std::string &value)
+    {
+        napi_value jsValue;
+        napi_create_string_utf8(env, value.c_str(), value.size(), &jsValue);
+        napi_set_named_property(env, object, key, jsValue);
+    }
 
-static void AppendNodeStartupStats(napi_env env, napi_value result) {
-    SetUint32(env, result, "nodeNewContextSlots",
-              g_patchedNodeNewContextSlots.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodeNewContextCalls",
-              g_nodeNewContextCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodeNewContextNulls",
-              g_nodeNewContextNulls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeNewContextIsolate",
-              g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeNewContextTemplate",
-              g_lastNodeNewContextTemplate.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeNewContextResult",
-              g_lastNodeNewContextResult.load(std::memory_order_relaxed));
-    SetUint32(env, result, "nodeCreateEnvironmentSlots",
-              g_patchedNodeCreateEnvironmentSlots.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodeCreateEnvironmentCalls",
-              g_nodeCreateEnvironmentCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodeCreateEnvironmentNulls",
-              g_nodeCreateEnvironmentNulls.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodeCreateEnvironmentArgTraceFailures",
-              g_nodeCreateEnvironmentArgTraceFailures.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeCreateEnvironmentIsolateData",
-              g_lastNodeCreateEnvironmentIsolateData.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeCreateEnvironmentContext",
-              g_lastNodeCreateEnvironmentContext.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeCreateEnvironmentResult",
-              g_lastNodeCreateEnvironmentResult.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "lastNodeCreateEnvironmentInitScript",
-              GetLastNodeCreateEnvironmentInitScript());
-    SetString(env, result, "lastNodeCreateEnvironmentArgs",
-              GetLastNodeCreateEnvironmentArgs());
-    SetString(env, result, "lastNodeCreateEnvironmentExecArgs",
-              GetLastNodeCreateEnvironmentExecArgs());
-    SetUint32(env, result, "nodeLoadEnvironmentStringSlots",
-              g_patchedNodeLoadEnvironmentStringSlots.load(
-                  std::memory_order_relaxed));
-    SetUint32(env, result, "nodeLoadEnvironmentCallbackSlots",
-              g_patchedNodeLoadEnvironmentCallbackSlots.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodeLoadEnvironmentStringCalls",
-              g_nodeLoadEnvironmentStringCalls.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodeLoadEnvironmentCallbackCalls",
-              g_nodeLoadEnvironmentCallbackCalls.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodeLoadEnvironmentNulls",
-              g_nodeLoadEnvironmentNulls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "forcedContextEnterAttempts",
-              g_forcedContextEnterAttempts.load(std::memory_order_relaxed));
-    SetUint64(env, result, "forcedContextEnterSuccesses",
-              g_forcedContextEnterSuccesses.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePreLoadProbeAttempts",
-              g_nodePreLoadProbeAttempts.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePreLoadProbeSuccesses",
-              g_nodePreLoadProbeSuccesses.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePreLoadProbeFailures",
-              g_nodePreLoadProbeFailures.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePreLoadProbeResultReads",
-              g_nodePreLoadProbeResultReads.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodePreLoadProbeResultReadFailures",
-              g_nodePreLoadProbeResultReadFailures.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodePreLoadProbeHiddenWrites",
-              g_nodePreLoadProbeHiddenWrites.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "lastNodePreLoadProbeResult",
-              GetLastNodePreLoadProbeResult());
-    SetString(env, result, "lastNodePreLoadProbeHiddenValue",
-              GetLastNodePreLoadProbeHiddenValue());
-    SetString(env, result, "preLoadEnvResult",
-              GetClampedEnvString("OHCODE_PRELOAD_RESULT"));
-    SetUint64(env, result, "nodePostLoadTraceAttempts",
-              g_nodePostLoadTraceAttempts.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePostLoadTraceSuccesses",
-              g_nodePostLoadTraceSuccesses.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePostLoadTraceFailures",
-              g_nodePostLoadTraceFailures.load(std::memory_order_relaxed));
-    SetUint64(env, result, "nodePostLoadTraceResultReads",
-              g_nodePostLoadTraceResultReads.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "nodePostLoadTraceResultReadFailures",
-              g_nodePostLoadTraceResultReadFailures.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "lastNodePostLoadTraceResult",
-              GetLastNodePostLoadTraceResult());
-    SetString(env, result, "lastNodePostLoadStage",
-              GetLastNodePostLoadStage());
-    SetString(env, result, "postLoadEnvResult",
-              GetClampedEnvString("OHCODE_POSTLOAD_RESULT"));
-    SetString(env, result, "entryProbeEnvResult",
-              GetClampedEnvString("OHCODE_ENTRY_PROBE_RESULT"));
-    SetString(env, result, "browserInitEnvO",
-              GetClampedEnvString("O"));
-    SetUint64(env, result, "browserInitDefineOCalls",
-              g_browserInitDefineOCalls.load(std::memory_order_relaxed));
-    SetString(env, result, "browserInitDefineO",
-              GetLastBrowserInitDefineO());
-    SetUint64(env, result, "browserInitStageDefineCalls",
-              g_browserInitStageDefineCalls.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "browserInitStageDefines",
-              GetBrowserInitStageDefines());
-    SetUint64(env, result, "lastNodeLoadEnvironmentEnv",
-              g_lastNodeLoadEnvironmentEnv.load(std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeLoadEnvironmentSource",
-              g_lastNodeLoadEnvironmentSource.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeLoadEnvironmentPreload",
-              g_lastNodeLoadEnvironmentPreload.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastNodeLoadEnvironmentResult",
-              g_lastNodeLoadEnvironmentResult.load(
-                  std::memory_order_relaxed));
-    SetUint32(env, result, "v8CompileFunctionSlots",
-              g_patchedV8CompileFunctionSlots.load(
-                  std::memory_order_relaxed));
-    SetBool(env, result, "v8CompileFunctionInlineInstalled",
-            g_v8CompileFunctionInlineInstalled.load(
-                std::memory_order_relaxed));
-    SetUint32(env, result, "v8CompileFunctionInlineEntrypoints",
-              g_patchedV8CompileFunctionInlineEntrypoints.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8CompileFunctionInlineFailures",
-              g_v8CompileFunctionInlineFailures.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8CompileFunctionCalls",
-              g_v8CompileFunctionCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "v8CompileFunctionSourceReads",
-              g_v8CompileFunctionSourceReads.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8CompileFunctionSourceReadFailures",
-              g_v8CompileFunctionSourceReadFailures.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8CompileFunctionMarkerHits",
-              g_v8CompileFunctionMarkerHits.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8CompileFunctionResetSearchPathHits",
-              g_v8CompileFunctionResetSearchPathHits.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8CompileFunctionContext",
-              g_lastV8CompileFunctionContext.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8CompileFunctionSourcePtr",
-              g_lastV8CompileFunctionSourcePtr.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "lastV8CompileFunctionArgCount",
-              g_lastV8CompileFunctionArgCount.load(
-                  std::memory_order_relaxed));
-    SetInt(env, result, "lastV8CompileFunctionOptions",
-           g_lastV8CompileFunctionOptions.load(
-               std::memory_order_relaxed));
-    SetInt(env, result, "lastV8CompileFunctionNoCacheReason",
-           g_lastV8CompileFunctionNoCacheReason.load(
-               std::memory_order_relaxed));
-    SetString(env, result, "lastV8CompileFunctionSourceSlots",
-              GetLastV8CompileFunctionSourceSlots());
-    SetString(env, result, "lastV8CompileFunctionSource",
-              GetLastV8CompileFunctionSource());
-    SetString(env, result, "firstV8CompileFunctionSource",
-              GetFirstV8CompileFunctionSource());
-    SetString(env, result, "interestingV8CompileFunctionSource",
-              GetInterestingV8CompileFunctionSource());
-    SetString(env, result, "v8CompileFunctionSourceSequence",
-              GetV8CompileFunctionSourceSequence());
-    SetUint32(env, result, "v8ObjectSetPrivateSlots",
-              g_patchedV8ObjectSetPrivateSlots.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8ObjectSetPrivateCalls",
-              g_v8ObjectSetPrivateCalls.load(std::memory_order_relaxed));
-    SetUint32(env, result, "v8ObjectDefineOwnPropertySlots",
-              g_patchedV8ObjectDefineOwnPropertySlots.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8ObjectDefineOwnPropertyCalls",
-              g_v8ObjectDefineOwnPropertyCalls.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8ObjectDefineOwnPropertyNameReadFailures",
-              g_v8ObjectDefineOwnPropertyNameReadFailures.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "v8DefineResourcesPathPatches",
-              g_v8DefineResourcesPathPatches.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "v8ObjectDefineOwnPropertyNames",
-              GetV8ObjectDefineOwnPropertyNames());
-    SetString(env, result, "lastDefinedResourcesPath",
-              GetLastDefinedResourcesPath());
-    SetUint64(env, result, "browserAppSearchPathPatchAttempts",
-              g_browserAppSearchPathPatchAttempts.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "browserAppSearchPathPatches",
-              g_browserAppSearchPathPatches.load(std::memory_order_relaxed));
-    SetUint64(env, result, "browserAppSearchPathPatchFailures",
-              g_browserAppSearchPathPatchFailures.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "browserAppSearchPathAsarOnlyPatches",
-              g_browserAppSearchPathAsarOnlyPatches.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "browserAppSearchPathAsarOnlyFallbackPatches",
-              g_browserAppSearchPathAsarOnlyFallbackPatches.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "browserAppSearchPathNameReadFailures",
-              g_browserAppSearchPathNameReadFailures.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "v8ObjectSetPrivateNames",
-              GetV8ObjectSetPrivateNames());
-    SetUint32(env, result, "entryPathProbeOpenSlots",
-              g_patchedOpenSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "entryPathProbeFopenSlots",
-              g_patchedFopenSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "entryPathProbeAccessSlots",
-              g_patchedAccessSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "entryPathProbeStatSlots",
-              g_patchedStatSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "entryPathProbeLstatSlots",
-              g_patchedLstatSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "ohcodeWriteSlots",
-              g_patchedWriteSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "ohcodeWritevSlots",
-              g_patchedWritevSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "uvFsOpenSlots",
-              g_patchedUvFsOpenSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "uvFsStatSlots",
-              g_patchedUvFsStatSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "uvFsLstatSlots",
-              g_patchedUvFsLstatSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "uvFsAccessSlots",
-              g_patchedUvFsAccessSlots.load(std::memory_order_relaxed));
-    SetUint32(env, result, "uvFsScandirSlots",
-              g_patchedUvFsScandirSlots.load(std::memory_order_relaxed));
-    SetUint64(env, result, "uvFsOpenCalls",
-              g_uvFsOpenCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "uvFsStatCalls",
-              g_uvFsStatCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "uvFsLstatCalls",
-              g_uvFsLstatCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "uvFsAccessCalls",
-              g_uvFsAccessCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "uvFsScandirCalls",
-              g_uvFsScandirCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "uvFsResfileCalls",
-              g_uvFsResfileCalls.load(std::memory_order_relaxed));
-    SetString(env, result, "lastUvFsOp", GetLastUvFsOp());
-    SetString(env, result, "lastUvFsPath", GetLastUvFsPath());
-    SetUint64(env, result, "entryPathProbeHits",
-              g_entryPathProbeHits.load(std::memory_order_relaxed));
-    SetUint64(env, result, "entryPathProbePackageJsonHits",
-              g_entryPathProbePackageJsonHits.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "entryPathProbeEntryJsHits",
-              g_entryPathProbeEntryJsHits.load(std::memory_order_relaxed));
-    SetUint64(env, result, "entryPathProbeOutMainHits",
-              g_entryPathProbeOutMainHits.load(std::memory_order_relaxed));
-    SetUint64(env, result, "entryPathProbeElectronMainHits",
-              g_entryPathProbeElectronMainHits.load(
-                  std::memory_order_relaxed));
-    SetUint64(env, result, "entryPathProbeNullSlotPatches",
-              g_entryPathProbeNullSlotPatches.load(
-                  std::memory_order_relaxed));
-    SetString(env, result, "lastEntryPathProbeOp",
-              GetLastEntryPathProbeOp());
-    SetString(env, result, "lastEntryPathProbePath",
-              GetLastEntryPathProbePath());
-    SetUint64(env, result, "ohcodeWriteTraceCalls",
-              g_ohcodeWriteTraceCalls.load(std::memory_order_relaxed));
-    SetUint64(env, result, "ohcodeWriteTraceBytes",
-              g_ohcodeWriteTraceBytes.load(std::memory_order_relaxed));
-    SetString(env, result, "lastOhcodeWriteTrace",
-              GetLastOhcodeWriteTrace());
-}
+    static std::string GetClampedEnvString(const char *name)
+    {
+        const char *value = name ? getenv(name) : nullptr;
+        if (!value)
+        {
+            return "";
+        }
+        std::string result(value);
+        if (result.size() > 1800)
+        {
+            result.resize(1800);
+        }
+        return result;
+    }
 
-}  // namespace
+    static void AppendV8StartupDataStats(napi_env env, napi_value result)
+    {
+        SetUint64(env, result, "v8SetSnapshotDataBlobCalls",
+                  g_v8SetSnapshotDataBlobCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8SnapshotDataBlobAddress",
+                  g_lastV8SnapshotDataBlobAddress.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8SnapshotDataBlobDataAddress",
+                  g_lastV8SnapshotDataBlobDataAddress.load(
+                      std::memory_order_relaxed));
+        SetInt(env, result, "lastV8SnapshotDataBlobRawSize",
+               g_lastV8SnapshotDataBlobRawSize.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastEffectiveV8SnapshotDataBlobAddress",
+                  g_lastEffectiveV8SnapshotDataBlobAddress.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastEffectiveV8SnapshotDataBlobDataAddress",
+                  g_lastEffectiveV8SnapshotDataBlobDataAddress.load(
+                      std::memory_order_relaxed));
+        SetInt(env, result, "lastEffectiveV8SnapshotDataBlobRawSize",
+               g_lastEffectiveV8SnapshotDataBlobRawSize.load(
+                   std::memory_order_relaxed));
+        SetBool(env, result, "replaceContextSnapshotWithStartup",
+                g_replaceContextSnapshotWithStartup.load(
+                    std::memory_order_relaxed));
+        SetBool(env, result, "skipV8SnapshotDataBlob",
+                g_skipV8SnapshotDataBlob.load(std::memory_order_relaxed));
+        SetUint64(env, result, "snapshotBlobSkips",
+                  g_snapshotBlobSkips.load(std::memory_order_relaxed));
+        SetUint64(env, result, "snapshotBlobReplacementAttempts",
+                  g_snapshotBlobReplacementAttempts.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "snapshotBlobReplacements",
+                  g_snapshotBlobReplacements.load(std::memory_order_relaxed));
+        SetUint64(env, result, "snapshotBlobReplacementFailures",
+                  g_snapshotBlobReplacementFailures.load(
+                      std::memory_order_relaxed));
+        SetInt(env, result, "baseStartupBlobRawSize",
+               g_baseStartupBlobRawSize.load(std::memory_order_relaxed));
+        SetString(env, result, "snapshotBlobReplacementPath",
+                  GetSnapshotBlobReplacementPath());
+        SetUint64(env, result, "v8InitializeExternalStartupDataCalls",
+                  g_v8InitializeExternalStartupDataCalls.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8InitializeExternalStartupDataFromFileCalls",
+                  g_v8InitializeExternalStartupDataFromFileCalls.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "lastV8ExternalStartupDataPath",
+                  GetV8ExternalStartupDataPath());
+        SetUint64(env, result, "v8InitWithSnapshotCalls",
+                  g_v8InitWithSnapshotCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "v8InitWithSnapshotSuccesses",
+                  g_v8InitWithSnapshotSuccesses.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8InitWithSnapshotFailures",
+                  g_v8InitWithSnapshotFailures.load(std::memory_order_relaxed));
+        SetUint32(env, result, "lastV8InitWithSnapshotCallerOffset",
+                  static_cast<uint32_t>(
+                      g_lastV8InitWithSnapshotCallerOffset.load(
+                          std::memory_order_relaxed)));
+        SetUint64(env, result, "lastV8InitWithSnapshotIsolate",
+                  g_lastV8InitWithSnapshotIsolate.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8InitWithSnapshotReadOnlyAddress",
+                  g_lastV8InitWithSnapshotReadOnlyAddress.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8InitWithSnapshotReadOnlyDataAddress",
+                  g_lastV8InitWithSnapshotReadOnlyDataAddress.load(
+                      std::memory_order_relaxed));
+        SetUint32(env, result, "lastV8InitWithSnapshotReadOnlyLength",
+                  g_lastV8InitWithSnapshotReadOnlyLength.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8InitWithSnapshotSharedAddress",
+                  g_lastV8InitWithSnapshotSharedAddress.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8InitWithSnapshotSharedDataAddress",
+                  g_lastV8InitWithSnapshotSharedDataAddress.load(
+                      std::memory_order_relaxed));
+        SetUint32(env, result, "lastV8InitWithSnapshotSharedLength",
+                  g_lastV8InitWithSnapshotSharedLength.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8InitWithSnapshotStartupAddress",
+                  g_lastV8InitWithSnapshotStartupAddress.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8InitWithSnapshotStartupDataAddress",
+                  g_lastV8InitWithSnapshotStartupDataAddress.load(
+                      std::memory_order_relaxed));
+        SetUint32(env, result, "lastV8InitWithSnapshotStartupLength",
+                  g_lastV8InitWithSnapshotStartupLength.load(
+                      std::memory_order_relaxed));
+        SetBool(env, result, "lastV8InitWithSnapshotCanRehash",
+                g_lastV8InitWithSnapshotCanRehash.load(
+                    std::memory_order_relaxed));
+        SetBool(env, result, "lastV8InitWithSnapshotResult",
+                g_lastV8InitWithSnapshotResult.load(std::memory_order_relaxed));
+    }
 
-extern "C" int epoll_wait(int epfd, struct epoll_event* events, int maxevents,
-                          int timeout) {
+    static void AppendNodeStartupStats(napi_env env, napi_value result)
+    {
+        SetUint32(env, result, "nodeNewContextSlots",
+                  g_patchedNodeNewContextSlots.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodeNewContextCalls",
+                  g_nodeNewContextCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodeNewContextNulls",
+                  g_nodeNewContextNulls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeNewContextIsolate",
+                  g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeNewContextTemplate",
+                  g_lastNodeNewContextTemplate.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeNewContextResult",
+                  g_lastNodeNewContextResult.load(std::memory_order_relaxed));
+        SetUint32(env, result, "nodeCreateEnvironmentSlots",
+                  g_patchedNodeCreateEnvironmentSlots.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodeCreateEnvironmentCalls",
+                  g_nodeCreateEnvironmentCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodeCreateEnvironmentNulls",
+                  g_nodeCreateEnvironmentNulls.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodeCreateEnvironmentArgTraceFailures",
+                  g_nodeCreateEnvironmentArgTraceFailures.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeCreateEnvironmentIsolateData",
+                  g_lastNodeCreateEnvironmentIsolateData.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeCreateEnvironmentContext",
+                  g_lastNodeCreateEnvironmentContext.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeCreateEnvironmentResult",
+                  g_lastNodeCreateEnvironmentResult.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "lastNodeCreateEnvironmentInitScript",
+                  GetLastNodeCreateEnvironmentInitScript());
+        SetString(env, result, "lastNodeCreateEnvironmentArgs",
+                  GetLastNodeCreateEnvironmentArgs());
+        SetString(env, result, "lastNodeCreateEnvironmentExecArgs",
+                  GetLastNodeCreateEnvironmentExecArgs());
+        SetUint32(env, result, "nodeLoadEnvironmentStringSlots",
+                  g_patchedNodeLoadEnvironmentStringSlots.load(
+                      std::memory_order_relaxed));
+        SetUint32(env, result, "nodeLoadEnvironmentCallbackSlots",
+                  g_patchedNodeLoadEnvironmentCallbackSlots.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodeLoadEnvironmentStringCalls",
+                  g_nodeLoadEnvironmentStringCalls.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodeLoadEnvironmentCallbackCalls",
+                  g_nodeLoadEnvironmentCallbackCalls.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodeLoadEnvironmentNulls",
+                  g_nodeLoadEnvironmentNulls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "forcedContextEnterAttempts",
+                  g_forcedContextEnterAttempts.load(std::memory_order_relaxed));
+        SetUint64(env, result, "forcedContextEnterSuccesses",
+                  g_forcedContextEnterSuccesses.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePreLoadProbeAttempts",
+                  g_nodePreLoadProbeAttempts.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePreLoadProbeSuccesses",
+                  g_nodePreLoadProbeSuccesses.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePreLoadProbeFailures",
+                  g_nodePreLoadProbeFailures.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePreLoadProbeResultReads",
+                  g_nodePreLoadProbeResultReads.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodePreLoadProbeResultReadFailures",
+                  g_nodePreLoadProbeResultReadFailures.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodePreLoadProbeHiddenWrites",
+                  g_nodePreLoadProbeHiddenWrites.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "lastNodePreLoadProbeResult",
+                  GetLastNodePreLoadProbeResult());
+        SetString(env, result, "lastNodePreLoadProbeHiddenValue",
+                  GetLastNodePreLoadProbeHiddenValue());
+        SetString(env, result, "preLoadEnvResult",
+                  GetClampedEnvString("OHCODE_PRELOAD_RESULT"));
+        SetUint64(env, result, "nodePostLoadTraceAttempts",
+                  g_nodePostLoadTraceAttempts.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePostLoadTraceSuccesses",
+                  g_nodePostLoadTraceSuccesses.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePostLoadTraceFailures",
+                  g_nodePostLoadTraceFailures.load(std::memory_order_relaxed));
+        SetUint64(env, result, "nodePostLoadTraceResultReads",
+                  g_nodePostLoadTraceResultReads.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "nodePostLoadTraceResultReadFailures",
+                  g_nodePostLoadTraceResultReadFailures.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "lastNodePostLoadTraceResult",
+                  GetLastNodePostLoadTraceResult());
+        SetString(env, result, "lastNodePostLoadStage",
+                  GetLastNodePostLoadStage());
+        SetString(env, result, "postLoadEnvResult",
+                  GetClampedEnvString("OHCODE_POSTLOAD_RESULT"));
+        SetString(env, result, "entryProbeEnvResult",
+                  GetClampedEnvString("OHCODE_ENTRY_PROBE_RESULT"));
+        SetString(env, result, "browserInitEnvO",
+                  GetClampedEnvString("O"));
+        SetUint64(env, result, "browserInitDefineOCalls",
+                  g_browserInitDefineOCalls.load(std::memory_order_relaxed));
+        SetString(env, result, "browserInitDefineO",
+                  GetLastBrowserInitDefineO());
+        SetUint64(env, result, "browserInitStageDefineCalls",
+                  g_browserInitStageDefineCalls.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "browserInitStageDefines",
+                  GetBrowserInitStageDefines());
+        SetUint64(env, result, "lastNodeLoadEnvironmentEnv",
+                  g_lastNodeLoadEnvironmentEnv.load(std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeLoadEnvironmentSource",
+                  g_lastNodeLoadEnvironmentSource.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeLoadEnvironmentPreload",
+                  g_lastNodeLoadEnvironmentPreload.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastNodeLoadEnvironmentResult",
+                  g_lastNodeLoadEnvironmentResult.load(
+                      std::memory_order_relaxed));
+        SetUint32(env, result, "v8CompileFunctionSlots",
+                  g_patchedV8CompileFunctionSlots.load(
+                      std::memory_order_relaxed));
+        SetBool(env, result, "v8CompileFunctionInlineInstalled",
+                g_v8CompileFunctionInlineInstalled.load(
+                    std::memory_order_relaxed));
+        SetUint32(env, result, "v8CompileFunctionInlineEntrypoints",
+                  g_patchedV8CompileFunctionInlineEntrypoints.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8CompileFunctionInlineFailures",
+                  g_v8CompileFunctionInlineFailures.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8CompileFunctionCalls",
+                  g_v8CompileFunctionCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "v8CompileFunctionSourceReads",
+                  g_v8CompileFunctionSourceReads.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8CompileFunctionSourceReadFailures",
+                  g_v8CompileFunctionSourceReadFailures.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8CompileFunctionMarkerHits",
+                  g_v8CompileFunctionMarkerHits.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8CompileFunctionResetSearchPathHits",
+                  g_v8CompileFunctionResetSearchPathHits.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8CompileFunctionContext",
+                  g_lastV8CompileFunctionContext.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8CompileFunctionSourcePtr",
+                  g_lastV8CompileFunctionSourcePtr.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "lastV8CompileFunctionArgCount",
+                  g_lastV8CompileFunctionArgCount.load(
+                      std::memory_order_relaxed));
+        SetInt(env, result, "lastV8CompileFunctionOptions",
+               g_lastV8CompileFunctionOptions.load(
+                   std::memory_order_relaxed));
+        SetInt(env, result, "lastV8CompileFunctionNoCacheReason",
+               g_lastV8CompileFunctionNoCacheReason.load(
+                   std::memory_order_relaxed));
+        SetString(env, result, "lastV8CompileFunctionSourceSlots",
+                  GetLastV8CompileFunctionSourceSlots());
+        SetString(env, result, "lastV8CompileFunctionSource",
+                  GetLastV8CompileFunctionSource());
+        SetString(env, result, "firstV8CompileFunctionSource",
+                  GetFirstV8CompileFunctionSource());
+        SetString(env, result, "interestingV8CompileFunctionSource",
+                  GetInterestingV8CompileFunctionSource());
+        SetString(env, result, "v8CompileFunctionSourceSequence",
+                  GetV8CompileFunctionSourceSequence());
+        SetUint32(env, result, "v8ObjectSetPrivateSlots",
+                  g_patchedV8ObjectSetPrivateSlots.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8ObjectSetPrivateCalls",
+                  g_v8ObjectSetPrivateCalls.load(std::memory_order_relaxed));
+        SetUint32(env, result, "v8ObjectDefineOwnPropertySlots",
+                  g_patchedV8ObjectDefineOwnPropertySlots.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8ObjectDefineOwnPropertyCalls",
+                  g_v8ObjectDefineOwnPropertyCalls.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8ObjectDefineOwnPropertyNameReadFailures",
+                  g_v8ObjectDefineOwnPropertyNameReadFailures.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "v8DefineResourcesPathPatches",
+                  g_v8DefineResourcesPathPatches.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "v8ObjectDefineOwnPropertyNames",
+                  GetV8ObjectDefineOwnPropertyNames());
+        SetString(env, result, "lastDefinedResourcesPath",
+                  GetLastDefinedResourcesPath());
+        SetUint64(env, result, "browserAppSearchPathPatchAttempts",
+                  g_browserAppSearchPathPatchAttempts.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "browserAppSearchPathPatches",
+                  g_browserAppSearchPathPatches.load(std::memory_order_relaxed));
+        SetUint64(env, result, "browserAppSearchPathPatchFailures",
+                  g_browserAppSearchPathPatchFailures.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "browserAppSearchPathAsarOnlyPatches",
+                  g_browserAppSearchPathAsarOnlyPatches.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "browserAppSearchPathAsarOnlyFallbackPatches",
+                  g_browserAppSearchPathAsarOnlyFallbackPatches.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "browserAppSearchPathNameReadFailures",
+                  g_browserAppSearchPathNameReadFailures.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "v8ObjectSetPrivateNames",
+                  GetV8ObjectSetPrivateNames());
+        SetUint32(env, result, "entryPathProbeOpenSlots",
+                  g_patchedOpenSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "entryPathProbeFopenSlots",
+                  g_patchedFopenSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "entryPathProbeAccessSlots",
+                  g_patchedAccessSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "entryPathProbeStatSlots",
+                  g_patchedStatSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "entryPathProbeLstatSlots",
+                  g_patchedLstatSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "ohcodeWriteSlots",
+                  g_patchedWriteSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "ohcodeWritevSlots",
+                  g_patchedWritevSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "uvFsOpenSlots",
+                  g_patchedUvFsOpenSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "uvFsStatSlots",
+                  g_patchedUvFsStatSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "uvFsLstatSlots",
+                  g_patchedUvFsLstatSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "uvFsAccessSlots",
+                  g_patchedUvFsAccessSlots.load(std::memory_order_relaxed));
+        SetUint32(env, result, "uvFsScandirSlots",
+                  g_patchedUvFsScandirSlots.load(std::memory_order_relaxed));
+        SetUint64(env, result, "uvFsOpenCalls",
+                  g_uvFsOpenCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "uvFsStatCalls",
+                  g_uvFsStatCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "uvFsLstatCalls",
+                  g_uvFsLstatCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "uvFsAccessCalls",
+                  g_uvFsAccessCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "uvFsScandirCalls",
+                  g_uvFsScandirCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "uvFsResfileCalls",
+                  g_uvFsResfileCalls.load(std::memory_order_relaxed));
+        SetString(env, result, "lastUvFsOp", GetLastUvFsOp());
+        SetString(env, result, "lastUvFsPath", GetLastUvFsPath());
+        SetUint64(env, result, "entryPathProbeHits",
+                  g_entryPathProbeHits.load(std::memory_order_relaxed));
+        SetUint64(env, result, "entryPathProbePackageJsonHits",
+                  g_entryPathProbePackageJsonHits.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "entryPathProbeEntryJsHits",
+                  g_entryPathProbeEntryJsHits.load(std::memory_order_relaxed));
+        SetUint64(env, result, "entryPathProbeOutMainHits",
+                  g_entryPathProbeOutMainHits.load(std::memory_order_relaxed));
+        SetUint64(env, result, "entryPathProbeElectronMainHits",
+                  g_entryPathProbeElectronMainHits.load(
+                      std::memory_order_relaxed));
+        SetUint64(env, result, "entryPathProbeNullSlotPatches",
+                  g_entryPathProbeNullSlotPatches.load(
+                      std::memory_order_relaxed));
+        SetString(env, result, "lastEntryPathProbeOp",
+                  GetLastEntryPathProbeOp());
+        SetString(env, result, "lastEntryPathProbePath",
+                  GetLastEntryPathProbePath());
+        SetUint64(env, result, "ohcodeWriteTraceCalls",
+                  g_ohcodeWriteTraceCalls.load(std::memory_order_relaxed));
+        SetUint64(env, result, "ohcodeWriteTraceBytes",
+                  g_ohcodeWriteTraceBytes.load(std::memory_order_relaxed));
+        SetString(env, result, "lastOhcodeWriteTrace",
+                  GetLastOhcodeWriteTrace());
+    }
+
+} // namespace
+
+extern "C" int epoll_wait(int epfd, struct epoll_event *events, int maxevents,
+                          int timeout)
+{
     EpollWaitFn realEpollWait = GetRealEpollWait();
-    if (!realEpollWait) {
+    if (!realEpollWait)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -4723,11 +5198,14 @@ extern "C" int epoll_wait(int epfd, struct epoll_event* events, int maxevents,
 
     int effectiveTimeout = timeout;
     if (shouldInspectCaller &&
-        IsTargetElectronEpollWaitCaller(__builtin_return_address(0))) {
+        IsTargetElectronEpollWaitCaller(__builtin_return_address(0)))
+    {
         g_epollTargetHits.fetch_add(1, std::memory_order_relaxed);
         effectiveTimeout = maxWaitMs;
         g_epollClampHits.fetch_add(1, std::memory_order_relaxed);
-    } else {
+    }
+    else
+    {
         g_epollPassThroughHits.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -4738,9 +5216,33 @@ extern "C" int epoll_wait(int epfd, struct epoll_event* events, int maxevents,
     return realEpollWait(epfd, events, maxevents, effectiveTimeout);
 }
 
-extern "C" ssize_t write(int fd, const void* buffer, size_t count) {
+// libqos logs through hilog on failure, which needs several KB of stack; on
+// threads with a small stack (CrBrowserMain) that overflows and kills the
+// process, so skip the call instead of risking it. QoS is advisory only.
+extern "C" int OH_QoS_SetThreadQoS(int level)
+{
+    g_qosSetThreadQoSCalls.fetch_add(1, std::memory_order_relaxed);
+
+    constexpr size_t kMinQosStackHeadroom = 64 * 1024;
+    const size_t headroom = CurrentStackHeadroom();
+    g_lastQosStackHeadroom.store(headroom, std::memory_order_relaxed);
+
+    QosSetThreadQoSFn realSetThreadQoS = GetRealQosSetThreadQoS();
+    if (!realSetThreadQoS || headroom < kMinQosStackHeadroom)
+    {
+        g_qosSetThreadQoSSkips.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+
+    g_qosSetThreadQoSPassThrough.fetch_add(1, std::memory_order_relaxed);
+    return realSetThreadQoS(level);
+}
+
+extern "C" ssize_t write(int fd, const void *buffer, size_t count)
+{
     WriteFn realWrite = GetRealWrite();
-    if (!realWrite) {
+    if (!realWrite)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -4749,29 +5251,35 @@ extern "C" ssize_t write(int fd, const void* buffer, size_t count) {
     return realWrite(fd, buffer, count);
 }
 
-extern "C" ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
+extern "C" ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
+{
     WritevFn realWritev = GetRealWritev();
-    if (!realWritev) {
+    if (!realWritev)
+    {
         errno = ENOSYS;
         return -1;
     }
 
-    if (iov && iovcnt > 0) {
+    if (iov && iovcnt > 0)
+    {
         const int capped = iovcnt > 32 ? 32 : iovcnt;
-        for (int i = 0; i < capped; ++i) {
+        for (int i = 0; i < capped; ++i)
+        {
             CaptureOhcodeWriteTrace(iov[i].iov_base, iov[i].iov_len);
         }
     }
     return realWritev(fd, iov, iovcnt);
 }
 
-extern "C" void*
+extern "C" void *
 _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE(
-    void* context, void* source, size_t arguments_count, void* arguments,
-    size_t context_extension_count, void* context_extensions,
-    int compile_options, int no_cache_reason) {
+    void *context, void *source, size_t arguments_count, void *arguments,
+    size_t context_extension_count, void *context_extensions,
+    int compile_options, int no_cache_reason)
+{
     V8CompileFunctionFn realCompileFunction = GetRealV8CompileFunction();
-    if (!realCompileFunction) {
+    if (!realCompileFunction)
+    {
         return nullptr;
     }
 
@@ -4795,9 +5303,11 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
 
 extern "C" uint32_t
 _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE(
-    void* object, void* context, void* key, void* value) {
+    void *object, void *context, void *key, void *value)
+{
     V8ObjectSetPrivateFn realSetPrivate = GetRealV8ObjectSetPrivate();
-    if (!realSetPrivate) {
+    if (!realSetPrivate)
+    {
         return 0;
     }
 
@@ -4805,9 +5315,10 @@ _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5Va
 
     const uintptr_t callerOffset =
         GetElectronCallerOffset(__builtin_return_address(0));
-    void* effectiveValue = value;
+    void *effectiveValue = value;
     char privateName[96];
-    if (!ReadV8PrivateName(context, key, privateName, sizeof(privateName))) {
+    if (!ReadV8PrivateName(context, key, privateName, sizeof(privateName)))
+    {
         g_browserAppSearchPathNameReadFailures.fetch_add(
             1, std::memory_order_relaxed);
         TraceV8ObjectSetPrivateName("<read-failed>", callerOffset);
@@ -4815,55 +5326,68 @@ _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5Va
     }
     TraceV8ObjectSetPrivateName(privateName, callerOffset);
     CaptureNodePreLoadProbeHiddenValue(context, privateName, value);
-    if (IsBrowserInitStageDefineName(privateName)) {
+    if (IsBrowserInitStageDefineName(privateName))
+    {
         char valueText[128];
         const bool valueIsString =
             ReadV8StringValue(context, value, valueText, sizeof(valueText));
         RecordBrowserInitStageDefine(
             privateName, valueIsString ? valueText : "<non-string>");
-        if (strcmp(privateName, "O") == 0) {
+        if (strcmp(privateName, "O") == 0)
+        {
             RecordBrowserInitDefineO(valueIsString ? valueText
                                                    : "<non-string>");
         }
     }
 
-    if (strcmp(privateName, "appSearchPaths") == 0) {
+    if (strcmp(privateName, "appSearchPaths") == 0)
+    {
         const uint64_t attempt =
             g_browserAppSearchPathPatchAttempts.fetch_add(
                 1, std::memory_order_relaxed) +
             1;
-        void* replacement = BuildBrowserAppSearchPathsArray(context);
-        if (replacement) {
+        void *replacement = BuildBrowserAppSearchPathsArray(context);
+        if (replacement)
+        {
             effectiveValue = replacement;
             g_browserAppSearchPathPatches.fetch_add(
                 1, std::memory_order_relaxed);
-            if (attempt <= 5) {
+            if (attempt <= 5)
+            {
                 Log("patched Electron appSearchPaths hidden value "
                     "context=%p value=%p",
                     context, replacement);
             }
-        } else {
+        }
+        else
+        {
             g_browserAppSearchPathPatchFailures.fetch_add(
                 1, std::memory_order_relaxed);
             Log("failed to build appSearchPaths replacement context=%p",
                 context);
         }
-    } else if (strcmp(privateName, "appSearchPathsOnlyLoadASAR") == 0) {
+    }
+    else if (strcmp(privateName, "appSearchPathsOnlyLoadASAR") == 0)
+    {
         const uint64_t attempt =
             g_browserAppSearchPathPatchAttempts.fetch_add(
                 1, std::memory_order_relaxed) +
             1;
-        void* replacement = BuildV8FalseValue(context);
-        if (replacement) {
+        void *replacement = BuildV8FalseValue(context);
+        if (replacement)
+        {
             effectiveValue = replacement;
             g_browserAppSearchPathAsarOnlyPatches.fetch_add(
                 1, std::memory_order_relaxed);
-            if (attempt <= 5) {
+            if (attempt <= 5)
+            {
                 Log("patched Electron appSearchPathsOnlyLoadASAR hidden value "
                     "context=%p value=%p",
                     context, replacement);
             }
-        } else {
+        }
+        else
+        {
             g_browserAppSearchPathPatchFailures.fetch_add(
                 1, std::memory_order_relaxed);
             Log("failed to build appSearchPathsOnlyLoadASAR replacement "
@@ -4877,10 +5401,12 @@ _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5Va
 
 extern "C" uint32_t
 _ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE(
-    void* object, void* context, void* key, void* value, int attributes) {
+    void *object, void *context, void *key, void *value, int attributes)
+{
     V8ObjectDefineOwnPropertyFn realDefineOwnProperty =
         GetRealV8ObjectDefineOwnProperty();
-    if (!realDefineOwnProperty) {
+    if (!realDefineOwnProperty)
+    {
         return 0;
     }
 
@@ -4889,9 +5415,10 @@ _ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS
 
     const uintptr_t callerOffset =
         GetElectronCallerOffset(__builtin_return_address(0));
-    void* effectiveValue = value;
+    void *effectiveValue = value;
     char name[96];
-    if (!ReadV8StringValue(context, key, name, sizeof(name))) {
+    if (!ReadV8StringValue(context, key, name, sizeof(name)))
+    {
         g_v8ObjectDefineOwnPropertyNameReadFailures.fetch_add(
             1, std::memory_order_relaxed);
         TraceV8ObjectDefineOwnPropertyName("<read-failed>", nullptr,
@@ -4905,27 +5432,32 @@ _ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS
         ReadV8StringValue(context, value, valueText, sizeof(valueText));
     TraceV8ObjectDefineOwnPropertyName(
         name, valueIsString ? valueText : nullptr, attributes, callerOffset);
-    if (IsBrowserInitStageDefineName(name)) {
+    if (IsBrowserInitStageDefineName(name))
+    {
         RecordBrowserInitStageDefine(name,
                                      valueIsString ? valueText : "<non-string>");
     }
-    if (strcmp(name, "O") == 0) {
+    if (strcmp(name, "O") == 0)
+    {
         RecordBrowserInitDefineO(valueIsString ? valueText : "<non-string>");
     }
 
-    if (strcmp(name, "resourcesPath") == 0) {
-        if (valueIsString) {
+    if (strcmp(name, "resourcesPath") == 0)
+    {
+        if (valueIsString)
+        {
             RecordDefinedResourcesPath(valueText);
         }
 
-        constexpr const char* kForcedResourcesPath =
+        constexpr const char *kForcedResourcesPath =
             "/data/storage/el1/bundle/electron/resources/resfile/resources";
         std::call_once(g_v8AppSearchPathSymbolsOnce,
                        ResolveV8AppSearchPathSymbols);
-        void* isolate = g_v8ContextGetIsolate ? g_v8ContextGetIsolate(context)
+        void *isolate = g_v8ContextGetIsolate ? g_v8ContextGetIsolate(context)
                                               : nullptr;
-        void* replacement = NewV8Utf8String(isolate, kForcedResourcesPath);
-        if (replacement) {
+        void *replacement = NewV8Utf8String(isolate, kForcedResourcesPath);
+        if (replacement)
+        {
             effectiveValue = replacement;
             g_v8DefineResourcesPathPatches.fetch_add(
                 1, std::memory_order_relaxed);
@@ -4939,9 +5471,11 @@ _ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS
                                  attributes);
 }
 
-extern "C" int open(const char* path, int flags, ...) {
+extern "C" int open(const char *path, int flags, ...)
+{
     OpenFn realOpen = GetRealOpen();
-    if (!realOpen) {
+    if (!realOpen)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -4950,7 +5484,8 @@ extern "C" int open(const char* path, int flags, ...) {
 
     mode_t mode = 0;
     const bool hasMode = (flags & O_CREAT) != 0;
-    if (hasMode) {
+    if (hasMode)
+    {
         va_list args;
         va_start(args, flags);
         mode = static_cast<mode_t>(va_arg(args, int));
@@ -4960,9 +5495,11 @@ extern "C" int open(const char* path, int flags, ...) {
     return realOpen(path, flags);
 }
 
-extern "C" FILE* fopen(const char* path, const char* mode) {
+extern "C" FILE *fopen(const char *path, const char *mode)
+{
     FopenFn realFopen = GetRealFopen();
-    if (!realFopen) {
+    if (!realFopen)
+    {
         errno = ENOSYS;
         return nullptr;
     }
@@ -4971,9 +5508,11 @@ extern "C" FILE* fopen(const char* path, const char* mode) {
     return realFopen(path, mode);
 }
 
-extern "C" int access(const char* path, int mode) {
+extern "C" int access(const char *path, int mode)
+{
     AccessFn realAccess = GetRealAccess();
-    if (!realAccess) {
+    if (!realAccess)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -4982,9 +5521,11 @@ extern "C" int access(const char* path, int mode) {
     return realAccess(path, mode);
 }
 
-extern "C" int stat(const char* path, struct stat* buffer) {
+extern "C" int stat(const char *path, struct stat *buffer)
+{
     StatFn realStat = GetRealStat();
-    if (!realStat) {
+    if (!realStat)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -4993,9 +5534,11 @@ extern "C" int stat(const char* path, struct stat* buffer) {
     return realStat(path, buffer);
 }
 
-extern "C" int lstat(const char* path, struct stat* buffer) {
+extern "C" int lstat(const char *path, struct stat *buffer)
+{
     StatFn realLstat = GetRealLstat();
-    if (!realLstat) {
+    if (!realLstat)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -5004,10 +5547,12 @@ extern "C" int lstat(const char* path, struct stat* buffer) {
     return realLstat(path, buffer);
 }
 
-extern "C" int uv_fs_open(void* loop, void* req, const char* path, int flags,
-                          int mode, void* cb) {
+extern "C" int uv_fs_open(void *loop, void *req, const char *path, int flags,
+                          int mode, void *cb)
+{
     UvFsOpenFn realUvFsOpen = GetRealUvFsOpen();
-    if (!realUvFsOpen) {
+    if (!realUvFsOpen)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -5017,9 +5562,11 @@ extern "C" int uv_fs_open(void* loop, void* req, const char* path, int flags,
     return realUvFsOpen(loop, req, path, flags, mode, cb);
 }
 
-extern "C" int uv_fs_stat(void* loop, void* req, const char* path, void* cb) {
+extern "C" int uv_fs_stat(void *loop, void *req, const char *path, void *cb)
+{
     UvFsPathFn realUvFsStat = GetRealUvFsStat();
-    if (!realUvFsStat) {
+    if (!realUvFsStat)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -5029,9 +5576,11 @@ extern "C" int uv_fs_stat(void* loop, void* req, const char* path, void* cb) {
     return realUvFsStat(loop, req, path, cb);
 }
 
-extern "C" int uv_fs_lstat(void* loop, void* req, const char* path, void* cb) {
+extern "C" int uv_fs_lstat(void *loop, void *req, const char *path, void *cb)
+{
     UvFsPathFn realUvFsLstat = GetRealUvFsLstat();
-    if (!realUvFsLstat) {
+    if (!realUvFsLstat)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -5041,10 +5590,12 @@ extern "C" int uv_fs_lstat(void* loop, void* req, const char* path, void* cb) {
     return realUvFsLstat(loop, req, path, cb);
 }
 
-extern "C" int uv_fs_access(void* loop, void* req, const char* path, int flags,
-                            void* cb) {
+extern "C" int uv_fs_access(void *loop, void *req, const char *path, int flags,
+                            void *cb)
+{
     UvFsPathFlagsFn realUvFsAccess = GetRealUvFsAccess();
-    if (!realUvFsAccess) {
+    if (!realUvFsAccess)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -5054,10 +5605,12 @@ extern "C" int uv_fs_access(void* loop, void* req, const char* path, int flags,
     return realUvFsAccess(loop, req, path, flags, cb);
 }
 
-extern "C" int uv_fs_scandir(void* loop, void* req, const char* path,
-                             int flags, void* cb) {
+extern "C" int uv_fs_scandir(void *loop, void *req, const char *path,
+                             int flags, void *cb)
+{
     UvFsPathFlagsFn realUvFsScandir = GetRealUvFsScandir();
-    if (!realUvFsScandir) {
+    if (!realUvFsScandir)
+    {
         errno = ENOSYS;
         return -1;
     }
@@ -5067,11 +5620,13 @@ extern "C" int uv_fs_scandir(void* loop, void* req, const char* path,
     return realUvFsScandir(loop, req, path, flags, cb);
 }
 
-extern "C" bool _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
-    void* isolate, const void* params) {
+extern "C" void _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
+    void *isolate, const void *params)
+{
     V8IsolateInitializeFn realInitialize = GetRealV8IsolateInitialize();
-    if (!realInitialize) {
-        return false;
+    if (!realInitialize)
+    {
+        return;
     }
 
     std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
@@ -5079,56 +5634,60 @@ extern "C" bool _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
     g_v8InitializeCalls.fetch_add(1, std::memory_order_relaxed);
     const bool targetCaller =
         IsTargetElectronV8InitializeCaller(__builtin_return_address(0));
-    if (targetCaller) {
+    if (targetCaller)
+    {
         g_v8InitializeTargetHits.fetch_add(1, std::memory_order_relaxed);
     }
     InspectV8CreateParams(params, targetCaller);
 
     if (!g_v8InitializeHookEnabled.load(std::memory_order_relaxed) ||
-        g_insideV8InitializeHook) {
+        g_insideV8InitializeHook)
+    {
         g_v8InitializePassThroughCalls.fetch_add(1,
                                                  std::memory_order_relaxed);
         EnsureNodePlatformRegisteredForIsolate(nullptr, isolate, true);
-        const bool ok =
-            CallRealV8IsolateInitialize(realInitialize, isolate, params);
+        CallRealV8IsolateInitialize(realInitialize, isolate, params);
         EnsureNodePlatformRegisteredForIsolate(nullptr, isolate, true);
-        return ok;
+        return;
     }
 
     std::call_once(g_v8FlagsOnce, ApplyV8StartupFlagsOnce);
 
-    if (!g_serializeV8Initialize.load(std::memory_order_relaxed)) {
+    if (!g_serializeV8Initialize.load(std::memory_order_relaxed))
+    {
         g_v8InitializePassThroughCalls.fetch_add(1,
                                                  std::memory_order_relaxed);
         g_insideV8InitializeHook = true;
         EnsureNodePlatformRegisteredForIsolate(nullptr, isolate, true);
-        const bool ok =
-            CallRealV8IsolateInitialize(realInitialize, isolate, params);
+        CallRealV8IsolateInitialize(realInitialize, isolate, params);
         g_insideV8InitializeHook = false;
         EnsureNodePlatformRegisteredForIsolate(nullptr, isolate, true);
-        return ok;
+        return;
     }
 
     std::lock_guard<std::mutex> lock(g_v8InitializeMutex);
     g_v8InitializeSerializedCalls.fetch_add(1, std::memory_order_relaxed);
     g_insideV8InitializeHook = true;
     EnsureNodePlatformRegisteredForIsolate(nullptr, isolate, true);
-    const bool ok = CallRealV8IsolateInitialize(realInitialize, isolate, params);
+    CallRealV8IsolateInitialize(realInitialize, isolate, params);
     g_insideV8InitializeHook = false;
     EnsureNodePlatformRegisteredForIsolate(nullptr, isolate, true);
-    return ok;
+    return;
 }
 
 extern "C" uint32_t
-_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void* context) {
+_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void *context)
+{
     NodeInitializeContextFn realInitializeContext =
         GetRealNodeInitializeContext();
-    if (!realInitializeContext) {
+    if (!realInitializeContext)
+    {
         return 0;
     }
 
     g_nodeInitializeContextCalls.fetch_add(1, std::memory_order_relaxed);
-    if (!g_insideNodeInitializeContextHook) {
+    if (!g_insideNodeInitializeContextHook)
+    {
         g_insideNodeInitializeContextHook = true;
         EnsureNodePlatformRegisteredForContext(context);
         g_insideNodeInitializeContextHook = false;
@@ -5137,11 +5696,13 @@ _ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE(void* context) {
     return realInitializeContext(context);
 }
 
-extern "C" void*
+extern "C" void *
 _ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE(
-    void* isolate, void* objectTemplate) {
+    void *isolate, void *objectTemplate)
+{
     NodeNewContextFn realNewContext = GetRealNodeNewContext();
-    if (!realNewContext) {
+    if (!realNewContext)
+    {
         g_nodeNewContextNulls.fetch_add(1, std::memory_order_relaxed);
         return nullptr;
     }
@@ -5153,27 +5714,32 @@ _ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE(
     g_lastNodeNewContextTemplate.store(
         reinterpret_cast<uintptr_t>(objectTemplate), std::memory_order_relaxed);
 
-    void* context = realNewContext(isolate, objectTemplate);
+    void *context = realNewContext(isolate, objectTemplate);
     g_lastNodeNewContextResult.store(reinterpret_cast<uintptr_t>(context),
                                      std::memory_order_relaxed);
-    if (!context) {
+    if (!context)
+    {
         g_nodeNewContextNulls.fetch_add(1, std::memory_order_relaxed);
         Log("node::NewContext returned null isolate=%p template=%p",
             isolate, objectTemplate);
-    } else if (callIndex <= 5) {
+    }
+    else if (callIndex <= 5)
+    {
         Log("node::NewContext returned context=%p isolate=%p template=%p",
             context, isolate, objectTemplate);
     }
     return context;
 }
 
-extern "C" void*
+extern "C" void *
 _ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE(
-    void* isolateData, void* context, void* args, void* execArgs, void* flags,
-    void* threadId, void* inspectorParentHandle) {
+    void *isolateData, void *context, void *args, void *execArgs, void *flags,
+    void *threadId, void *inspectorParentHandle)
+{
     NodeCreateEnvironmentFn realCreateEnvironment =
         GetRealNodeCreateEnvironment();
-    if (!realCreateEnvironment) {
+    if (!realCreateEnvironment)
+    {
         g_nodeCreateEnvironmentNulls.fetch_add(1,
                                                std::memory_order_relaxed);
         return nullptr;
@@ -5187,29 +5753,34 @@ _ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__
     g_lastNodeCreateEnvironmentContext.store(
         reinterpret_cast<uintptr_t>(context), std::memory_order_relaxed);
     RecordNodeCreateEnvironmentArgs(args, execArgs, callIndex);
-    void* environment =
+    void *environment =
         realCreateEnvironment(isolateData, context, args, execArgs, flags,
                               threadId, inspectorParentHandle);
     g_lastNodeCreateEnvironmentResult.store(
         reinterpret_cast<uintptr_t>(environment), std::memory_order_relaxed);
-    if (!environment) {
+    if (!environment)
+    {
         g_nodeCreateEnvironmentNulls.fetch_add(1,
                                                std::memory_order_relaxed);
         Log("node::CreateEnvironment returned null isolateData=%p context=%p",
             isolateData, context);
-    } else if (callIndex <= 5) {
+    }
+    else if (callIndex <= 5)
+    {
         Log("node::CreateEnvironment returned env=%p isolateData=%p context=%p",
             environment, isolateData, context);
     }
     return environment;
 }
 
-extern "C" void*
-_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
-                                                const char* source) {
+extern "C" void *
+_ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void *environment,
+                                                const char *source)
+{
     NodeLoadEnvironmentStringFn realLoadEnvironment =
         GetRealNodeLoadEnvironmentString();
-    if (!realLoadEnvironment) {
+    if (!realLoadEnvironment)
+    {
         g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
         return nullptr;
     }
@@ -5222,26 +5793,31 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentEPKc(void* environment,
         reinterpret_cast<uintptr_t>(environment), std::memory_order_relaxed);
     g_lastNodeLoadEnvironmentSource.store(
         reinterpret_cast<uintptr_t>(source), std::memory_order_relaxed);
-    void* value = realLoadEnvironment(environment, source);
+    void *value = realLoadEnvironment(environment, source);
     g_lastNodeLoadEnvironmentResult.store(reinterpret_cast<uintptr_t>(value),
                                           std::memory_order_relaxed);
-    if (!value) {
+    if (!value)
+    {
         g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
         Log("node::LoadEnvironment(string) returned empty env=%p source=%p",
             environment, source);
-    } else if (callIndex <= 5) {
+    }
+    else if (callIndex <= 5)
+    {
         Log("node::LoadEnvironment(string) returned value=%p env=%p source=%p",
             value, environment, source);
     }
     return value;
 }
 
-extern "C" void*
+extern "C" void *
 _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE(
-    void* environment, void* callback, void* preload) {
+    void *environment, void *callback, void *preload)
+{
     NodeLoadEnvironmentCallbackFn realLoadEnvironment =
         GetRealNodeLoadEnvironmentCallback();
-    if (!realLoadEnvironment) {
+    if (!realLoadEnvironment)
+    {
         g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
         return nullptr;
     }
@@ -5256,44 +5832,53 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         reinterpret_cast<uintptr_t>(callback), std::memory_order_relaxed);
     g_lastNodeLoadEnvironmentPreload.store(
         reinterpret_cast<uintptr_t>(preload), std::memory_order_relaxed);
-    void* value = realLoadEnvironment(environment, callback, preload);
+    void *value = realLoadEnvironment(environment, callback, preload);
     g_lastNodeLoadEnvironmentResult.store(reinterpret_cast<uintptr_t>(value),
                                           std::memory_order_relaxed);
-    if (!value) {
+    if (!value)
+    {
         g_nodeLoadEnvironmentNulls.fetch_add(1, std::memory_order_relaxed);
         Log("node::LoadEnvironment(callback) returned empty env=%p callback=%p "
             "preload=%p",
             environment, callback, preload);
-    } else if (callIndex <= 5) {
+    }
+    else if (callIndex <= 5)
+    {
         Log("node::LoadEnvironment(callback) returned value=%p env=%p "
             "callback=%p preload=%p",
             value, environment, callback, preload);
     }
-    if (value && callIndex == 1) {
-        auto* environmentBytes = static_cast<uint8_t*>(environment);
-        void* startExecutionData =
-            *reinterpret_cast<void**>(environmentBytes + 0xa70);
-        if (startExecutionData) {
-            auto* dataBytes = static_cast<uint8_t*>(startExecutionData);
+    if (value && callIndex == 1)
+    {
+        auto *environmentBytes = static_cast<uint8_t *>(environment);
+        void *startExecutionData =
+            *reinterpret_cast<void **>(environmentBytes + 0xa70);
+        if (startExecutionData)
+        {
+            auto *dataBytes = static_cast<uint8_t *>(startExecutionData);
             NodeStartExecutionCallbackInfoView info{
-                *reinterpret_cast<void**>(dataBytes + 0x1c8),
-                *reinterpret_cast<void**>(dataBytes + 0x1a8)};
+                *reinterpret_cast<void **>(dataBytes + 0x1c8),
+                *reinterpret_cast<void **>(dataBytes + 0x1a8)};
             Log("recovered Node start-execution values data=%p first=%p "
-                "second=%p", startExecutionData, info.firstValue,
+                "second=%p",
+                startExecutionData, info.firstValue,
                 info.secondValue);
-            void* bootstrapResult = RunNodeStartExecutionBootstrap(info);
+            void *bootstrapResult = RunNodeStartExecutionBootstrap(info);
             if (!bootstrapResult &&
-                BootstrapMissingNodeInternalLoaders(environment)) {
+                BootstrapMissingNodeInternalLoaders(environment))
+            {
                 info.firstValue =
-                    *reinterpret_cast<void**>(dataBytes + 0x1c8);
+                    *reinterpret_cast<void **>(dataBytes + 0x1c8);
                 info.secondValue =
-                    *reinterpret_cast<void**>(dataBytes + 0x1a8);
+                    *reinterpret_cast<void **>(dataBytes + 0x1a8);
                 Log("recovered Node start-execution values after loader "
                     "bootstrap first=%p second=%p",
                     info.firstValue, info.secondValue);
                 RunNodeStartExecutionBootstrap(info);
             }
-        } else {
+        }
+        else
+        {
             Log("Node start-execution data unavailable env=%p", environment);
         }
     }
@@ -5302,16 +5887,19 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
 
 extern "C" int
 _ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE(
-    void* self, const AdapterArgVector& args, const AdapterFdVector& fds) {
+    void *self, const AdapterArgVector &args, const AdapterFdVector &fds)
+{
     g_adapterChildProcessCalls.fetch_add(1, std::memory_order_relaxed);
-    if (ShouldBlockAdapterChildProcess(args)) {
+    if (ShouldBlockAdapterChildProcess(args))
+    {
         g_adapterCrashpadBlocks.fetch_add(1, std::memory_order_relaxed);
         Log("blocked adapter StartGpuProcess crashpad child launch");
         return -1;
     }
 
     AdapterStartChildProcess2Fn realStart = GetRealAdapterStartGpuProcess();
-    if (!realStart) {
+    if (!realStart)
+    {
         return -1;
     }
     g_adapterChildProcessPassThrough.fetch_add(1, std::memory_order_relaxed);
@@ -5320,9 +5908,11 @@ _ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16
 
 extern "C" int
 _ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE(
-    void* self, const AdapterArgVector& args, const AdapterFdVector& fds) {
+    void *self, const AdapterArgVector &args, const AdapterFdVector &fds)
+{
     g_adapterChildProcessCalls.fetch_add(1, std::memory_order_relaxed);
-    if (ShouldBlockAdapterChildProcess(args)) {
+    if (ShouldBlockAdapterChildProcess(args))
+    {
         g_adapterCrashpadBlocks.fetch_add(1, std::memory_order_relaxed);
         Log("blocked adapter StartLegacyChildProcess crashpad child launch");
         return -1;
@@ -5330,7 +5920,8 @@ _ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKN
 
     AdapterStartChildProcess2Fn realStart =
         GetRealAdapterStartLegacyChildProcess();
-    if (!realStart) {
+    if (!realStart)
+    {
         return -1;
     }
     g_adapterChildProcessPassThrough.fetch_add(1, std::memory_order_relaxed);
@@ -5339,10 +5930,12 @@ _ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKN
 
 extern "C" int
 _ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_(
-    void* self, const AdapterArgVector& args, const AdapterFdVector& fds,
-    const std::string& processName) {
+    void *self, const AdapterArgVector &args, const AdapterFdVector &fds,
+    const std::string &processName)
+{
     g_adapterChildProcessCalls.fetch_add(1, std::memory_order_relaxed);
-    if (ShouldBlockAdapterChildProcess(args)) {
+    if (ShouldBlockAdapterChildProcess(args))
+    {
         g_adapterCrashpadBlocks.fetch_add(1, std::memory_order_relaxed);
         Log("blocked adapter StartNormalChildProcess crashpad child launch");
         return -1;
@@ -5350,7 +5943,8 @@ _ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKN
 
     AdapterStartChildProcess3Fn realStart =
         GetRealAdapterStartNormalChildProcess();
-    if (!realStart) {
+    if (!realStart)
+    {
         return -1;
     }
     g_adapterChildProcessPassThrough.fetch_add(1, std::memory_order_relaxed);
@@ -5359,10 +5953,12 @@ _ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKN
 
 extern "C" int
 _ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_(
-    void* self, const AdapterArgVector& args, const AdapterFdVector& fds,
-    const std::string& processName) {
+    void *self, const AdapterArgVector &args, const AdapterFdVector &fds,
+    const std::string &processName)
+{
     g_adapterChildProcessCalls.fetch_add(1, std::memory_order_relaxed);
-    if (ShouldBlockAdapterChildProcess(args)) {
+    if (ShouldBlockAdapterChildProcess(args))
+    {
         g_adapterCrashpadBlocks.fetch_add(1, std::memory_order_relaxed);
         Log("blocked adapter StartIsolateChildProcess crashpad child launch");
         return -1;
@@ -5370,54 +5966,62 @@ _ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERK
 
     AdapterStartChildProcess3Fn realStart =
         GetRealAdapterStartIsolateChildProcess();
-    if (!realStart) {
+    if (!realStart)
+    {
         return -1;
     }
     g_adapterChildProcessPassThrough.fetch_add(1, std::memory_order_relaxed);
     return realStart(self, args, fds, processName);
 }
 
-extern "C" void _ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE(void* blob) {
+extern "C" void _ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE(void *blob)
+{
     g_v8SetSnapshotDataBlobCalls.fetch_add(1, std::memory_order_relaxed);
     RecordV8SnapshotDataBlob(blob);
-    if (g_skipV8SnapshotDataBlob.load(std::memory_order_relaxed)) {
+    if (g_skipV8SnapshotDataBlob.load(std::memory_order_relaxed))
+    {
         g_snapshotBlobSkips.fetch_add(1, std::memory_order_relaxed);
         RecordEffectiveV8SnapshotDataBlob(nullptr);
         Log("skipping V8 snapshot blob original=%p", blob);
         return;
     }
 
-    void* effectiveBlob = MaybeReplaceContextSnapshotBlob(blob);
+    void *effectiveBlob = MaybeReplaceContextSnapshotBlob(blob);
     RecordEffectiveV8SnapshotDataBlob(effectiveBlob);
     V8SetSnapshotDataBlobFn realSetSnapshotDataBlob =
         GetRealV8SetSnapshotDataBlob();
-    if (!realSetSnapshotDataBlob) {
+    if (!realSetSnapshotDataBlob)
+    {
         return;
     }
     realSetSnapshotDataBlob(effectiveBlob);
 }
 
 extern "C" void _ZN2v82V829InitializeExternalStartupDataEPKc(
-    const char* directoryPath) {
+    const char *directoryPath)
+{
     g_v8InitializeExternalStartupDataCalls.fetch_add(
         1, std::memory_order_relaxed);
     StoreV8ExternalStartupDataPath(directoryPath);
     V8InitializeExternalStartupDataFn realInitializeExternalStartupData =
         GetRealV8InitializeExternalStartupData();
-    if (!realInitializeExternalStartupData) {
+    if (!realInitializeExternalStartupData)
+    {
         return;
     }
     realInitializeExternalStartupData(directoryPath);
 }
 
 extern "C" void _ZN2v82V837InitializeExternalStartupDataFromFileEPKc(
-    const char* snapshotBlobPath) {
+    const char *snapshotBlobPath)
+{
     g_v8InitializeExternalStartupDataFromFileCalls.fetch_add(
         1, std::memory_order_relaxed);
     StoreV8ExternalStartupDataPath(snapshotBlobPath);
     V8InitializeExternalStartupDataFn realInitializeExternalStartupDataFromFile =
         GetRealV8InitializeExternalStartupDataFromFile();
-    if (!realInitializeExternalStartupDataFromFile) {
+    if (!realInitializeExternalStartupDataFromFile)
+    {
         return;
     }
     realInitializeExternalStartupDataFromFile(snapshotBlobPath);
@@ -5425,11 +6029,12 @@ extern "C" void _ZN2v82V837InitializeExternalStartupDataFromFileEPKc(
 
 extern "C" bool
 _ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b(
-    void* isolate,
-    void* readOnlySnapshot,
-    void* sharedSnapshot,
-    void* startupSnapshot,
-    bool canRehash) {
+    void *isolate,
+    void *readOnlySnapshot,
+    void *sharedSnapshot,
+    void *startupSnapshot,
+    bool canRehash)
+{
     g_v8InitWithSnapshotCalls.fetch_add(1, std::memory_order_relaxed);
     RecordV8InitWithSnapshotArgs(isolate, readOnlySnapshot, sharedSnapshot,
                                  startupSnapshot, canRehash,
@@ -5437,7 +6042,8 @@ _ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b(
 
     V8InternalInitWithSnapshotFn realInitWithSnapshot =
         GetRealV8InternalInitWithSnapshot();
-    if (!realInitWithSnapshot) {
+    if (!realInitWithSnapshot)
+    {
         g_v8InitWithSnapshotFailures.fetch_add(1,
                                                std::memory_order_relaxed);
         g_lastV8InitWithSnapshotResult.store(false,
@@ -5449,10 +6055,13 @@ _ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b(
                                          sharedSnapshot, startupSnapshot,
                                          canRehash);
     g_lastV8InitWithSnapshotResult.store(ok, std::memory_order_relaxed);
-    if (ok) {
+    if (ok)
+    {
         g_v8InitWithSnapshotSuccesses.fetch_add(
             1, std::memory_order_relaxed);
-    } else {
+    }
+    else
+    {
         g_v8InitWithSnapshotFailures.fetch_add(
             1, std::memory_order_relaxed);
     }
@@ -5461,17 +6070,17 @@ _ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b(
         "startup=%p/%u canRehash=%d caller=0x%zx",
         ok ? 1 : 0,
         isolate,
-        reinterpret_cast<void*>(
+        reinterpret_cast<void *>(
             g_lastV8InitWithSnapshotReadOnlyDataAddress.load(
                 std::memory_order_relaxed)),
         g_lastV8InitWithSnapshotReadOnlyLength.load(
             std::memory_order_relaxed),
-        reinterpret_cast<void*>(
+        reinterpret_cast<void *>(
             g_lastV8InitWithSnapshotSharedDataAddress.load(
                 std::memory_order_relaxed)),
         g_lastV8InitWithSnapshotSharedLength.load(
             std::memory_order_relaxed),
-        reinterpret_cast<void*>(
+        reinterpret_cast<void *>(
             g_lastV8InitWithSnapshotStartupDataAddress.load(
                 std::memory_order_relaxed)),
         g_lastV8InitWithSnapshotStartupLength.load(
@@ -5485,9 +6094,11 @@ _ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b(
 
 extern "C" V8OwnedByteVector
 _ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE(
-    const uint8_t* data, size_t size) {
+    const uint8_t *data, size_t size)
+{
     SnapshotDecompressFn realDecompress = GetRealSnapshotDecompress();
-    if (!realDecompress) {
+    if (!realDecompress)
+    {
         return {};
     }
 
@@ -5496,7 +6107,8 @@ _ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE(
     g_lastSnapshotCompressedSize.store(
         size > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(size),
         std::memory_order_relaxed);
-    if (data && size >= sizeof(uint32_t)) {
+    if (data && size >= sizeof(uint32_t))
+    {
         uint32_t decompressedSize = 0;
         memcpy(&decompressedSize, data, sizeof(decompressedSize));
         g_lastSnapshotDecompressedSize.store(decompressedSize,
@@ -5506,781 +6118,911 @@ _ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE(
     return realDecompress(data, size);
 }
 
-extern "C" void* _ZnamRKSt9nothrow_t(size_t size,
-                                     const void* nothrowTag) noexcept {
+extern "C" void *_ZnamRKSt9nothrow_t(size_t size,
+                                     const void *nothrowTag) noexcept
+{
     g_snapshotNothrowNewCalls.fetch_add(1, std::memory_order_relaxed);
     return NothrowNewWithSnapshotFallback(
         GetRealArrayNothrowNew(), size, nothrowTag,
         __builtin_return_address(0));
 }
 
-extern "C" void* _ZnwmRKSt9nothrow_t(size_t size,
-                                     const void* nothrowTag) noexcept {
+extern "C" void *_ZnwmRKSt9nothrow_t(size_t size,
+                                     const void *nothrowTag) noexcept
+{
     g_snapshotNothrowNewCalls.fetch_add(1, std::memory_order_relaxed);
     return NothrowNewWithSnapshotFallback(
         GetRealScalarNothrowNew(), size, nothrowTag,
         __builtin_return_address(0));
 }
 
-extern "C" void _ZdaPv(void* ptr) noexcept {
-    if (!ptr) {
+extern "C" void _ZdaPv(void *ptr) noexcept
+{
+    if (!ptr)
+    {
         return;
     }
 
     size_t size = 0;
-    if (TakeMmapAllocation(ptr, &size)) {
+    if (TakeMmapAllocation(ptr, &size))
+    {
         munmap(ptr, size);
         g_snapshotMmapDeletes.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
     DeleteFn realDelete = GetRealArrayDelete();
-    if (realDelete) {
+    if (realDelete)
+    {
         realDelete(ptr);
     }
 }
 
-extern "C" void _ZdlPv(void* ptr) noexcept {
-    if (!ptr) {
+extern "C" void _ZdlPv(void *ptr) noexcept
+{
+    if (!ptr)
+    {
         return;
     }
 
     size_t size = 0;
-    if (TakeMmapAllocation(ptr, &size)) {
+    if (TakeMmapAllocation(ptr, &size))
+    {
         munmap(ptr, size);
         g_snapshotMmapDeletes.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
     DeleteFn realDelete = GetRealScalarDelete();
-    if (realDelete) {
+    if (realDelete)
+    {
         realDelete(ptr);
     }
 }
 
-extern "C" void _ZdaPvm(void* ptr, size_t) noexcept {
+extern "C" void _ZdaPvm(void *ptr, size_t) noexcept
+{
     _ZdaPv(ptr);
 }
 
-extern "C" void _ZdlPvm(void* ptr, size_t) noexcept {
+extern "C" void _ZdlPvm(void *ptr, size_t) noexcept
+{
     _ZdlPv(ptr);
 }
 
-namespace {
+namespace
+{
 
-struct PltHookTarget {
-    const char* symbol;
-    void* replacement;
-    std::atomic<void*>* original;
-    std::atomic<uint32_t>* patchedSlots;
-};
+    struct PltHookTarget
+    {
+        const char *symbol;
+        void *replacement;
+        std::atomic<void *> *original;
+        std::atomic<uint32_t> *patchedSlots;
+    };
 
-static bool IsEntryPathProbeSymbol(const char* symbol) {
-    return symbol && (strcmp(symbol, "open") == 0 ||
-                      strcmp(symbol, "fopen") == 0 ||
-                      strcmp(symbol, "access") == 0 ||
-                      strcmp(symbol, "stat") == 0 ||
-                      strcmp(symbol, "lstat") == 0 ||
-                      strcmp(symbol, "uv_fs_open") == 0 ||
-                      strcmp(symbol, "uv_fs_stat") == 0 ||
-                      strcmp(symbol, "uv_fs_lstat") == 0 ||
-                      strcmp(symbol, "uv_fs_access") == 0 ||
-                      strcmp(symbol, "uv_fs_scandir") == 0);
-}
-
-struct ModuleAddressRange {
-    uintptr_t start;
-    uintptr_t end;
-};
-
-static bool GetModuleAddressRange(dl_phdr_info* info,
-                                  ModuleAddressRange* range) {
-    uintptr_t start = UINTPTR_MAX;
-    uintptr_t end = 0;
-    const uintptr_t base = static_cast<uintptr_t>(info->dlpi_addr);
-    for (int i = 0; i < info->dlpi_phnum; ++i) {
-        const ElfW(Phdr)& phdr = info->dlpi_phdr[i];
-        if (phdr.p_type != PT_LOAD) {
-            continue;
-        }
-        const uintptr_t segStart = base + static_cast<uintptr_t>(phdr.p_vaddr);
-        const uintptr_t segEnd = segStart + static_cast<uintptr_t>(phdr.p_memsz);
-        if (segStart < start) {
-            start = segStart;
-        }
-        if (segEnd > end) {
-            end = segEnd;
-        }
+    static bool IsEntryPathProbeSymbol(const char *symbol)
+    {
+        return symbol && (strcmp(symbol, "open") == 0 ||
+                          strcmp(symbol, "fopen") == 0 ||
+                          strcmp(symbol, "access") == 0 ||
+                          strcmp(symbol, "stat") == 0 ||
+                          strcmp(symbol, "lstat") == 0 ||
+                          strcmp(symbol, "uv_fs_open") == 0 ||
+                          strcmp(symbol, "uv_fs_stat") == 0 ||
+                          strcmp(symbol, "uv_fs_lstat") == 0 ||
+                          strcmp(symbol, "uv_fs_access") == 0 ||
+                          strcmp(symbol, "uv_fs_scandir") == 0);
     }
-    if (start == UINTPTR_MAX || end <= start) {
-        return false;
-    }
-    range->start = start;
-    range->end = end;
-    return true;
-}
 
-static uintptr_t ResolveModuleAddress(dl_phdr_info* info,
-                                      const ModuleAddressRange& range,
-                                      ElfW(Addr) value) {
-    const uintptr_t raw = static_cast<uintptr_t>(value);
-    if (raw >= range.start && raw < range.end) {
+    struct ModuleAddressRange
+    {
+        uintptr_t start;
+        uintptr_t end;
+    };
+
+    static bool GetModuleAddressRange(dl_phdr_info *info,
+                                      ModuleAddressRange *range)
+    {
+        uintptr_t start = UINTPTR_MAX;
+        uintptr_t end = 0;
+        const uintptr_t base = static_cast<uintptr_t>(info->dlpi_addr);
+        for (int i = 0; i < info->dlpi_phnum; ++i)
+        {
+            const ElfW(Phdr) &phdr = info->dlpi_phdr[i];
+            if (phdr.p_type != PT_LOAD)
+            {
+                continue;
+            }
+            const uintptr_t segStart = base + static_cast<uintptr_t>(phdr.p_vaddr);
+            const uintptr_t segEnd = segStart + static_cast<uintptr_t>(phdr.p_memsz);
+            if (segStart < start)
+            {
+                start = segStart;
+            }
+            if (segEnd > end)
+            {
+                end = segEnd;
+            }
+        }
+        if (start == UINTPTR_MAX || end <= start)
+        {
+            return false;
+        }
+        range->start = start;
+        range->end = end;
+        return true;
+    }
+
+    static uintptr_t ResolveModuleAddress(dl_phdr_info *info,
+                                          const ModuleAddressRange &range,
+                                          ElfW(Addr) value)
+    {
+        const uintptr_t raw = static_cast<uintptr_t>(value);
+        if (raw >= range.start && raw < range.end)
+        {
+            return raw;
+        }
+
+        const uintptr_t withBase =
+            static_cast<uintptr_t>(info->dlpi_addr) + raw;
+        if (withBase >= range.start && withBase < range.end)
+        {
+            return withBase;
+        }
+
         return raw;
     }
 
-    const uintptr_t withBase =
-        static_cast<uintptr_t>(info->dlpi_addr) + raw;
-    if (withBase >= range.start && withBase < range.end) {
-        return withBase;
-    }
-
-    return raw;
-}
-
-static bool MakePageWritable(void* address, size_t* pageSizeOut,
-                             void** pageStartOut) {
-    long pageSize = sysconf(_SC_PAGESIZE);
-    if (pageSize <= 0) {
-        pageSize = 4096;
-    }
-    const uintptr_t pageMask = static_cast<uintptr_t>(pageSize - 1);
-    void* pageStart = reinterpret_cast<void*>(
-        reinterpret_cast<uintptr_t>(address) & ~pageMask);
-    if (mprotect(pageStart, static_cast<size_t>(pageSize),
-                 PROT_READ | PROT_WRITE) != 0) {
-        return false;
-    }
-    *pageSizeOut = static_cast<size_t>(pageSize);
-    *pageStartOut = pageStart;
-    return true;
-}
-
-static bool MakeCodePageWritable(void* address, size_t* pageSizeOut,
-                                 void** pageStartOut,
-                                 bool* keptExecutableOut,
-                                 bool allowRwFallback) {
-    long pageSize = sysconf(_SC_PAGESIZE);
-    if (pageSize <= 0) {
-        pageSize = 4096;
-    }
-    const uintptr_t pageMask = static_cast<uintptr_t>(pageSize - 1);
-    void* pageStart = reinterpret_cast<void*>(
-        reinterpret_cast<uintptr_t>(address) & ~pageMask);
-
-    if (mprotect(pageStart, static_cast<size_t>(pageSize),
-                 PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+    static bool MakePageWritable(void *address, size_t *pageSizeOut,
+                                 void **pageStartOut)
+    {
+        long pageSize = sysconf(_SC_PAGESIZE);
+        if (pageSize <= 0)
+        {
+            pageSize = 4096;
+        }
+        const uintptr_t pageMask = static_cast<uintptr_t>(pageSize - 1);
+        void *pageStart = reinterpret_cast<void *>(
+            reinterpret_cast<uintptr_t>(address) & ~pageMask);
+        if (mprotect(pageStart, static_cast<size_t>(pageSize),
+                     PROT_READ | PROT_WRITE) != 0)
+        {
+            return false;
+        }
         *pageSizeOut = static_cast<size_t>(pageSize);
         *pageStartOut = pageStart;
-        *keptExecutableOut = true;
         return true;
     }
 
-    const int rwxErrno = errno;
-    if (!allowRwFallback) {
-        errno = rwxErrno;
-        return false;
-    }
-    if (mprotect(pageStart, static_cast<size_t>(pageSize),
-                 PROT_READ | PROT_WRITE) == 0) {
-        *pageSizeOut = static_cast<size_t>(pageSize);
-        *pageStartOut = pageStart;
-        *keptExecutableOut = false;
-        Log("inline hook target page fell back to RW without EXEC "
-            "target=%p rwx_errno=%d",
-            address, rwxErrno);
-        return true;
-    }
+    static bool MakeCodePageWritable(void *address, size_t *pageSizeOut,
+                                     void **pageStartOut,
+                                     bool *keptExecutableOut,
+                                     bool allowRwFallback)
+    {
+        long pageSize = sysconf(_SC_PAGESIZE);
+        if (pageSize <= 0)
+        {
+            pageSize = 4096;
+        }
+        const uintptr_t pageMask = static_cast<uintptr_t>(pageSize - 1);
+        void *pageStart = reinterpret_cast<void *>(
+            reinterpret_cast<uintptr_t>(address) & ~pageMask);
 
-    return false;
-}
+        if (mprotect(pageStart, static_cast<size_t>(pageSize),
+                     PROT_READ | PROT_WRITE | PROT_EXEC) == 0)
+        {
+            *pageSizeOut = static_cast<size_t>(pageSize);
+            *pageStartOut = pageStart;
+            *keptExecutableOut = true;
+            return true;
+        }
 
-static void WriteAbsoluteBranch(void* address, void* target) {
-    uint32_t instructions[2] = {
-        kAarch64LdrX16Literal8,
-        kAarch64BrX16,
-    };
-    memcpy(address, instructions, sizeof(instructions));
-    const uintptr_t targetAddress = reinterpret_cast<uintptr_t>(target);
-    memcpy(reinterpret_cast<uint8_t*>(address) + sizeof(instructions),
-           &targetAddress, sizeof(targetAddress));
-}
+        const int rwxErrno = errno;
+        if (!allowRwFallback)
+        {
+            errno = rwxErrno;
+            return false;
+        }
+        if (mprotect(pageStart, static_cast<size_t>(pageSize),
+                     PROT_READ | PROT_WRITE) == 0)
+        {
+            *pageSizeOut = static_cast<size_t>(pageSize);
+            *pageStartOut = pageStart;
+            *keptExecutableOut = false;
+            Log("inline hook target page fell back to RW without EXEC "
+                "target=%p rwx_errno=%d",
+                address, rwxErrno);
+            return true;
+        }
 
-static bool InstallNodeStartExecutionThunkInlineHookAt(
-    void* target, bool allowRwFallback) {
-    if (!target) {
-        return false;
-    }
-    if (g_nodeStartExecutionThunkInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
-
-    std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
-    if (g_nodeStartExecutionThunkInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
-
-    size_t pageSize = 0;
-    void* pageStart = nullptr;
-    bool keptExecutable = false;
-    if (!MakeCodePageWritable(target, &pageSize, &pageStart,
-                              &keptExecutable, allowRwFallback)) {
-        g_nodeStartExecutionThunkInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node start-execution thunk hook mprotect failed target=%p "
-            "errno=%d",
-            target, errno);
         return false;
     }
 
-    void* replacement =
-        reinterpret_cast<void*>(&OHcodeNodeStartExecutionThunk);
-    WriteAbsoluteBranch(target, replacement);
-    __builtin___clear_cache(
-        reinterpret_cast<char*>(target),
-        reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
-    if (pageStart && pageSize > 0 &&
-        mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
-        g_nodeStartExecutionThunkInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node start-execution thunk hook restore RX failed target=%p "
-            "errno=%d",
-            target, errno);
-        return false;
+    static void WriteAbsoluteBranch(void *address, void *target)
+    {
+        uint32_t instructions[2] = {
+            kAarch64LdrX16Literal8,
+            kAarch64BrX16,
+        };
+        memcpy(address, instructions, sizeof(instructions));
+        const uintptr_t targetAddress = reinterpret_cast<uintptr_t>(target);
+        memcpy(reinterpret_cast<uint8_t *>(address) + sizeof(instructions),
+               &targetAddress, sizeof(targetAddress));
     }
 
-    g_nodeStartExecutionThunkInlineInstalled.store(
-        true, std::memory_order_release);
-    Log("node start-execution thunk hook installed target=%p replacement=%p "
-        "keptExec=%d",
-        target, replacement, keptExecutable ? 1 : 0);
-    return true;
-}
+    static bool InstallNodeStartExecutionThunkInlineHookAt(
+        void *target, bool allowRwFallback)
+    {
+        if (!target)
+        {
+            return false;
+        }
+        if (g_nodeStartExecutionThunkInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-static void* CreateNodeInitializeContextTrampoline(void* target) {
-    constexpr size_t trampolineSize =
-        kAarch64InlineBranchBytes + kAarch64InlineBranchBytes;
-    void* trampoline = mmap(nullptr, trampolineSize,
-                            PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (trampoline == MAP_FAILED) {
-        return nullptr;
-    }
+        std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
+        if (g_nodeStartExecutionThunkInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-    memcpy(trampoline, target, kAarch64InlineBranchBytes);
-    WriteAbsoluteBranch(
-        reinterpret_cast<uint8_t*>(trampoline) + kAarch64InlineBranchBytes,
-        reinterpret_cast<uint8_t*>(target) + kAarch64InlineBranchBytes);
-    __builtin___clear_cache(
-        reinterpret_cast<char*>(trampoline),
-        reinterpret_cast<char*>(trampoline) + trampolineSize);
-    if (mprotect(trampoline, trampolineSize, PROT_READ | PROT_EXEC) != 0) {
-        const int savedErrno = errno;
-        munmap(trampoline, trampolineSize);
-        errno = savedErrno;
-        return nullptr;
-    }
-    return trampoline;
-}
+        size_t pageSize = 0;
+        void *pageStart = nullptr;
+        bool keptExecutable = false;
+        if (!MakeCodePageWritable(target, &pageSize, &pageStart,
+                                  &keptExecutable, allowRwFallback))
+        {
+            g_nodeStartExecutionThunkInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node start-execution thunk hook mprotect failed target=%p "
+                "errno=%d",
+                target, errno);
+            return false;
+        }
 
-static bool InstallNodeInitializeContextInlineHookAt(void* target,
-                                                    bool allowRwFallback) {
-    if (!ReadEnvBool("V8_POOL_HOOK_INIT_CONTEXT_INLINE_ENABLE", false)) {
-        return false;
-    }
-    if (!target) {
-        return false;
-    }
-    if (g_nodeInitializeContextInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
+        void *replacement =
+            reinterpret_cast<void *>(&OHcodeNodeStartExecutionThunk);
+        WriteAbsoluteBranch(target, replacement);
+        __builtin___clear_cache(
+            reinterpret_cast<char *>(target),
+            reinterpret_cast<char *>(target) + kAarch64InlineBranchBytes);
+        if (pageStart && pageSize > 0 &&
+            mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0)
+        {
+            g_nodeStartExecutionThunkInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node start-execution thunk hook restore RX failed target=%p "
+                "errno=%d",
+                target, errno);
+            return false;
+        }
 
-    std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
-    if (g_nodeInitializeContextInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
-
-    const uint32_t firstInstruction =
-        ReadInstruction(reinterpret_cast<uintptr_t>(target));
-    const uint32_t secondInstruction =
-        ReadInstruction(reinterpret_cast<uintptr_t>(target) + 4);
-    if (firstInstruction == kAarch64LdrX16Literal8 &&
-        secondInstruction == kAarch64BrX16) {
-        g_nodeInitializeContextInlineInstalled.store(
+        g_nodeStartExecutionThunkInlineInstalled.store(
             true, std::memory_order_release);
+        Log("node start-execution thunk hook installed target=%p replacement=%p "
+            "keptExec=%d",
+            target, replacement, keptExecutable ? 1 : 0);
         return true;
     }
 
-    void* replacement = reinterpret_cast<void*>(
-        &_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE);
-    void* trampoline = CreateNodeInitializeContextTrampoline(target);
-    if (!trampoline) {
-        g_nodeInitializeContextInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node::InitializeContext inline hook trampoline setup failed "
-            "target=%p errno=%d",
-            target, errno);
-        return false;
+    static void *CreateNodeInitializeContextTrampoline(void *target)
+    {
+        constexpr size_t trampolineSize =
+            kAarch64InlineBranchBytes + kAarch64InlineBranchBytes;
+        void *trampoline = mmap(nullptr, trampolineSize,
+                                PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (trampoline == MAP_FAILED)
+        {
+            return nullptr;
+        }
+
+        memcpy(trampoline, target, kAarch64InlineBranchBytes);
+        WriteAbsoluteBranch(
+            reinterpret_cast<uint8_t *>(trampoline) + kAarch64InlineBranchBytes,
+            reinterpret_cast<uint8_t *>(target) + kAarch64InlineBranchBytes);
+        __builtin___clear_cache(
+            reinterpret_cast<char *>(trampoline),
+            reinterpret_cast<char *>(trampoline) + trampolineSize);
+        if (mprotect(trampoline, trampolineSize, PROT_READ | PROT_EXEC) != 0)
+        {
+            const int savedErrno = errno;
+            munmap(trampoline, trampolineSize);
+            errno = savedErrno;
+            return nullptr;
+        }
+        return trampoline;
     }
 
-    g_nodeInitializeContextInlineTrampoline.store(
-        trampoline, std::memory_order_release);
+    static bool InstallNodeInitializeContextInlineHookAt(void *target,
+                                                         bool allowRwFallback)
+    {
+        if (!ReadEnvBool("V8_POOL_HOOK_INIT_CONTEXT_INLINE_ENABLE", false))
+        {
+            return false;
+        }
+        if (!target)
+        {
+            return false;
+        }
+        if (g_nodeInitializeContextInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-    size_t pageSize = 0;
-    void* pageStart = nullptr;
-    bool keptExecutable = false;
-    if (!MakeCodePageWritable(target, &pageSize, &pageStart,
-                              &keptExecutable, allowRwFallback)) {
-        g_nodeInitializeContextInlineTrampoline.store(
-            nullptr, std::memory_order_release);
-        munmap(trampoline,
-               kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
-        g_nodeInitializeContextInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("node::InitializeContext inline hook mprotect failed target=%p "
-            "errno=%d",
-            target, errno);
-        return false;
-    }
+        std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
+        if (g_nodeInitializeContextInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-    WriteAbsoluteBranch(target, replacement);
-    __builtin___clear_cache(
-        reinterpret_cast<char*>(target),
-        reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
-    if (pageStart && pageSize > 0) {
-        if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
+        const uint32_t firstInstruction =
+            ReadInstruction(reinterpret_cast<uintptr_t>(target));
+        const uint32_t secondInstruction =
+            ReadInstruction(reinterpret_cast<uintptr_t>(target) + 4);
+        if (firstInstruction == kAarch64LdrX16Literal8 &&
+            secondInstruction == kAarch64BrX16)
+        {
+            g_nodeInitializeContextInlineInstalled.store(
+                true, std::memory_order_release);
+            return true;
+        }
+
+        void *replacement = reinterpret_cast<void *>(
+            &_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE);
+        void *trampoline = CreateNodeInitializeContextTrampoline(target);
+        if (!trampoline)
+        {
             g_nodeInitializeContextInlineFailures.fetch_add(
                 1, std::memory_order_relaxed);
-            Log("node::InitializeContext inline hook restore RX failed "
+            Log("node::InitializeContext inline hook trampoline setup failed "
                 "target=%p errno=%d",
                 target, errno);
             return false;
         }
-    }
 
-    g_patchedNodeInitializeContextInlineEntrypoints.fetch_add(
-        1, std::memory_order_relaxed);
-    g_nodeInitializeContextInlineInstalled.store(true,
-                                                 std::memory_order_release);
-    g_electronPltPatchInstalled.store(true, std::memory_order_release);
-    Log("node::InitializeContext inline hook installed target=%p "
-        "trampoline=%p replacement=%p keptExec=%d",
-        target, trampoline, replacement, keptExecutable ? 1 : 0);
-    return true;
-}
+        g_nodeInitializeContextInlineTrampoline.store(
+            trampoline, std::memory_order_release);
 
-static bool InstallNodePlatformForIsolateInlineHookAt(void* target,
-                                                     bool allowRwFallback) {
-    if (!target) {
-        return false;
-    }
-    if (g_nodePlatformForIsolateInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
+        size_t pageSize = 0;
+        void *pageStart = nullptr;
+        bool keptExecutable = false;
+        if (!MakeCodePageWritable(target, &pageSize, &pageStart,
+                                  &keptExecutable, allowRwFallback))
+        {
+            g_nodeInitializeContextInlineTrampoline.store(
+                nullptr, std::memory_order_release);
+            munmap(trampoline,
+                   kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
+            g_nodeInitializeContextInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("node::InitializeContext inline hook mprotect failed target=%p "
+                "errno=%d",
+                target, errno);
+            return false;
+        }
 
-    std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
-    if (g_nodePlatformForIsolateInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
+        WriteAbsoluteBranch(target, replacement);
+        __builtin___clear_cache(
+            reinterpret_cast<char *>(target),
+            reinterpret_cast<char *>(target) + kAarch64InlineBranchBytes);
+        if (pageStart && pageSize > 0)
+        {
+            if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0)
+            {
+                g_nodeInitializeContextInlineFailures.fetch_add(
+                    1, std::memory_order_relaxed);
+                Log("node::InitializeContext inline hook restore RX failed "
+                    "target=%p errno=%d",
+                    target, errno);
+                return false;
+            }
+        }
 
-    const uint32_t firstInstruction =
-        ReadInstruction(reinterpret_cast<uintptr_t>(target));
-    const uint32_t secondInstruction =
-        ReadInstruction(reinterpret_cast<uintptr_t>(target) + 4);
-    if (firstInstruction == kAarch64LdrX16Literal8 &&
-        secondInstruction == kAarch64BrX16) {
-        g_nodePlatformForIsolateInlineInstalled.store(
-            true, std::memory_order_release);
-        return true;
-    }
-
-    void* replacement = reinterpret_cast<void*>(&NodePlatformForIsolateLookupHook);
-    void* trampoline = CreateNodeInitializeContextTrampoline(target);
-    if (!trampoline) {
-        g_nodePlatformForIsolateInlineFailures.fetch_add(
+        g_patchedNodeInitializeContextInlineEntrypoints.fetch_add(
             1, std::memory_order_relaxed);
-        Log("NodePlatform::ForIsolate inline hook trampoline setup failed "
-            "target=%p errno=%d",
-            target, errno);
-        return false;
+        g_nodeInitializeContextInlineInstalled.store(true,
+                                                     std::memory_order_release);
+        g_electronPltPatchInstalled.store(true, std::memory_order_release);
+        Log("node::InitializeContext inline hook installed target=%p "
+            "trampoline=%p replacement=%p keptExec=%d",
+            target, trampoline, replacement, keptExecutable ? 1 : 0);
+        return true;
     }
 
-    g_nodePlatformForIsolateInlineTrampoline.store(
-        trampoline, std::memory_order_release);
-    g_realNodePlatformForIsolate =
-        reinterpret_cast<NodePlatformForIsolateFn>(trampoline);
+    static bool InstallNodePlatformForIsolateInlineHookAt(void *target,
+                                                          bool allowRwFallback)
+    {
+        if (!target)
+        {
+            return false;
+        }
+        if (g_nodePlatformForIsolateInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-    size_t pageSize = 0;
-    void* pageStart = nullptr;
-    bool keptExecutable = false;
-    if (!MakeCodePageWritable(target, &pageSize, &pageStart,
-                              &keptExecutable, allowRwFallback)) {
+        std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
+        if (g_nodePlatformForIsolateInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
+
+        const uint32_t firstInstruction =
+            ReadInstruction(reinterpret_cast<uintptr_t>(target));
+        const uint32_t secondInstruction =
+            ReadInstruction(reinterpret_cast<uintptr_t>(target) + 4);
+        if (firstInstruction == kAarch64LdrX16Literal8 &&
+            secondInstruction == kAarch64BrX16)
+        {
+            g_nodePlatformForIsolateInlineInstalled.store(
+                true, std::memory_order_release);
+            return true;
+        }
+
+        void *replacement = reinterpret_cast<void *>(&NodePlatformForIsolateLookupHook);
+        void *trampoline = CreateNodeInitializeContextTrampoline(target);
+        if (!trampoline)
+        {
+            g_nodePlatformForIsolateInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("NodePlatform::ForIsolate inline hook trampoline setup failed "
+                "target=%p errno=%d",
+                target, errno);
+            return false;
+        }
+
         g_nodePlatformForIsolateInlineTrampoline.store(
-            nullptr, std::memory_order_release);
-        g_realNodePlatformForIsolate = nullptr;
-        munmap(trampoline,
-               kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
-        g_nodePlatformForIsolateInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("NodePlatform::ForIsolate inline hook mprotect failed target=%p "
-            "errno=%d",
-            target, errno);
-        return false;
-    }
+            trampoline, std::memory_order_release);
+        g_realNodePlatformForIsolate =
+            reinterpret_cast<NodePlatformForIsolateFn>(trampoline);
 
-    WriteAbsoluteBranch(target, replacement);
-    __builtin___clear_cache(
-        reinterpret_cast<char*>(target),
-        reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
-    if (pageStart && pageSize > 0) {
-        if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
+        size_t pageSize = 0;
+        void *pageStart = nullptr;
+        bool keptExecutable = false;
+        if (!MakeCodePageWritable(target, &pageSize, &pageStart,
+                                  &keptExecutable, allowRwFallback))
+        {
             g_nodePlatformForIsolateInlineTrampoline.store(
                 nullptr, std::memory_order_release);
             g_realNodePlatformForIsolate = nullptr;
+            munmap(trampoline,
+                   kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
             g_nodePlatformForIsolateInlineFailures.fetch_add(
                 1, std::memory_order_relaxed);
-            Log("NodePlatform::ForIsolate inline hook restore RX failed "
-                "target=%p errno=%d",
+            Log("NodePlatform::ForIsolate inline hook mprotect failed target=%p "
+                "errno=%d",
                 target, errno);
             return false;
         }
-    }
 
-    g_patchedNodePlatformForIsolateInlineEntrypoints.fetch_add(
-        1, std::memory_order_relaxed);
-    g_nodePlatformForIsolateInlineInstalled.store(
-        true, std::memory_order_release);
-    g_electronPltPatchInstalled.store(true, std::memory_order_release);
-    Log("NodePlatform::ForIsolate inline hook installed target=%p "
-        "trampoline=%p replacement=%p keptExec=%d",
-        target, trampoline, replacement, keptExecutable ? 1 : 0);
-    return true;
-}
+        WriteAbsoluteBranch(target, replacement);
+        __builtin___clear_cache(
+            reinterpret_cast<char *>(target),
+            reinterpret_cast<char *>(target) + kAarch64InlineBranchBytes);
+        if (pageStart && pageSize > 0)
+        {
+            if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0)
+            {
+                g_nodePlatformForIsolateInlineTrampoline.store(
+                    nullptr, std::memory_order_release);
+                g_realNodePlatformForIsolate = nullptr;
+                g_nodePlatformForIsolateInlineFailures.fetch_add(
+                    1, std::memory_order_relaxed);
+                Log("NodePlatform::ForIsolate inline hook restore RX failed "
+                    "target=%p errno=%d",
+                    target, errno);
+                return false;
+            }
+        }
 
-static bool InstallV8CompileFunctionInlineHookAt(void* target,
-                                                 bool allowRwFallback) {
-    if (!target) {
-        return false;
-    }
-    if (g_v8CompileFunctionInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
-
-    std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
-    if (g_v8CompileFunctionInlineInstalled.load(
-            std::memory_order_acquire)) {
-        return true;
-    }
-
-    const uint32_t firstInstruction =
-        ReadInstruction(reinterpret_cast<uintptr_t>(target));
-    const uint32_t secondInstruction =
-        ReadInstruction(reinterpret_cast<uintptr_t>(target) + 4);
-    if (firstInstruction == kAarch64LdrX16Literal8 &&
-        secondInstruction == kAarch64BrX16) {
-        g_v8CompileFunctionInlineInstalled.store(
+        g_patchedNodePlatformForIsolateInlineEntrypoints.fetch_add(
+            1, std::memory_order_relaxed);
+        g_nodePlatformForIsolateInlineInstalled.store(
             true, std::memory_order_release);
+        g_electronPltPatchInstalled.store(true, std::memory_order_release);
+        Log("NodePlatform::ForIsolate inline hook installed target=%p "
+            "trampoline=%p replacement=%p keptExec=%d",
+            target, trampoline, replacement, keptExecutable ? 1 : 0);
         return true;
     }
 
-    void* replacement = reinterpret_cast<void*>(
-        &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE);
-    void* trampoline = CreateNodeInitializeContextTrampoline(target);
-    if (!trampoline) {
-        g_v8CompileFunctionInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("v8::ScriptCompiler::CompileFunction inline hook trampoline "
-            "setup failed target=%p errno=%d",
-            target, errno);
-        return false;
-    }
+    static bool InstallV8CompileFunctionInlineHookAt(void *target,
+                                                     bool allowRwFallback)
+    {
+        if (!target)
+        {
+            return false;
+        }
+        if (g_v8CompileFunctionInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-    g_v8CompileFunctionInlineTrampoline.store(
-        trampoline, std::memory_order_release);
-    g_realV8CompileFunction =
-        reinterpret_cast<V8CompileFunctionFn>(trampoline);
+        std::lock_guard<std::mutex> lock(g_nodeInitializeContextInlineHookMutex);
+        if (g_v8CompileFunctionInlineInstalled.load(
+                std::memory_order_acquire))
+        {
+            return true;
+        }
 
-    size_t pageSize = 0;
-    void* pageStart = nullptr;
-    bool keptExecutable = false;
-    if (!MakeCodePageWritable(target, &pageSize, &pageStart,
-                              &keptExecutable, allowRwFallback)) {
+        const uint32_t firstInstruction =
+            ReadInstruction(reinterpret_cast<uintptr_t>(target));
+        const uint32_t secondInstruction =
+            ReadInstruction(reinterpret_cast<uintptr_t>(target) + 4);
+        if (firstInstruction == kAarch64LdrX16Literal8 &&
+            secondInstruction == kAarch64BrX16)
+        {
+            g_v8CompileFunctionInlineInstalled.store(
+                true, std::memory_order_release);
+            return true;
+        }
+
+        void *replacement = reinterpret_cast<void *>(
+            &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE);
+        void *trampoline = CreateNodeInitializeContextTrampoline(target);
+        if (!trampoline)
+        {
+            g_v8CompileFunctionInlineFailures.fetch_add(
+                1, std::memory_order_relaxed);
+            Log("v8::ScriptCompiler::CompileFunction inline hook trampoline "
+                "setup failed target=%p errno=%d",
+                target, errno);
+            return false;
+        }
+
         g_v8CompileFunctionInlineTrampoline.store(
-            nullptr, std::memory_order_release);
-        g_realV8CompileFunction = nullptr;
-        munmap(trampoline,
-               kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
-        g_v8CompileFunctionInlineFailures.fetch_add(
-            1, std::memory_order_relaxed);
-        Log("v8::ScriptCompiler::CompileFunction inline hook mprotect "
-            "failed target=%p errno=%d",
-            target, errno);
-        return false;
-    }
+            trampoline, std::memory_order_release);
+        g_realV8CompileFunction =
+            reinterpret_cast<V8CompileFunctionFn>(trampoline);
 
-    WriteAbsoluteBranch(target, replacement);
-    __builtin___clear_cache(
-        reinterpret_cast<char*>(target),
-        reinterpret_cast<char*>(target) + kAarch64InlineBranchBytes);
-    if (pageStart && pageSize > 0) {
-        if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0) {
+        size_t pageSize = 0;
+        void *pageStart = nullptr;
+        bool keptExecutable = false;
+        if (!MakeCodePageWritable(target, &pageSize, &pageStart,
+                                  &keptExecutable, allowRwFallback))
+        {
             g_v8CompileFunctionInlineTrampoline.store(
                 nullptr, std::memory_order_release);
             g_realV8CompileFunction = nullptr;
+            munmap(trampoline,
+                   kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
             g_v8CompileFunctionInlineFailures.fetch_add(
                 1, std::memory_order_relaxed);
-            Log("v8::ScriptCompiler::CompileFunction inline hook restore RX "
+            Log("v8::ScriptCompiler::CompileFunction inline hook mprotect "
                 "failed target=%p errno=%d",
                 target, errno);
             return false;
         }
-    }
 
-    g_patchedV8CompileFunctionInlineEntrypoints.fetch_add(
-        1, std::memory_order_relaxed);
-    g_v8CompileFunctionInlineInstalled.store(true,
-                                             std::memory_order_release);
-    g_electronPltPatchInstalled.store(true, std::memory_order_release);
-    Log("v8::ScriptCompiler::CompileFunction inline hook installed target=%p "
-        "trampoline=%p replacement=%p keptExec=%d",
-        target, trampoline, replacement, keptExecutable ? 1 : 0);
-    return true;
-}
+        WriteAbsoluteBranch(target, replacement);
+        __builtin___clear_cache(
+            reinterpret_cast<char *>(target),
+            reinterpret_cast<char *>(target) + kAarch64InlineBranchBytes);
+        if (pageStart && pageSize > 0)
+        {
+            if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0)
+            {
+                g_v8CompileFunctionInlineTrampoline.store(
+                    nullptr, std::memory_order_release);
+                g_realV8CompileFunction = nullptr;
+                g_v8CompileFunctionInlineFailures.fetch_add(
+                    1, std::memory_order_relaxed);
+                Log("v8::ScriptCompiler::CompileFunction inline hook restore RX "
+                    "failed target=%p errno=%d",
+                    target, errno);
+                return false;
+            }
+        }
 
-static bool PatchGotSlot(void** slot, const PltHookTarget& target) {
-    void* current = *slot;
-    if (current == target.replacement) {
-        return false;
-    }
-    const bool allowNullSlotPatch = IsEntryPathProbeSymbol(target.symbol);
-    if (current == nullptr && !allowNullSlotPatch) {
-        return false;
-    }
-
-    if (current) {
-        void* expected = nullptr;
-        target.original->compare_exchange_strong(expected, current,
-                                                 std::memory_order_acq_rel);
-    }
-
-    size_t pageSize = 0;
-    void* pageStart = nullptr;
-    if (!MakePageWritable(slot, &pageSize, &pageStart)) {
-        g_electronPltPatchFailures.fetch_add(1, std::memory_order_relaxed);
-        Log("PLT hook mprotect failed for %s slot=%p errno=%d",
-            target.symbol, slot, errno);
-        return false;
-    }
-
-    *slot = target.replacement;
-    if (current == nullptr && allowNullSlotPatch) {
-        g_entryPathProbeNullSlotPatches.fetch_add(
+        g_patchedV8CompileFunctionInlineEntrypoints.fetch_add(
             1, std::memory_order_relaxed);
+        g_v8CompileFunctionInlineInstalled.store(true,
+                                                 std::memory_order_release);
+        g_electronPltPatchInstalled.store(true, std::memory_order_release);
+        Log("v8::ScriptCompiler::CompileFunction inline hook installed target=%p "
+            "trampoline=%p replacement=%p keptExec=%d",
+            target, trampoline, replacement, keptExecutable ? 1 : 0);
+        return true;
     }
-    // Leave the GOT page writable. Some Harmony builds still lazily resolve
-    // neighbouring PLT slots after this point, and restoring read-only here can
-    // turn a later lazy bind into a crash.
 
-    target.patchedSlots->fetch_add(1, std::memory_order_relaxed);
-    g_electronPltPatchedSlots.fetch_add(1, std::memory_order_relaxed);
-    Log("PLT hook patched %s slot=%p original=%p replacement=%p",
-        target.symbol, slot, current, target.replacement);
-    return true;
-}
-
-static const PltHookTarget* FindPltHookTarget(const char* symbol) {
-    static PltHookTarget targets[] = {
-        {"epoll_wait", reinterpret_cast<void*>(&epoll_wait),
-         &g_gotRealEpollWait, &g_patchedEpollWaitSlots},
-        {"_ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE",
-         reinterpret_cast<void*>(&_ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE),
-         &g_gotRealV8IsolateInitialize, &g_patchedV8InitializeSlots},
-        {"_ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE",
-         reinterpret_cast<void*>(&_ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE),
-         &g_gotRealV8SetSnapshotDataBlob,
-         &g_patchedV8SetSnapshotDataBlobSlots},
-        {"_ZN2v82V829InitializeExternalStartupDataEPKc",
-         reinterpret_cast<void*>(&_ZN2v82V829InitializeExternalStartupDataEPKc),
-         &g_gotRealV8InitializeExternalStartupData,
-         &g_patchedV8InitializeExternalStartupDataSlots},
-        {"_ZN2v82V837InitializeExternalStartupDataFromFileEPKc",
-         reinterpret_cast<void*>(&_ZN2v82V837InitializeExternalStartupDataFromFileEPKc),
-         &g_gotRealV8InitializeExternalStartupDataFromFile,
-         &g_patchedV8InitializeExternalStartupDataFromFileSlots},
-        {"_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b",
-         reinterpret_cast<void*>(
-             &_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b),
-         &g_gotRealV8InternalInitWithSnapshot,
-         &g_patchedV8InternalInitWithSnapshotSlots},
-        {"_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE",
-         reinterpret_cast<void*>(&_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE),
-         &g_gotRealSnapshotDecompress, &g_patchedSnapshotDecompressSlots},
-        {"_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE",
-         reinterpret_cast<void*>(
-             &_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE),
-         &g_gotRealNodeNewContext, &g_patchedNodeNewContextSlots},
-        {"_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE",
-         reinterpret_cast<void*>(
-             &_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE),
-         &g_gotRealNodeCreateEnvironment,
-         &g_patchedNodeCreateEnvironmentSlots},
-        {"_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE",
-         reinterpret_cast<void*>(
-             &_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE),
-         &g_gotRealNodeLoadEnvironmentCallback,
-         &g_patchedNodeLoadEnvironmentCallbackSlots},
-        {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
-         reinterpret_cast<void*>(
-             &_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
-         &g_gotRealAdapterStartGpuProcess,
-         &g_patchedAdapterStartGpuProcessSlots},
-        {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
-         reinterpret_cast<void*>(
-             &_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
-         &g_gotRealAdapterStartLegacyChildProcess,
-         &g_patchedAdapterStartLegacyChildProcessSlots},
-        {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_",
-         reinterpret_cast<void*>(
-             &_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_),
-         &g_gotRealAdapterStartNormalChildProcess,
-         &g_patchedAdapterStartNormalChildProcessSlots},
-        {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_",
-         reinterpret_cast<void*>(
-             &_ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_),
-         &g_gotRealAdapterStartIsolateChildProcess,
-         &g_patchedAdapterStartIsolateChildProcessSlots},
-        {"_ZnamRKSt9nothrow_t", reinterpret_cast<void*>(&_ZnamRKSt9nothrow_t),
-         &g_gotRealArrayNothrowNew, &g_patchedArrayNothrowNewSlots},
-        {"_ZnwmRKSt9nothrow_t", reinterpret_cast<void*>(&_ZnwmRKSt9nothrow_t),
-         &g_gotRealScalarNothrowNew, &g_patchedScalarNothrowNewSlots},
-        {"_ZdaPv", reinterpret_cast<void*>(&_ZdaPv),
-         &g_gotRealArrayDelete, &g_patchedArrayDeleteSlots},
-        {"_ZdlPv", reinterpret_cast<void*>(&_ZdlPv),
-         &g_gotRealScalarDelete, &g_patchedScalarDeleteSlots},
-    };
-
-    for (const PltHookTarget& target : targets) {
-        if (strcmp(symbol, target.symbol) == 0) {
-            return &target;
+    static bool PatchGotSlot(void **slot, const PltHookTarget &target)
+    {
+        void *current = *slot;
+        if (current == target.replacement)
+        {
+            return false;
         }
-    }
-    return nullptr;
-}
-
-static size_t PatchRelaTable(dl_phdr_info* info,
-                             const ModuleAddressRange& range,
-                             ElfW(Sym)* symtab,
-                             const char* strtab,
-                             ElfW(Rela)* rela,
-                             size_t relaBytes) {
-    if (!symtab || !strtab || !rela || relaBytes == 0) {
-        return 0;
-    }
-
-    size_t patched = 0;
-    const size_t count = relaBytes / sizeof(ElfW(Rela));
-    for (size_t i = 0; i < count; ++i) {
-        const unsigned type = ELF64_R_TYPE(rela[i].r_info);
-        if (type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_GLOB_DAT) {
-            continue;
+        const bool allowNullSlotPatch = IsEntryPathProbeSymbol(target.symbol);
+        if (current == nullptr && !allowNullSlotPatch)
+        {
+            return false;
         }
 
-        const size_t symIndex = ELF64_R_SYM(rela[i].r_info);
-        const char* symbol = strtab + symtab[symIndex].st_name;
-        if (!symbol || symbol[0] == '\0') {
-            continue;
+        if (current)
+        {
+            void *expected = nullptr;
+            target.original->compare_exchange_strong(expected, current,
+                                                     std::memory_order_acq_rel);
         }
 
-        const PltHookTarget* target = FindPltHookTarget(symbol);
-        if (!target) {
-            continue;
+        size_t pageSize = 0;
+        void *pageStart = nullptr;
+        if (!MakePageWritable(slot, &pageSize, &pageStart))
+        {
+            g_electronPltPatchFailures.fetch_add(1, std::memory_order_relaxed);
+            Log("PLT hook mprotect failed for %s slot=%p errno=%d",
+                target.symbol, slot, errno);
+            return false;
         }
 
-        void** slot = reinterpret_cast<void**>(
-            ResolveModuleAddress(info, range, rela[i].r_offset));
-        if (reinterpret_cast<uintptr_t>(slot) < range.start ||
-            reinterpret_cast<uintptr_t>(slot) + sizeof(void*) > range.end) {
-            g_electronPltPatchFailures.fetch_add(1,
-                                                 std::memory_order_relaxed);
-            Log("PLT hook skipped %s invalid slot=%p", symbol, slot);
-            continue;
+        *slot = target.replacement;
+        if (current == nullptr && allowNullSlotPatch)
+        {
+            g_entryPathProbeNullSlotPatches.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+        // Leave the GOT page writable. Some Harmony builds still lazily resolve
+        // neighbouring PLT slots after this point, and restoring read-only here can
+        // turn a later lazy bind into a crash.
+
+        target.patchedSlots->fetch_add(1, std::memory_order_relaxed);
+        g_electronPltPatchedSlots.fetch_add(1, std::memory_order_relaxed);
+        Log("PLT hook patched %s slot=%p original=%p replacement=%p",
+            target.symbol, slot, current, target.replacement);
+        return true;
+    }
+
+    static const PltHookTarget *FindPltHookTarget(const char *symbol)
+    {
+        static PltHookTarget targets[] = {
+            {"epoll_wait", reinterpret_cast<void *>(&epoll_wait),
+             &g_gotRealEpollWait, &g_patchedEpollWaitSlots},
+            {"OH_QoS_SetThreadQoS",
+             reinterpret_cast<void *>(&OH_QoS_SetThreadQoS),
+             &g_gotRealQosSetThreadQoS, &g_patchedQosSetThreadQoSSlots},
+            {"_ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE",
+             reinterpret_cast<void *>(&_ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE),
+             &g_gotRealV8IsolateInitialize, &g_patchedV8InitializeSlots},
+            {"_ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE",
+             reinterpret_cast<void *>(&_ZN2v82V819SetSnapshotDataBlobEPNS_11StartupDataE),
+             &g_gotRealV8SetSnapshotDataBlob,
+             &g_patchedV8SetSnapshotDataBlobSlots},
+            {"_ZN2v82V829InitializeExternalStartupDataEPKc",
+             reinterpret_cast<void *>(&_ZN2v82V829InitializeExternalStartupDataEPKc),
+             &g_gotRealV8InitializeExternalStartupData,
+             &g_patchedV8InitializeExternalStartupDataSlots},
+            {"_ZN2v82V837InitializeExternalStartupDataFromFileEPKc",
+             reinterpret_cast<void *>(&_ZN2v82V837InitializeExternalStartupDataFromFileEPKc),
+             &g_gotRealV8InitializeExternalStartupDataFromFile,
+             &g_patchedV8InitializeExternalStartupDataFromFileSlots},
+            {"_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b",
+             reinterpret_cast<void *>(
+                 &_ZN2v88internal7Isolate16InitWithSnapshotEPNS0_12SnapshotDataES3_S3_b),
+             &g_gotRealV8InternalInitWithSnapshot,
+             &g_patchedV8InternalInitWithSnapshotSlots},
+            {"_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE",
+             reinterpret_cast<void *>(&_ZN2v88internal19SnapshotCompression10DecompressENS_4base6VectorIKhEE),
+             &g_gotRealSnapshotDecompress, &g_patchedSnapshotDecompressSlots},
+            {"_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE",
+             reinterpret_cast<void *>(
+                 &_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE),
+             &g_gotRealNodeNewContext, &g_patchedNodeNewContextSlots},
+            {"_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE",
+             reinterpret_cast<void *>(
+                 &_ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__n16vectorINS6_12basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEENSB_ISD_EEEESH_NS_16EnvironmentFlags5FlagsENS_8ThreadIdENS6_10unique_ptrINS_21InspectorParentHandleENS6_14default_deleteISM_EEEE),
+             &g_gotRealNodeCreateEnvironment,
+             &g_patchedNodeCreateEnvironmentSlots},
+            {"_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE",
+             reinterpret_cast<void *>(
+                 &_ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalINS4_5ValueEEERKNS_26StartExecutionCallbackInfoEEEE),
+             &g_gotRealNodeLoadEnvironmentCallback,
+             &g_patchedNodeLoadEnvironmentCallbackSlots},
+            {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
+             reinterpret_cast<void *>(
+                 &_ZN4ohos7adapter12multiprocess19ChildProcessStarter15StartGpuProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
+             &g_gotRealAdapterStartGpuProcess,
+             &g_patchedAdapterStartGpuProcessSlots},
+            {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE",
+             reinterpret_cast<void *>(
+                 &_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartLegacyChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEE),
+             &g_gotRealAdapterStartLegacyChildProcess,
+             &g_patchedAdapterStartLegacyChildProcessSlots},
+            {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_",
+             reinterpret_cast<void *>(
+                 &_ZN4ohos7adapter12multiprocess19ChildProcessStarter23StartNormalChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_),
+             &g_gotRealAdapterStartNormalChildProcess,
+             &g_patchedAdapterStartNormalChildProcessSlots},
+            {"_ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_",
+             reinterpret_cast<void *>(
+                 &_ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_),
+             &g_gotRealAdapterStartIsolateChildProcess,
+             &g_patchedAdapterStartIsolateChildProcessSlots},
+            {"_ZnamRKSt9nothrow_t", reinterpret_cast<void *>(&_ZnamRKSt9nothrow_t),
+             &g_gotRealArrayNothrowNew, &g_patchedArrayNothrowNewSlots},
+            {"_ZnwmRKSt9nothrow_t", reinterpret_cast<void *>(&_ZnwmRKSt9nothrow_t),
+             &g_gotRealScalarNothrowNew, &g_patchedScalarNothrowNewSlots},
+            {"_ZdaPv", reinterpret_cast<void *>(&_ZdaPv),
+             &g_gotRealArrayDelete, &g_patchedArrayDeleteSlots},
+            {"_ZdlPv", reinterpret_cast<void *>(&_ZdlPv),
+             &g_gotRealScalarDelete, &g_patchedScalarDeleteSlots},
+            {"open", reinterpret_cast<void *>(&open),
+             &g_gotRealOpen, &g_patchedOpenSlots},
+            {"fopen", reinterpret_cast<void *>(&fopen),
+             &g_gotRealFopen, &g_patchedFopenSlots},
+            {"access", reinterpret_cast<void *>(&access),
+             &g_gotRealAccess, &g_patchedAccessSlots},
+            {"stat", reinterpret_cast<void *>(&stat),
+             &g_gotRealStat, &g_patchedStatSlots},
+            {"lstat", reinterpret_cast<void *>(&lstat),
+             &g_gotRealLstat, &g_patchedLstatSlots},
+            {"uv_fs_open", reinterpret_cast<void *>(&uv_fs_open),
+             &g_gotRealUvFsOpen, &g_patchedUvFsOpenSlots},
+            {"uv_fs_stat", reinterpret_cast<void *>(&uv_fs_stat),
+             &g_gotRealUvFsStat, &g_patchedUvFsStatSlots},
+            {"uv_fs_lstat", reinterpret_cast<void *>(&uv_fs_lstat),
+             &g_gotRealUvFsLstat, &g_patchedUvFsLstatSlots},
+            {"uv_fs_access", reinterpret_cast<void *>(&uv_fs_access),
+             &g_gotRealUvFsAccess, &g_patchedUvFsAccessSlots},
+            {"uv_fs_scandir", reinterpret_cast<void *>(&uv_fs_scandir),
+             &g_gotRealUvFsScandir, &g_patchedUvFsScandirSlots},
+            {"_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
+             reinterpret_cast<void *>(
+                 &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE),
+             &g_gotRealV8ObjectSetPrivate, &g_patchedV8ObjectSetPrivateSlots},
+            {"_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE",
+             reinterpret_cast<void *>(
+                 &_ZN2v86Object17DefineOwnPropertyENS_5LocalINS_7ContextEEENS1_INS_4NameEEENS1_INS_5ValueEEENS_17PropertyAttributeE),
+             &g_gotRealV8ObjectDefineOwnProperty,
+             &g_patchedV8ObjectDefineOwnPropertySlots},
+        };
+
+        for (const PltHookTarget &target : targets)
+        {
+            if (strcmp(symbol, target.symbol) == 0)
+            {
+                return &target;
+            }
+        }
+        return nullptr;
+    }
+
+    static size_t PatchRelaTable(dl_phdr_info *info,
+                                 const ModuleAddressRange &range,
+                                 ElfW(Sym) * symtab,
+                                 const char *strtab,
+                                 ElfW(Rela) * rela,
+                                 size_t relaBytes)
+    {
+        if (!symtab || !strtab || !rela || relaBytes == 0)
+        {
+            return 0;
         }
 
-        if (PatchGotSlot(slot, *target)) {
-            ++patched;
+        size_t patched = 0;
+        const size_t count = relaBytes / sizeof(ElfW(Rela));
+        for (size_t i = 0; i < count; ++i)
+        {
+            const unsigned type = ELF64_R_TYPE(rela[i].r_info);
+            if (type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_GLOB_DAT)
+            {
+                continue;
+            }
+
+            const size_t symIndex = ELF64_R_SYM(rela[i].r_info);
+            const char *symbol = strtab + symtab[symIndex].st_name;
+            if (!symbol || symbol[0] == '\0')
+            {
+                continue;
+            }
+
+            const PltHookTarget *target = FindPltHookTarget(symbol);
+            if (!target)
+            {
+                continue;
+            }
+
+            void **slot = reinterpret_cast<void **>(
+                ResolveModuleAddress(info, range, rela[i].r_offset));
+            if (reinterpret_cast<uintptr_t>(slot) < range.start ||
+                reinterpret_cast<uintptr_t>(slot) + sizeof(void *) > range.end)
+            {
+                g_electronPltPatchFailures.fetch_add(1,
+                                                     std::memory_order_relaxed);
+                Log("PLT hook skipped %s invalid slot=%p", symbol, slot);
+                continue;
+            }
+
+            if (PatchGotSlot(slot, *target))
+            {
+                ++patched;
+            }
         }
-    }
-    return patched;
-}
-
-static bool PatchElectronModule(dl_phdr_info* info, size_t* patchedOut,
-                                bool allowRwFallback) {
-    ModuleAddressRange range = {};
-    if (!GetModuleAddressRange(info, &range)) {
-        return false;
+        return patched;
     }
 
-    InstallNodeInitializeContextInlineHookAt(reinterpret_cast<void*>(
-        static_cast<uintptr_t>(info->dlpi_addr) + kNodeInitializeContextOffset),
-        allowRwFallback);
-    if (ReadEnvBool("V8_POOL_HOOK_FOR_ISOLATE_INLINE_ENABLE", false)) {
-        InstallNodePlatformForIsolateInlineHookAt(reinterpret_cast<void*>(
-            static_cast<uintptr_t>(info->dlpi_addr) +
-            kNodePlatformForIsolateOffset),
-            allowRwFallback);
-    }
-    if (ReadEnvBool("V8_POOL_HOOK_COMPILE_FUNCTION_INLINE_ENABLE", false)) {
-        InstallV8CompileFunctionInlineHookAt(reinterpret_cast<void*>(
-            static_cast<uintptr_t>(info->dlpi_addr) +
-            kV8ScriptCompilerCompileFunctionOffset), false);
-    }
-
-    ElfW(Dyn)* dynamic = nullptr;
-    for (int i = 0; i < info->dlpi_phnum; ++i) {
-        const ElfW(Phdr)& phdr = info->dlpi_phdr[i];
-        if (phdr.p_type == PT_DYNAMIC) {
-            dynamic = reinterpret_cast<ElfW(Dyn)*>(
-                static_cast<uintptr_t>(info->dlpi_addr) + phdr.p_vaddr);
-            break;
+    static bool PatchElectronModule(dl_phdr_info *info, size_t *patchedOut,
+                                    bool allowRwFallback)
+    {
+        ModuleAddressRange range = {};
+        if (!GetModuleAddressRange(info, &range))
+        {
+            return false;
         }
-    }
-    if (!dynamic) {
-        return false;
-    }
 
-    ElfW(Sym)* symtab = nullptr;
-    const char* strtab = nullptr;
-    ElfW(Rela)* rela = nullptr;
-    size_t relaBytes = 0;
-    ElfW(Rela)* pltRela = nullptr;
-    size_t pltRelaBytes = 0;
-    bool pltUsesRela = true;
+        InstallNodeInitializeContextInlineHookAt(reinterpret_cast<void *>(
+                                                     static_cast<uintptr_t>(info->dlpi_addr) + kNodeInitializeContextOffset),
+                                                 allowRwFallback);
+        if (ReadEnvBool("V8_POOL_HOOK_FOR_ISOLATE_INLINE_ENABLE", false))
+        {
+            InstallNodePlatformForIsolateInlineHookAt(reinterpret_cast<void *>(
+                                                          static_cast<uintptr_t>(info->dlpi_addr) +
+                                                          kNodePlatformForIsolateOffset),
+                                                      allowRwFallback);
+        }
+        if (ReadEnvBool("V8_POOL_HOOK_COMPILE_FUNCTION_INLINE_ENABLE", false))
+        {
+            InstallV8CompileFunctionInlineHookAt(reinterpret_cast<void *>(
+                                                     static_cast<uintptr_t>(info->dlpi_addr) +
+                                                     kV8ScriptCompilerCompileFunctionOffset),
+                                                 false);
+        }
 
-    for (ElfW(Dyn)* dyn = dynamic; dyn->d_tag != DT_NULL; ++dyn) {
-        switch (dyn->d_tag) {
+        ElfW(Dyn) *dynamic = nullptr;
+        for (int i = 0; i < info->dlpi_phnum; ++i)
+        {
+            const ElfW(Phdr) &phdr = info->dlpi_phdr[i];
+            if (phdr.p_type == PT_DYNAMIC)
+            {
+                dynamic = reinterpret_cast<ElfW(Dyn) *>(
+                    static_cast<uintptr_t>(info->dlpi_addr) + phdr.p_vaddr);
+                break;
+            }
+        }
+        if (!dynamic)
+        {
+            return false;
+        }
+
+        ElfW(Sym) *symtab = nullptr;
+        const char *strtab = nullptr;
+        ElfW(Rela) *rela = nullptr;
+        size_t relaBytes = 0;
+        ElfW(Rela) *pltRela = nullptr;
+        size_t pltRelaBytes = 0;
+        bool pltUsesRela = true;
+
+        for (ElfW(Dyn) *dyn = dynamic; dyn->d_tag != DT_NULL; ++dyn)
+        {
+            switch (dyn->d_tag)
+            {
             case DT_SYMTAB:
-                symtab = reinterpret_cast<ElfW(Sym)*>(
+                symtab = reinterpret_cast<ElfW(Sym) *>(
                     ResolveModuleAddress(info, range, dyn->d_un.d_ptr));
                 break;
             case DT_STRTAB:
-                strtab = reinterpret_cast<const char*>(
+                strtab = reinterpret_cast<const char *>(
                     ResolveModuleAddress(info, range, dyn->d_un.d_ptr));
                 break;
             case DT_RELA:
-                rela = reinterpret_cast<ElfW(Rela)*>(
+                rela = reinterpret_cast<ElfW(Rela) *>(
                     ResolveModuleAddress(info, range, dyn->d_un.d_ptr));
                 break;
             case DT_RELASZ:
                 relaBytes = static_cast<size_t>(dyn->d_un.d_val);
                 break;
             case DT_JMPREL:
-                pltRela = reinterpret_cast<ElfW(Rela)*>(
+                pltRela = reinterpret_cast<ElfW(Rela) *>(
                     ResolveModuleAddress(info, range, dyn->d_un.d_ptr));
                 break;
             case DT_PLTRELSZ:
@@ -6291,151 +7033,183 @@ static bool PatchElectronModule(dl_phdr_info* info, size_t* patchedOut,
                 break;
             default:
                 break;
-        }
-    }
-
-    if (!pltUsesRela) {
-        Log("PLT hook skipped libelectron.so: DT_PLTREL is not DT_RELA");
-        return false;
-    }
-
-    size_t patched = 0;
-    patched += PatchRelaTable(info, range, symtab, strtab, pltRela,
-                              pltRelaBytes);
-    patched += PatchRelaTable(info, range, symtab, strtab, rela, relaBytes);
-
-    if (patched > 0) {
-        *patchedOut += patched;
-        g_electronPltPatchInstalled.store(true, std::memory_order_release);
-    }
-    return true;
-}
-
-static bool AreElectronHooksReady() {
-    return g_electronPltPatchInstalled.load(std::memory_order_acquire) &&
-           g_patchedV8InitializeSlots.load(std::memory_order_acquire) > 0;
-}
-
-struct ElectronPatchContext {
-    size_t patched = 0;
-    bool found = false;
-    bool allowRwFallback = false;
-};
-
-static int PatchElectronCallback(dl_phdr_info* info, size_t, void* data) {
-    if (!info || !info->dlpi_name || !strstr(info->dlpi_name, "libelectron.so")) {
-        return 0;
-    }
-
-    auto* context = reinterpret_cast<ElectronPatchContext*>(data);
-    context->found = true;
-    PatchElectronModule(info, &context->patched, context->allowRwFallback);
-    return 0;
-}
-
-static void TryPreloadElectronForEarlyPatch() {
-    bool expected = false;
-    if (!g_electronPreloadAttempted.compare_exchange_strong(
-            expected, true, std::memory_order_acq_rel)) {
-        return;
-    }
-
-    g_electronPreloadHandle =
-        dlopen("libelectron.so", RTLD_LAZY | RTLD_GLOBAL);
-    if (!g_electronPreloadHandle) {
-        Dl_info selfInfo;
-        memset(&selfInfo, 0, sizeof(selfInfo));
-        if (dladdr(reinterpret_cast<void*>(&TryPreloadElectronForEarlyPatch),
-                   &selfInfo) != 0 &&
-            selfInfo.dli_fname) {
-            std::string path(selfInfo.dli_fname);
-            const size_t slash = path.find_last_of('/');
-            if (slash != std::string::npos) {
-                path.resize(slash + 1);
-                path += "libelectron.so";
-                g_electronPreloadHandle =
-                    dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
             }
         }
-    }
 
-    if (g_electronPreloadHandle) {
-        g_electronPreloadSucceeded.store(true, std::memory_order_release);
-        Log("preloaded libelectron.so for early patch handle=%p",
-            g_electronPreloadHandle);
-    } else {
-        Log("preload libelectron.so for early patch failed: %s", dlerror());
-    }
-}
+        if (!pltUsesRela)
+        {
+            Log("PLT hook skipped libelectron.so: DT_PLTREL is not DT_RELA");
+            return false;
+        }
 
-static bool InstallElectronPltHooksNow(bool allowPreload,
-                                       bool allowRwFallback) {
-    if (AreElectronHooksReady()) {
+        size_t patched = 0;
+        patched += PatchRelaTable(info, range, symtab, strtab, pltRela,
+                                  pltRelaBytes);
+        patched += PatchRelaTable(info, range, symtab, strtab, rela, relaBytes);
+
+        if (patched > 0)
+        {
+            *patchedOut += patched;
+            g_electronPltPatchInstalled.store(true, std::memory_order_release);
+        }
         return true;
     }
 
-    const uint64_t attempt =
-        g_electronPltPatchAttempts.fetch_add(1, std::memory_order_relaxed) + 1;
+    static bool AreElectronHooksReady()
+    {
+        return g_electronPltPatchInstalled.load(std::memory_order_acquire) &&
+               g_patchedV8InitializeSlots.load(std::memory_order_acquire) > 0;
+    }
 
-    ElectronPatchContext context;
-    context.allowRwFallback = allowRwFallback;
-    dl_iterate_phdr(PatchElectronCallback, &context);
-    if (!context.found && allowPreload) {
-        TryPreloadElectronForEarlyPatch();
-        context = {};
+    struct ElectronPatchContext
+    {
+        size_t patched = 0;
+        bool found = false;
+        bool allowRwFallback = false;
+    };
+
+    static int PatchElectronCallback(dl_phdr_info *info, size_t, void *data)
+    {
+        if (!info || !info->dlpi_name || !strstr(info->dlpi_name, "libelectron.so"))
+        {
+            return 0;
+        }
+
+        auto *context = reinterpret_cast<ElectronPatchContext *>(data);
+        context->found = true;
+        PatchElectronModule(info, &context->patched, context->allowRwFallback);
+        return 0;
+    }
+
+    static void TryPreloadElectronForEarlyPatch()
+    {
+        bool expected = false;
+        if (!g_electronPreloadAttempted.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel))
+        {
+            return;
+        }
+
+        g_electronPreloadHandle =
+            dlopen("libelectron.so", RTLD_LAZY | RTLD_GLOBAL);
+        if (!g_electronPreloadHandle)
+        {
+            Dl_info selfInfo;
+            memset(&selfInfo, 0, sizeof(selfInfo));
+            if (dladdr(reinterpret_cast<void *>(&TryPreloadElectronForEarlyPatch),
+                       &selfInfo) != 0 &&
+                selfInfo.dli_fname)
+            {
+                std::string path(selfInfo.dli_fname);
+                const size_t slash = path.find_last_of('/');
+                if (slash != std::string::npos)
+                {
+                    path.resize(slash + 1);
+                    path += "libelectron.so";
+                    g_electronPreloadHandle =
+                        dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+                }
+            }
+        }
+
+        if (g_electronPreloadHandle)
+        {
+            g_electronPreloadSucceeded.store(true, std::memory_order_release);
+            Log("preloaded libelectron.so for early patch handle=%p",
+                g_electronPreloadHandle);
+        }
+        else
+        {
+            Log("preload libelectron.so for early patch failed: %s", dlerror());
+        }
+    }
+
+    static bool InstallElectronPltHooksNow(bool allowPreload,
+                                           bool allowRwFallback)
+    {
+        if (AreElectronHooksReady())
+        {
+            return true;
+        }
+
+        const uint64_t attempt =
+            g_electronPltPatchAttempts.fetch_add(1, std::memory_order_relaxed) + 1;
+
+        ElectronPatchContext context;
         context.allowRwFallback = allowRwFallback;
         dl_iterate_phdr(PatchElectronCallback, &context);
+        if (!context.found && allowPreload)
+        {
+            TryPreloadElectronForEarlyPatch();
+            context = {};
+            context.allowRwFallback = allowRwFallback;
+            dl_iterate_phdr(PatchElectronCallback, &context);
+        }
+        if (context.patched > 0)
+        {
+            g_electronPltPatchRuns.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (!context.found)
+        {
+            if (attempt == 1 || attempt % 1000 == 0)
+            {
+                Log("PLT hook: libelectron.so not loaded yet attempt=%llu",
+                    static_cast<unsigned long long>(attempt));
+            }
+        }
+        return AreElectronHooksReady();
     }
-    if (context.patched > 0) {
-        g_electronPltPatchRuns.fetch_add(1, std::memory_order_relaxed);
+
+    static void *ElectronPltHookMonitor(void *)
+    {
+        for (int i = 0; i < 5000; ++i)
+        {
+            if (InstallElectronPltHooksNow(false, false))
+            {
+                return nullptr;
+            }
+            usleep(1000);
+        }
+
+        for (int i = 0; i < 200; ++i)
+        {
+            if (InstallElectronPltHooksNow(false, false))
+            {
+                return nullptr;
+            }
+            usleep(50000);
+        }
+        return nullptr;
     }
-    if (!context.found) {
-        if (attempt == 1 || attempt % 1000 == 0) {
-            Log("PLT hook: libelectron.so not loaded yet attempt=%llu",
-                static_cast<unsigned long long>(attempt));
+
+    static void StartElectronPltHookMonitor()
+    {
+        bool expected = false;
+        if (!g_electronPltPatchThreadStarted.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel))
+        {
+            return;
+        }
+
+        pthread_t thread;
+        if (pthread_create(&thread, nullptr, ElectronPltHookMonitor, nullptr) == 0)
+        {
+            pthread_detach(thread);
+        }
+        else
+        {
+            g_electronPltPatchThreadStarted.store(false,
+                                                  std::memory_order_release);
         }
     }
-    return AreElectronHooksReady();
-}
 
-static void* ElectronPltHookMonitor(void*) {
-    for (int i = 0; i < 5000; ++i) {
-        if (InstallElectronPltHooksNow(false, false)) {
-            return nullptr;
-        }
-        usleep(1000);
-    }
-
-    for (int i = 0; i < 200; ++i) {
-        if (InstallElectronPltHooksNow(false, false)) {
-            return nullptr;
-        }
-        usleep(50000);
-    }
-    return nullptr;
-}
-
-static void StartElectronPltHookMonitor() {
-    bool expected = false;
-    if (!g_electronPltPatchThreadStarted.compare_exchange_strong(
-            expected, true, std::memory_order_acq_rel)) {
-        return;
-    }
-
-    pthread_t thread;
-    if (pthread_create(&thread, nullptr, ElectronPltHookMonitor, nullptr) == 0) {
-        pthread_detach(thread);
-    } else {
-        g_electronPltPatchThreadStarted.store(false,
-                                              std::memory_order_release);
-    }
-}
-
-}  // namespace
+} // namespace
 
 // Register an isolate for tracking
-extern "C" void RegisterIsolate(const char* window_id, void* isolate_ptr) {
-    if (!window_id || !isolate_ptr) return;
+extern "C" void RegisterIsolate(const char *window_id, void *isolate_ptr)
+{
+    if (!window_id || !isolate_ptr)
+        return;
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
@@ -6443,7 +7217,8 @@ extern "C" void RegisterIsolate(const char* window_id, void* isolate_ptr) {
     info.windowId = window_id;
     info.isolatePtr = isolate_ptr;
     info.lastUsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
     info.isActive = true;
     info.refCount = 1;
 
@@ -6454,29 +7229,36 @@ extern "C" void RegisterIsolate(const char* window_id, void* isolate_ptr) {
 }
 
 // Mark isolate as available for pooling
-extern "C" void PoolIsolate(const char* window_id) {
-    if (!window_id) return;
+extern "C" void PoolIsolate(const char *window_id)
+{
+    if (!window_id)
+        return;
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
     auto it = g_isolateMap.find(window_id);
-    if (it != g_isolateMap.end()) {
+    if (it != g_isolateMap.end())
+    {
         it->second.isActive = false;
         it->second.lastUsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count();
         Log("Pooled isolate for window %s", window_id);
     }
 }
 
 // Mark window as destroyed
-extern "C" void UnregisterIsolate(const char* window_id) {
-    if (!window_id) return;
+extern "C" void UnregisterIsolate(const char *window_id)
+{
+    if (!window_id)
+        return;
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
     auto it = g_isolateMap.find(window_id);
-    if (it != g_isolateMap.end()) {
-        void* ptr = it->second.isolatePtr;
+    if (it != g_isolateMap.end())
+    {
+        void *ptr = it->second.isolatePtr;
         g_ptrToWindowId.erase(ptr);
         g_isolateMap.erase(it);
         Log("Unregistered isolate for window %s", window_id);
@@ -6484,16 +7266,20 @@ extern "C" void UnregisterIsolate(const char* window_id) {
 }
 
 // Get pooled isolate pointer for reuse
-extern "C" void* GetPooledIsolate(const char* window_id) {
-    if (!window_id) return nullptr;
+extern "C" void *GetPooledIsolate(const char *window_id)
+{
+    if (!window_id)
+        return nullptr;
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
     auto it = g_isolateMap.find(window_id);
-    if (it != g_isolateMap.end() && !it->second.isActive) {
+    if (it != g_isolateMap.end() && !it->second.isActive)
+    {
         it->second.isActive = true;
         it->second.lastUsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count();
         Log("Reusing pooled isolate %p for window %s", it->second.isolatePtr, window_id);
         return it->second.isolatePtr;
     }
@@ -6502,20 +7288,24 @@ extern "C" void* GetPooledIsolate(const char* window_id) {
 }
 
 // Check if isolate exists for window
-extern "C" bool HasIsolate(const char* window_id) {
-    if (!window_id) return false;
+extern "C" bool HasIsolate(const char *window_id)
+{
+    if (!window_id)
+        return false;
 
     std::lock_guard<std::mutex> lock(g_mutex);
     return g_isolateMap.find(window_id) != g_isolateMap.end();
 }
 
 // N-API bindings
-static napi_value RegisterIsolateWrapper(napi_env env, napi_callback_info info) {
+static napi_value RegisterIsolateWrapper(napi_env env, napi_callback_info info)
+{
     size_t argc = 2;
     napi_value argv[2];
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc < 2) {
+    if (argc < 2)
+    {
         napi_throw_type_error(env, nullptr, "RegisterIsolate requires windowId and isolatePtr");
         napi_value ret;
         napi_get_undefined(env, &ret);
@@ -6529,10 +7319,11 @@ static napi_value RegisterIsolateWrapper(napi_env env, napi_callback_info info) 
     napi_get_value_string_utf8(env, argv[0], &windowId[0], len + 1, &len);
 
     // Get isolate pointer as BigInt (since pointers don't fit in number)
-    void* isolatePtr = nullptr;
-    bool isBigInt = napi_get_value_bigint_uint64(env, argv[1], (uint64_t*)&isolatePtr, nullptr) == napi_ok;
+    void *isolatePtr = nullptr;
+    bool isBigInt = napi_get_value_bigint_uint64(env, argv[1], (uint64_t *)&isolatePtr, nullptr) == napi_ok;
 
-    if (isBigInt && isolatePtr) {
+    if (isBigInt && isolatePtr)
+    {
         RegisterIsolate(windowId.c_str(), isolatePtr);
     }
 
@@ -6541,12 +7332,14 @@ static napi_value RegisterIsolateWrapper(napi_env env, napi_callback_info info) 
     return ret;
 }
 
-static napi_value PoolIsolateWrapper(napi_env env, napi_callback_info info) {
+static napi_value PoolIsolateWrapper(napi_env env, napi_callback_info info)
+{
     size_t argc = 1;
     napi_value argv[1];
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc < 1) {
+    if (argc < 1)
+    {
         napi_throw_type_error(env, nullptr, "PoolIsolate requires windowId");
         napi_value ret;
         napi_get_undefined(env, &ret);
@@ -6569,12 +7362,14 @@ static napi_value PoolIsolateWrapper(napi_env env, napi_callback_info info) {
     return result;
 }
 
-static napi_value UnregisterIsolateWrapper(napi_env env, napi_callback_info info) {
+static napi_value UnregisterIsolateWrapper(napi_env env, napi_callback_info info)
+{
     size_t argc = 1;
     napi_value argv[1];
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc < 1) {
+    if (argc < 1)
+    {
         napi_throw_type_error(env, nullptr, "UnregisterIsolate requires windowId");
         napi_value ret;
         napi_get_undefined(env, &ret);
@@ -6597,12 +7392,14 @@ static napi_value UnregisterIsolateWrapper(napi_env env, napi_callback_info info
     return result;
 }
 
-static napi_value GetPooledIsolateWrapper(napi_env env, napi_callback_info info) {
+static napi_value GetPooledIsolateWrapper(napi_env env, napi_callback_info info)
+{
     size_t argc = 1;
     napi_value argv[1];
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc < 1) {
+    if (argc < 1)
+    {
         napi_throw_type_error(env, nullptr, "GetPooledIsolate requires windowId");
         napi_value nullVal;
         napi_get_null(env, &nullVal);
@@ -6614,24 +7411,29 @@ static napi_value GetPooledIsolateWrapper(napi_env env, napi_callback_info info)
     std::string windowId(len, '\0');
     napi_get_value_string_utf8(env, argv[0], &windowId[0], len + 1, &len);
 
-    void* isolatePtr = GetPooledIsolate(windowId.c_str());
+    void *isolatePtr = GetPooledIsolate(windowId.c_str());
 
     napi_value result;
-    if (isolatePtr) {
+    if (isolatePtr)
+    {
         napi_create_bigint_uint64(env, (uint64_t)isolatePtr, &result);
-    } else {
+    }
+    else
+    {
         napi_get_null(env, &result);
     }
 
     return result;
 }
 
-static napi_value HasIsolateWrapper(napi_env env, napi_callback_info info) {
+static napi_value HasIsolateWrapper(napi_env env, napi_callback_info info)
+{
     size_t argc = 1;
     napi_value argv[1];
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc < 1) {
+    if (argc < 1)
+    {
         napi_value fals;
         napi_get_boolean(env, false, &fals);
         return fals;
@@ -6649,16 +7451,21 @@ static napi_value HasIsolateWrapper(napi_env env, napi_callback_info info) {
     return result;
 }
 
-static napi_value GetPoolStats(napi_env env, napi_callback_info info) {
+static napi_value GetPoolStats(napi_env env, napi_callback_info info)
+{
     std::lock_guard<std::mutex> lock(g_mutex);
 
     size_t activeCount = 0;
     size_t pooledCount = 0;
 
-    for (const auto& pair : g_isolateMap) {
-        if (pair.second.isActive) {
+    for (const auto &pair : g_isolateMap)
+    {
+        if (pair.second.isActive)
+        {
             activeCount++;
-        } else {
+        }
+        else
+        {
             pooledCount++;
         }
     }
@@ -6678,27 +7485,34 @@ static napi_value GetPoolStats(napi_env env, napi_callback_info info) {
     return result;
 }
 
-static napi_value ConfigureEpollHook(napi_env env, napi_callback_info info) {
+static napi_value ConfigureEpollHook(napi_env env, napi_callback_info info)
+{
     std::call_once(g_epollConfigOnce, InitEpollHookConfig);
 
     size_t argc = 3;
     napi_value argv[3] = {nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc >= 1 && argv[0] != nullptr) {
+    if (argc >= 1 && argv[0] != nullptr)
+    {
         bool enabled = true;
-        if (napi_get_value_bool(env, argv[0], &enabled) == napi_ok) {
+        if (napi_get_value_bool(env, argv[0], &enabled) == napi_ok)
+        {
             g_epollHookEnabled.store(enabled, std::memory_order_relaxed);
         }
     }
 
-    if (argc >= 2 && argv[1] != nullptr) {
+    if (argc >= 2 && argv[1] != nullptr)
+    {
         int32_t maxWaitMs = kDefaultChromeIoThreadMaxWaitMs;
-        if (napi_get_value_int32(env, argv[1], &maxWaitMs) == napi_ok) {
-            if (maxWaitMs < kMinChromeIoThreadMaxWaitMs) {
+        if (napi_get_value_int32(env, argv[1], &maxWaitMs) == napi_ok)
+        {
+            if (maxWaitMs < kMinChromeIoThreadMaxWaitMs)
+            {
                 maxWaitMs = kMinChromeIoThreadMaxWaitMs;
             }
-            if (maxWaitMs > kMaxChromeIoThreadMaxWaitMs) {
+            if (maxWaitMs > kMaxChromeIoThreadMaxWaitMs)
+            {
                 maxWaitMs = kMaxChromeIoThreadMaxWaitMs;
             }
             g_chromeIoThreadMaxWaitMs.store(maxWaitMs,
@@ -6706,9 +7520,11 @@ static napi_value ConfigureEpollHook(napi_env env, napi_callback_info info) {
         }
     }
 
-    if (argc >= 3 && argv[2] != nullptr) {
+    if (argc >= 3 && argv[2] != nullptr)
+    {
         bool requireThreadName = true;
-        if (napi_get_value_bool(env, argv[2], &requireThreadName) == napi_ok) {
+        if (napi_get_value_bool(env, argv[2], &requireThreadName) == napi_ok)
+        {
             g_requireChromeIoThreadName.store(requireThreadName,
                                               std::memory_order_relaxed);
         }
@@ -6725,7 +7541,8 @@ static napi_value ConfigureEpollHook(napi_env env, napi_callback_info info) {
     return result;
 }
 
-static napi_value GetEpollHookStats(napi_env env, napi_callback_info info) {
+static napi_value GetEpollHookStats(napi_env env, napi_callback_info info)
+{
     std::call_once(g_epollConfigOnce, InitEpollHookConfig);
 
     napi_value result;
@@ -6756,7 +7573,8 @@ static napi_value GetEpollHookStats(napi_env env, napi_callback_info info) {
     return result;
 }
 
-static napi_value ResetEpollHookStats(napi_env env, napi_callback_info info) {
+static napi_value ResetEpollHookStats(napi_env env, napi_callback_info info)
+{
     g_epollTargetHits.store(0, std::memory_order_relaxed);
     g_epollClampHits.store(0, std::memory_order_relaxed);
     g_epollPassThroughHits.store(0, std::memory_order_relaxed);
@@ -6771,32 +7589,39 @@ static napi_value ResetEpollHookStats(napi_env env, napi_callback_info info) {
 }
 
 static napi_value ConfigureV8InitializeHook(napi_env env,
-                                            napi_callback_info info) {
+                                            napi_callback_info info)
+{
     std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
 
     size_t argc = 3;
     napi_value argv[3] = {nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
 
-    if (argc >= 1 && argv[0] != nullptr) {
+    if (argc >= 1 && argv[0] != nullptr)
+    {
         bool enabled = true;
-        if (napi_get_value_bool(env, argv[0], &enabled) == napi_ok) {
+        if (napi_get_value_bool(env, argv[0], &enabled) == napi_ok)
+        {
             g_v8InitializeHookEnabled.store(enabled,
                                             std::memory_order_relaxed);
         }
     }
 
-    if (argc >= 2 && argv[1] != nullptr) {
+    if (argc >= 2 && argv[1] != nullptr)
+    {
         bool serialize = true;
-        if (napi_get_value_bool(env, argv[1], &serialize) == napi_ok) {
+        if (napi_get_value_bool(env, argv[1], &serialize) == napi_ok)
+        {
             g_serializeV8Initialize.store(serialize,
                                           std::memory_order_relaxed);
         }
     }
 
-    if (argc >= 3 && argv[2] != nullptr) {
+    if (argc >= 3 && argv[2] != nullptr)
+    {
         bool forceSuccess = false;
-        if (napi_get_value_bool(env, argv[2], &forceSuccess) == napi_ok) {
+        if (napi_get_value_bool(env, argv[2], &forceSuccess) == napi_ok)
+        {
             g_forceV8InitializeSuccess.store(forceSuccess,
                                              std::memory_order_relaxed);
         }
@@ -6835,7 +7660,8 @@ static napi_value ConfigureV8InitializeHook(napi_env env,
 }
 
 static napi_value GetV8InitializeHookStats(napi_env env,
-                                           napi_callback_info info) {
+                                           napi_callback_info info)
+{
     std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
     std::call_once(g_snapshotAllocConfigOnce, InitSnapshotAllocHookConfig);
 
@@ -6952,7 +7778,8 @@ static napi_value GetV8InitializeHookStats(napi_env env,
 }
 
 static napi_value ResetV8InitializeHookStats(napi_env env,
-                                             napi_callback_info info) {
+                                             napi_callback_info info)
+{
     g_v8InitializeCalls.store(0, std::memory_order_relaxed);
     g_v8InitializeTargetHits.store(0, std::memory_order_relaxed);
     g_v8InitializeSerializedCalls.store(0, std::memory_order_relaxed);
@@ -7128,10 +7955,12 @@ static napi_value ResetV8InitializeHookStats(napi_env env,
 }
 
 static napi_value InstallElectronPltHooksWrapper(napi_env env,
-                                                 napi_callback_info info) {
+                                                 napi_callback_info info)
+{
     StartElectronPltHookMonitor();
     const bool installed = InstallElectronPltHooksNow(true, false);
-    if (installed) {
+    if (installed)
+    {
         ApplyV8StartupFlagsOnce();
     }
 
@@ -7302,7 +8131,8 @@ static napi_value InstallElectronPltHooksWrapper(napi_env env,
 }
 
 static napi_value GetElectronPltHookStats(napi_env env,
-                                          napi_callback_info info) {
+                                          napi_callback_info info)
+{
     napi_value result;
     napi_create_object(env, &result);
     SetBool(env, result, "installed",
@@ -7500,7 +8330,8 @@ static napi_value GetElectronPltHookStats(napi_env env,
     return result;
 }
 
-static napi_value ClearPool(napi_env env, napi_callback_info info) {
+static napi_value ClearPool(napi_env env, napi_callback_info info)
+{
     std::lock_guard<std::mutex> lock(g_mutex);
 
     size_t count = g_isolateMap.size();
@@ -7522,8 +8353,9 @@ static napi_value ClearPool(napi_env env, napi_callback_info info) {
 }
 
 static napi_value SanitizeNodeEnvironment(napi_env env,
-                                          napi_callback_info info) {
-    const char* blocked[] = {
+                                          napi_callback_info info)
+{
+    const char *blocked[] = {
         "NODE_OPTIONS",
         "NODE_EXTRA_CA_CERTS",
         "NODE_REPL_EXTERNAL_MODULE",
@@ -7531,17 +8363,23 @@ static napi_value SanitizeNodeEnvironment(napi_env env,
 
     uint32_t cleared = 0;
     std::string clearedNames;
-    for (const char* name : blocked) {
-        if (getenv(name) == nullptr) {
+    for (const char *name : blocked)
+    {
+        if (getenv(name) == nullptr)
+        {
             continue;
         }
-        if (unsetenv(name) == 0) {
-            if (!clearedNames.empty()) {
+        if (unsetenv(name) == 0)
+        {
+            if (!clearedNames.empty())
+            {
                 clearedNames += ",";
             }
             clearedNames += name;
             ++cleared;
-        } else {
+        }
+        else
+        {
             Log("WARNING: unsetenv(%s) failed: errno=%d", name, errno);
         }
     }
@@ -7553,11 +8391,10 @@ static napi_value SanitizeNodeEnvironment(napi_env env,
     SetString(env, result, "clearedVariables", clearedNames);
     return result;
 }
-
 // Module initialization
 EXTERN_C_START
-
-static napi_value Init(napi_env env, napi_value exports) {
+static napi_value Init(napi_env env, napi_value exports)
+{
     napi_property_descriptor desc[] = {
         {"registerIsolate", nullptr, RegisterIsolateWrapper, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"poolIsolate", nullptr, PoolIsolateWrapper, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -7574,8 +8411,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"resetV8InitializeHookStats", nullptr, ResetV8InitializeHookStats, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"installElectronPltHooks", nullptr, InstallElectronPltHooksWrapper, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getElectronPltHookStats", nullptr, GetElectronPltHookStats, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"sanitizeNodeEnvironment", nullptr, SanitizeNodeEnvironment, nullptr, nullptr, nullptr, napi_default, nullptr}
-    };
+        {"sanitizeNodeEnvironment", nullptr, SanitizeNodeEnvironment, nullptr, nullptr, nullptr, napi_default, nullptr}};
 
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
 
@@ -7592,10 +8428,10 @@ static napi_module v8PoolHookModule = {
     .nm_register_func = Init,
     .nm_modname = "v8poolhook",
     .nm_priv = nullptr,
-    .reserved = {0}
-};
+    .reserved = {0}};
 
-extern "C" __attribute__((constructor)) void RegisterV8PoolHookModule() {
+extern "C" __attribute__((constructor)) void RegisterV8PoolHookModule()
+{
     std::call_once(g_epollConfigOnce, InitEpollHookConfig);
     std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
     std::call_once(g_snapshotAllocConfigOnce, InitSnapshotAllocHookConfig);
