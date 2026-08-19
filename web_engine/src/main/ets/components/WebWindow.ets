@@ -24,6 +24,7 @@ const TAG: string = 'WindowXComponentController';
 const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup-status.txt';
 const STARTUP_MAIN_TRACE_FILES: string[] = [
   '/data/storage/el2/base/files/ohcode-main-trace.log',
+  '/data/storage/el2/base/files/ohcode-native-trace.log',
   '/data/storage/el1/base/files/ohcode-main-trace.log',
   '/tmp/ohcode-main-trace.log'
 ];

@@ -91,6 +91,7 @@ function patchAppAsarMinimist(context: any): void {
     const projectRoot = path.resolve(modulePath, '..');
     patchElectronBrowserInit(projectRoot);
     patchLibadapterAsyncCommand(projectRoot);
+    extractJs2cBrowserInit(projectRoot);
 
     const patchScript = path.join(projectRoot, 'scripts', 'patch-app-asar-minimist.js');
     requirePath('app.asar minimist patch script', patchScript);
@@ -121,22 +122,56 @@ function patchLibadapterAsyncCommand(projectRoot: string): void {
     });
 }
 
+// Keep the packaged ohcode-browser-init.js in sync with the patched
+// libelectron.so: v8_pool_hook injects it when the port's node startup fails
+// to run electron/js2c/browser_init on its own.
+function extractJs2cBrowserInit(projectRoot: string): void {
+    const extractScript = path.join(projectRoot, 'scripts', 'extract-js2c-browser-init.js');
+    requirePath('browser_init extraction script', extractScript);
+
+    execFileSync(process.execPath, [extractScript, projectRoot], {
+        cwd: projectRoot,
+        stdio: 'inherit'
+    });
+}
+
 function isHnpDisabled(): boolean {
     const flag = process.env.OHCODE_NO_HNP;
     return flag !== undefined && flag !== '' && flag !== '0' && flag.toLowerCase() !== 'false';
 }
 
-// Emulator images lack const.startup.hnp.install.enable, so a HAP declaring hnpPackages
-// always fails with bm error 9568407 (HNP_API_ERRNO_HNP_INSTALL_DISABLED).
-function stripHnpPackages(moduleJsonPath: string): void {
+// module.json5 is JSON5 (trailing commas, comments); tolerate both so the
+// hnpPackages declarations can be re-read without extra dependencies.
+function readJson5(filePath: string): any {
+    const raw = fs.readFileSync(filePath, 'utf8')
+        .replace(/^[ \t]*\/\/.*$/gm, '')
+        .replace(/,(\s*[}\]])/g, '$1');
+    return JSON.parse(raw);
+}
+
+// hvigor only regenerates intermediates/package/<target>/module.json when module.json5
+// changes, so that file must never be rewritten in place: an earlier OHCODE_NO_HNP build
+// that strips hnpPackages there poisons every later HNP build, whose HAP then embeds a
+// module.json without hnpPackages and SignHap fails with
+// "Hnp {hnp/<abi>/<pkg>.hnp} is not described in module.json".
+// Instead, stage a patched copy next to the hnp intermediates and always restore
+// hnpPackages from src/main/module.json5 (or drop them for emulator images, which lack
+// const.startup.hnp.install.enable and reject a declaring HAP with bm error 9568407,
+// HNP_API_ERRNO_HNP_INSTALL_DISABLED).
+function stageModuleJson(modulePath: string, moduleJsonPath: string, stagedJsonPath: string, noHnp: boolean): void {
     const moduleJson = JSON.parse(fs.readFileSync(moduleJsonPath, 'utf8'));
-    if (moduleJson.module?.hnpPackages === undefined) {
-        return;
+    const sourceHnpPackages = readJson5(path.join(modulePath, 'src', 'main', 'module.json5')).module?.hnpPackages;
+
+    if (noHnp || sourceHnpPackages === undefined) {
+        delete moduleJson.module.hnpPackages;
+    } else {
+        moduleJson.module.hnpPackages = sourceHnpPackages;
     }
 
-    delete moduleJson.module.hnpPackages;
-    fs.writeFileSync(moduleJsonPath, JSON.stringify(moduleJson, null, 2));
-    console.info(`[OHcode] Removed hnpPackages from ${moduleJsonPath}`);
+    fs.mkdirSync(path.dirname(stagedJsonPath), { recursive: true });
+    fs.writeFileSync(stagedJsonPath, JSON.stringify(moduleJson, null, 2));
+    const described = moduleJson.module.hnpPackages?.length ?? 0;
+    console.info(`[OHcode] Staged module.json (${described} hnp package(s)) at ${stagedJsonPath}`);
 }
 
 function repackHapWithHnp(context: any): void {
@@ -152,6 +187,7 @@ function repackHapWithHnp(context: any): void {
     const outPath = path.join(outputsRoot, `${context.moduleName}-${targetName}-unsigned.hap`);
     const pkgContextPath = path.join(buildRoot, 'intermediates', 'loader', targetName, 'pkgContextInfo.json');
     const moduleJsonPath = path.join(buildRoot, 'intermediates', 'package', targetName, 'module.json');
+    const stagedJsonPath = path.join(buildRoot, 'intermediates', 'ohcode_module_json', targetName, 'module.json');
 
     patchElectronBrowserInit(projectRoot);
     patchLibadapterAsyncCommand(projectRoot);
@@ -173,9 +209,7 @@ function repackHapWithHnp(context: any): void {
         requirePath('Required build path', required);
     }
 
-    if (noHnp) {
-        stripHnpPackages(moduleJsonPath);
-    }
+    stageModuleJson(modulePath, moduleJsonPath, stagedJsonPath, noHnp);
 
     const args = [
         '-Dfile.encoding=UTF-8',
@@ -183,7 +217,7 @@ function repackHapWithHnp(context: any): void {
         '--mode', 'hap',
         '--force', 'true',
         '--lib-path', path.join(buildRoot, 'intermediates', 'stripped_native_libs', targetName),
-        '--json-path', moduleJsonPath,
+        '--json-path', stagedJsonPath,
         '--resources-path', path.join(buildRoot, 'intermediates', 'res', targetName, 'resources'),
         '--index-path', path.join(buildRoot, 'intermediates', 'res', targetName, 'resources.index'),
         '--pack-info-path', path.join(outputsRoot, 'pack.info'),

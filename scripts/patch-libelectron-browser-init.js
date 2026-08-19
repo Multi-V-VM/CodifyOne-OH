@@ -56,6 +56,12 @@ const nodeAppBarrierTailSnippet =
 const nodeRunMainProbeSnippet = (
   "try{" + nodeRunMainSnippet + "}catch(e){require('fs').statSync('/E/'+e)}"
 ).padEnd(nodeAppBarrierTailSnippet.length, " ");
+const runMainEntryTailSnippet =
+  "\n\n// Note: this loads the module through the ESM loader";
+const runMainEntryOriginalSnippet =
+  "RegExpPrototypeExec(/^/, '');" + runMainEntryTailSnippet;
+const runMainEntryProbeSnippet =
+  "require('fs').statSync('/P');".padEnd(29, " ") + runMainEntryTailSnippet;
 const nodeAppBarrierReleaseSnippet =
   (
     "process.appCodeLoaded?.();process.appCodeLoaded=()=>{};\n" +
@@ -239,6 +245,12 @@ if (process.env.OHCODE_RUNMAIN_PROBE === "1") {
     nodeAppBarrierReleaseSnippet
   ];
   barrierPatch.newSnippet = nodeRunMainProbeSnippet;
+
+  patches.push({
+    name: "run_main_module entry probe",
+    oldSnippet: runMainEntryOriginalSnippet,
+    newSnippet: runMainEntryProbeSnippet
+  });
 }
 
 for (const patch of patches) {

@@ -543,6 +543,21 @@ export OHCODE_ABI="arm64-v8a"
 4. 连接鸿蒙 2in1 设备或启动模拟器
 5. **Run → Run 'electron'**
 
+如果你在终端里手工把 image 安装到真机/模拟器（尤其是 emulator），可以用仓库脚本一键部署：
+
+```bash
+# 需要先 export DEVECO_SDK_HOME，且产物已构建
+scripts/deploy-to-hdc.sh
+```
+
+```bash
+# 如果在 emulator image 上运行，建议先禁用 HNP 打包（按需打开）：
+export OHCODE_NO_HNP=1
+scripts/deploy-to-hdc.sh --hap /path/to/electron/build/default/outputs/default/electron.hap --bundle com.mikannqaq.ohcode --ability EntryAbility
+```
+
+脚本会默认使用 `electron/build/<target>/outputs/<target>/` 下最新的 `*.hap`，必要时可通过 `--hap`、`--device` 显式指定目标。启动后若仍拿不到日志，可先查到设备日志通道确认 `run_main_module`/探针输出是否落地。
+
 构建流水线自动执行：
 
 ```mermaid

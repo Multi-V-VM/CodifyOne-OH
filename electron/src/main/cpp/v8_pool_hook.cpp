@@ -403,6 +403,37 @@ Module.runMain(electronMain);
     constexpr const char *kNodeExposeBootstrapGlobalsScript =
         "globalThis.process=process;globalThis.require=require;"
         "'OHCODE_NODE_GLOBALS_EXPOSED'";
+    // Fallback rescue for the callback-form LoadEnvironment when Electron's
+    // start-execution callback never runs browser_init: node's string-form
+    // LoadEnvironment compiles this source with the standard bootstrap
+    // parameters (process, require, internalBinding, primordials), so the
+    // js2c bootstrap can be pulled in through nativeRequire directly.
+    // The js2c browser_init webpack bundle, extracted from the patched
+    // libelectron.so at build time (scripts/extract-js2c-browser-init.js) and
+    // shipped with the packaged app. v8_pool_hook injects it through the
+    // string-form LoadEnvironment — node compiles the source as builtin
+    // "embedder_main_<tid>" and calls it with (process, nativeRequire),
+    // exactly the parameters the bundle's free `require`/`process` expect.
+    constexpr const char *kBrowserInitBundlePath =
+        "/data/storage/el1/bundle/electron/resources/resfile/resources/app/"
+        "ohcode-browser-init.js";
+    constexpr const char *kBrowserInitRescuePrefix = R"OHCODE_JS(
+var __ohcodeOutcome = "running";
+try {
+)OHCODE_JS";
+    constexpr const char *kBrowserInitRescueSuffix = R"OHCODE_JS(
+;__ohcodeOutcome = "bundle-completed";
+} catch (err) {
+  __ohcodeOutcome =
+    "fail:" +
+    String((err && (err.stack || err.message)) || err).slice(0, 600);
+}
+try {
+  process
+    ._linkedBinding("electron_common_v8_util")
+    .setHiddenValue(global, "ohcodeProbeBI", String(__ohcodeOutcome).slice(0, 300));
+} catch (err) {}
+)OHCODE_JS";
     constexpr const char *kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
   const STAMP = "diag-20260715-directv8main1";
@@ -907,6 +938,8 @@ Module.runMain(electronMain);
     static std::atomic<int32_t> g_lastEffectiveV8SnapshotDataBlobRawSize{0};
     static std::atomic<bool> g_replaceContextSnapshotWithStartup{false};
     static std::atomic<bool> g_skipV8SnapshotDataBlob{false};
+    static std::atomic<bool> g_argvSwapBrowserInit{true};
+    static std::atomic<bool> g_injectBrowserInitBundle{false};
     static std::atomic<uint64_t> g_snapshotBlobSkips{0};
     static std::atomic<uint64_t> g_snapshotBlobReplacementAttempts{0};
     static std::atomic<uint64_t> g_snapshotBlobReplacements{0};
@@ -1092,6 +1125,10 @@ Module.runMain(electronMain);
     static std::once_flag g_realV8StringNewFromOneByteOnce;
     static V8StringNewFromOneByteFn g_realV8StringNewFromOneByte = nullptr;
     static std::atomic<uint64_t> g_v8StringNewFromOneByteCalls{0};
+    static std::atomic<void *> g_gotRealV8StringNewFromUtf8{nullptr};
+    static std::once_flag g_realV8StringNewFromUtf8Once;
+    static V8StringNewFromUtf8Fn g_realV8StringNewFromUtf8 = nullptr;
+    static std::atomic<uint64_t> g_v8StringNewFromUtf8Calls{0};
     static std::atomic<void *> g_gotRealV8FunctionCall{nullptr};
     static std::once_flag g_realV8FunctionCallOnce;
     static V8FunctionCallFn g_realV8FunctionCall = nullptr;
@@ -1267,6 +1304,7 @@ Module.runMain(electronMain);
     static std::atomic<uint32_t> g_patchedUvFsAccessSlots{0};
     static std::atomic<uint32_t> g_patchedUvFsScandirSlots{0};
     static std::atomic<uint32_t> g_patchedV8StringNewFromOneByteSlots{0};
+    static std::atomic<uint32_t> g_patchedV8StringNewFromUtf8Slots{0};
     static std::atomic<uint32_t> g_patchedV8FunctionCallSlots{0};
     static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
     static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
@@ -1329,6 +1367,28 @@ Module.runMain(electronMain);
         OH_LOG_Print(LOG_APP, LOG_INFO, 0x0000, "V8PoolHook", "%{public}s",
                      message);
 #endif
+        // App-domain hilog is often unreachable from `hdc shell hilog`, and the
+        // browser thread stalls without any trace in the ETS-side status file.
+        // Mirror every stage log into the el2 sandbox so the exact stall point
+        // can be pulled with `hdc file recv` while the process hangs.
+        static std::mutex traceMutex;
+        static FILE *traceFile = nullptr;
+        static bool traceOpenAttempted = false;
+        {
+            std::lock_guard<std::mutex> lock(traceMutex);
+            if (!traceOpenAttempted)
+            {
+                traceOpenAttempted = true;
+                traceFile =
+                    fopen("/data/storage/el2/base/files/ohcode-native-trace.log",
+                          "w");
+            }
+            if (traceFile)
+            {
+                fprintf(traceFile, "%s\n", message);
+                fflush(traceFile);
+            }
+        }
     }
 
     static bool ReadEnvBool(const char *name, bool default_value)
@@ -1419,6 +1479,12 @@ Module.runMain(electronMain);
             std::memory_order_relaxed);
         g_skipV8SnapshotDataBlob.store(
             ReadEnvBool("V8_POOL_HOOK_SKIP_SNAPSHOT_BLOB", false),
+            std::memory_order_relaxed);
+        g_argvSwapBrowserInit.store(
+            ReadEnvBool("OHCODE_BI_ARGV_SWAP", true),
+            std::memory_order_relaxed);
+        g_injectBrowserInitBundle.store(
+            ReadEnvBool("OHCODE_BI_INJECT", false),
             std::memory_order_relaxed);
 
         const char *flags = getenv("V8_POOL_HOOK_V8_FLAGS");
@@ -2282,6 +2348,58 @@ Module.runMain(electronMain);
         return g_realV8StringNewFromOneByte;
     }
 
+    static V8StringNewFromUtf8Fn GetRealV8StringNewFromUtf8()
+    {
+        if (void *gotReal = g_gotRealV8StringNewFromUtf8.load(
+                std::memory_order_acquire))
+        {
+            return reinterpret_cast<V8StringNewFromUtf8Fn>(gotReal);
+        }
+        std::call_once(g_realV8StringNewFromUtf8Once, []()
+                       { g_realV8StringNewFromUtf8 =
+                             reinterpret_cast<V8StringNewFromUtf8Fn>(dlsym(
+                                 RTLD_NEXT,
+                                 "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKc"
+                                 "NS_13NewStringTypeEi")); });
+        return g_realV8StringNewFromUtf8;
+    }
+
+    // Shared argv[1] rescue: node's argv bootstrap ends with
+    // Module.runMain('electron/js2c/browser_init'), which the CJS loader can
+    // never resolve (js2c ids are not file paths) and libelectron swallows
+    // the failure. Whenever that id string is created, hand back the packaged
+    // bundle path instead — runMain then loads the file through the full CJS
+    // path where require/_linkedBinding/console are all real.
+    static void *MaybeSwapBrowserInitId(void *isolate, const char *data,
+                                        int length)
+    {
+        if (!g_argvSwapBrowserInit.load(std::memory_order_relaxed) || !data)
+        {
+            return nullptr;
+        }
+        const size_t idLength = 27;
+        if ((length < 0 &&
+             strlen(data) != idLength) ||
+            (length >= 0 && static_cast<size_t>(length) != idLength) ||
+            memcmp(data, "electron/js2c/browser_init", idLength) != 0)
+        {
+            return nullptr;
+        }
+        std::call_once(g_v8DirectScriptSymbolsOnce,
+                       ResolveDirectScriptSymbols);
+        if (!g_v8DirectStringNewFromUtf8)
+        {
+            return nullptr;
+        }
+        void *replacement =
+            g_v8DirectStringNewFromUtf8(isolate, kBrowserInitBundlePath, 0, -1);
+        Log("swapped browser_init id -> bundle path replacement=%p caller=0x%llx",
+            replacement,
+            static_cast<unsigned long long>(
+                reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
+        return replacement;
+    }
+
     static V8FunctionCallFn GetRealV8FunctionCall()
     {
         if (void *gotReal = g_gotRealV8FunctionCall.load(
@@ -3040,11 +3158,8 @@ Module.runMain(electronMain);
         return true;
     }
 
-    static void *RunDirectV8BootstrapScript(void *processObject,
-                                            void *nativeRequire)
+    static void ResolveDirectScriptSymbols()
     {
-        std::call_once(g_v8DirectScriptSymbolsOnce, []()
-                       {
         g_v8DirectStringNewFromUtf8 =
             reinterpret_cast<V8StringNewFromUtf8Fn>(ResolveElectronExport(
                 "_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
@@ -3055,7 +3170,14 @@ Module.runMain(electronMain);
                 nullptr));
         g_v8DirectScriptRun =
             reinterpret_cast<V8ScriptRunFn>(ResolveElectronExport(
-                "_ZN2v86Script3RunENS_5LocalINS_7ContextEEE", nullptr)); });
+                "_ZN2v86Script3RunENS_5LocalINS_7ContextEEE", nullptr));
+    }
+
+    static void *RunDirectV8BootstrapScript(void *processObject,
+                                            void *nativeRequire)
+    {
+        std::call_once(g_v8DirectScriptSymbolsOnce,
+                       ResolveDirectScriptSymbols);
 
         void *isolate = reinterpret_cast<void *>(
             g_lastNodeNewContextIsolate.load(std::memory_order_relaxed));
@@ -5371,6 +5493,28 @@ _ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5Va
         return realSetPrivate(object, context, key, effectiveValue);
     }
     TraceV8ObjectSetPrivateName(privateName, callerOffset);
+    // node attaches formatted error text under private symbols when an error
+    // is prepared (e.g. reading err.stack). libelectron swallows bootstrap
+    // exceptions, so this is the only place the swallowed error text — such
+    // as why require('electron/js2c/browser_init') failed — becomes visible.
+    if (strstr(privateName, "arrowMessage") != nullptr ||
+        strstr(privateName, "errorMessage") != nullptr)
+    {
+        char errorText[512];
+        if (ReadV8StringValue(context, value, errorText, sizeof(errorText)))
+        {
+            Log("node error text via %s: %s", privateName, errorText);
+        }
+    }
+    if (strncmp(privateName, "ohcodeProbe", 11) == 0)
+    {
+        char probeText[384];
+        if (ReadV8StringValue(context, value, probeText,
+                              sizeof(probeText)))
+        {
+            Log("probe %s: %s", privateName, probeText);
+        }
+    }
     CaptureNodePreLoadProbeHiddenValue(context, privateName, value);
     if (IsBrowserInitStageDefineName(privateName))
     {
@@ -5698,7 +5842,7 @@ _ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi(
             strstr(preview, "internal/main") != nullptr ||
             strstr(preview, "browser_init") != nullptr || length > 4096;
         // Raise to trace every builtin V8 sees; 0 logs only the hits below.
-        constexpr uint64_t kV8StringTraceLimit = 0;
+        constexpr uint64_t kV8StringTraceLimit = 5000;
         if (interesting || callIndex <= kV8StringTraceLimit)
         {
             Log("v8::String::NewFromOneByte[%llu]%s len=%d caller=0x%llx "
@@ -5708,6 +5852,32 @@ _ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi(
                 static_cast<unsigned long long>(
                     reinterpret_cast<uintptr_t>(__builtin_return_address(0))),
                 preview);
+        }
+    }
+
+    // The port's node startup runs the argv bootstrap whose last step is
+    // Module.runMain('electron/js2c/browser_init'); the CJS loader cannot
+    // resolve js2c internal ids, so the whole boot dies silently (libelectron
+    // swallows the exception). Swap that id for the packaged bundle file —
+    // extracted from the patched libelectron.so at build time — so runMain
+    // loads it as a plain file through the FULL CJS path (pre_execution has
+    // already run there, so require/_linkedBinding/console all work).
+    if (g_argvSwapBrowserInit.load(std::memory_order_relaxed) && data &&
+        length == 27 &&
+        memcmp(data, "electron/js2c/browser_init", 27) == 0)
+    {
+        std::call_once(g_v8DirectScriptSymbolsOnce,
+                       ResolveDirectScriptSymbols);
+        if (g_v8DirectStringNewFromUtf8)
+        {
+            void *replacement = g_v8DirectStringNewFromUtf8(
+                isolate, kBrowserInitBundlePath, 0, -1);
+            Log("swapped browser_init id -> bundle path replacement=%p",
+                replacement);
+            if (replacement)
+            {
+                return replacement;
+            }
         }
     }
 
@@ -5726,6 +5896,13 @@ _ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_(
 
     const uint64_t callIndex =
         g_v8FunctionCallCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (callIndex <= 400)
+    {
+        Log("v8::Function::Call[%llu] ENTER fn=%p argc=%d caller=0x%llx",
+            static_cast<unsigned long long>(callIndex), self, argc,
+            static_cast<unsigned long long>(
+                reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
+    }
     void *result = realFunctionCall(self, context, recv, argc, argv);
     if (!result)
     {
@@ -5740,7 +5917,7 @@ _ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_(
                     reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
         }
     }
-    else if (callIndex <= 20)
+    else if (callIndex <= 400)
     {
         Log("v8::Function::Call[%llu] ok fn=%p argc=%d caller=0x%llx",
             static_cast<unsigned long long>(callIndex), self, argc,
@@ -5980,37 +6157,71 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
     }
     if (value && callIndex == 1)
     {
-        auto *environmentBytes = static_cast<uint8_t *>(environment);
-        void *startExecutionData =
-            *reinterpret_cast<void **>(environmentBytes + 0xa70);
-        if (startExecutionData)
+        // The previous rescue recovered the (process, require) pair through
+        // env+0xa70/+0x1c8/+0x1a8 pointer spelunking. On current libelectron
+        // builds that slot is the Realm (Realm::BootstrapInternalLoaders works
+        // through it), and neither field holds the native require, so both
+        // values failed IsFunction and the rescue always bailed at "could not
+        // uniquely identify native require" — browser_init never ran and the
+        // app stalled with every kNewWindow unhandled. Instead drive the
+        // bootstrap through node's string-form LoadEnvironment: node builds
+        // the standard (process, nativeRequire, internalBinding, primordials)
+        // arguments itself, so no pointer recovery is needed.
+        BootstrapMissingNodeInternalLoaders(environment);
+        NodeLoadEnvironmentStringFn realLoadEnvironmentString =
+            GetRealNodeLoadEnvironmentString();
+        if (!realLoadEnvironmentString)
         {
-            auto *dataBytes = static_cast<uint8_t *>(startExecutionData);
-            NodeStartExecutionCallbackInfoView info{
-                *reinterpret_cast<void **>(dataBytes + 0x1c8),
-                *reinterpret_cast<void **>(dataBytes + 0x1a8)};
-            Log("recovered Node start-execution values data=%p first=%p "
-                "second=%p",
-                startExecutionData, info.firstValue,
-                info.secondValue);
-            void *bootstrapResult = RunNodeStartExecutionBootstrap(info);
-            if (!bootstrapResult &&
-                BootstrapMissingNodeInternalLoaders(environment))
+            Log("browser_init rescue unavailable: "
+                "node::LoadEnvironment(string) real symbol not found");
+            return value;
+        }
+
+        // The string form compiles its argument as raw source under the id
+        // "node:embedder_main_0" with (process, require) parameters — it does
+        // NOT accept builtin script ids, so the js2c bootstrap has to be
+        // pulled in through nativeRequire from an embedder script.
+        // Embedder-context injection is a fallback (OHCODE_BI_INJECT=1): the
+        // argv-swap in the NewFromOneByte hook is the primary path, and both
+        // must not run or browser_init would boot Electron twice.
+        if (!g_injectBrowserInitBundle.load(std::memory_order_relaxed))
+        {
+            return value;
+        }
+        FILE *bundleFile = fopen(kBrowserInitBundlePath, "rb");
+        if (!bundleFile)
+        {
+            Log("browser_init rescue bundle missing path=%s errno=%d",
+                kBrowserInitBundlePath, errno);
+            return value;
+        }
+        std::string bundleSource;
+        char buffer[65536];
+        size_t chunk;
+        while ((chunk = fread(buffer, 1, sizeof(buffer), bundleFile)) > 0)
+        {
+            bundleSource.append(buffer, chunk);
+            if (bundleSource.size() > 4 * 1024 * 1024)
             {
-                info.firstValue =
-                    *reinterpret_cast<void **>(dataBytes + 0x1c8);
-                info.secondValue =
-                    *reinterpret_cast<void **>(dataBytes + 0x1a8);
-                Log("recovered Node start-execution values after loader "
-                    "bootstrap first=%p second=%p",
-                    info.firstValue, info.secondValue);
-                RunNodeStartExecutionBootstrap(info);
+                break;
             }
         }
-        else
+        fclose(bundleFile);
+        Log("browser_init rescue bundle loaded bytes=%llu",
+            static_cast<unsigned long long>(bundleSource.size()));
+        if (bundleSource.empty())
         {
-            Log("Node start-execution data unavailable env=%p", environment);
+            return value;
         }
+
+        std::string wrappedSource;
+        wrappedSource.reserve(bundleSource.size() + 1024);
+        wrappedSource += kBrowserInitRescuePrefix;
+        wrappedSource += bundleSource;
+        wrappedSource += kBrowserInitRescueSuffix;
+        void *bundleValue =
+            realLoadEnvironmentString(environment, wrappedSource.c_str());
+        Log("browser_init rescue injected result=%p", bundleValue);
     }
     return value;
 }
