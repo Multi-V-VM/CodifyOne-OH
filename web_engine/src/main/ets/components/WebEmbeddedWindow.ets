@@ -196,7 +196,7 @@ export struct WebEmbeddedWindow {
       default_uri = this.startUri;
     }
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
-    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16';
+    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --regexp-interpret-all';
     let vec_args = [override_ua, resDir, ELECTRON_APP_PATH, jsFlags, default_uri];
     this.appendMissingSwitches(vec_args, CHROMIUM_PROCESS_FLAGS);
     return vec_args;

@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/uio.h>
 #include <utility>
 #include <vector>
@@ -58,6 +59,11 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
     void *context, void *source, size_t arguments_count, void *arguments,
     size_t context_extension_count, void *context_extensions,
     int compile_options, int no_cache_reason);
+extern "C" void *
+_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE(
+    void *context, void *source, size_t arguments_count, void *arguments,
+    size_t context_extension_count, void *context_extensions,
+    int compile_options, int no_cache_reason, void *host_defined_options);
 extern "C" ssize_t write(int fd, const void *buffer, size_t count);
 extern "C" ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
@@ -417,22 +423,47 @@ Module.runMain(electronMain);
     constexpr const char *kBrowserInitBundlePath =
         "/data/storage/el1/bundle/electron/resources/resfile/resources/app/"
         "ohcode-browser-init.js";
+    constexpr const char *kNodeBootstrapLoadersPath =
+        "/data/storage/el1/bundle/electron/resources/resfile/resources/app/"
+        "ohcode-node-bootstrap-loaders.js";
+    constexpr const char *kNodePerContextPrimordialsPath =
+        "/data/storage/el1/bundle/electron/resources/resfile/resources/app/"
+        "ohcode-node-per-context-primordials.js";
     constexpr const char *kBrowserInitRescuePrefix = R"OHCODE_JS(
-var __ohcodeOutcome = "running";
+globalThis.__ohcodeNativeRescueStage = "browser-init-enter";
+globalThis.global = globalThis;
+globalThis.process = process;
+var __ohcodeFs = null;
 try {
+  __ohcodeFs = require("fs");
+  if (!globalThis.Buffer) {
+    globalThis.Buffer = require("buffer").Buffer;
+  }
+  globalThis.__ohcodeNativeRescueStage = "browser-init-require-fs-ok";
+} catch (err) {
+  globalThis.__ohcodeNativeRescueStage =
+    "browser-init-require-fs-error:" + String(err);
+}
+if (__ohcodeFs) {
+  try {
+    __ohcodeFs.openSync("/data/storage/el2/base/files/ohcode-bi-fs-ok", "w");
+    globalThis.__ohcodeNativeRescueStage = "browser-init-fs-probe-ok";
+  } catch (err) {}
+  try {
 )OHCODE_JS";
     constexpr const char *kBrowserInitRescueSuffix = R"OHCODE_JS(
-;__ohcodeOutcome = "bundle-completed";
-} catch (err) {
-  __ohcodeOutcome =
-    "fail:" +
-    String((err && (err.stack || err.message)) || err).slice(0, 600);
+    globalThis.__ohcodeNativeRescueStage = "browser-init-bundle-ok";
+  } catch (err) {
+    globalThis.__ohcodeNativeRescueStage =
+      "browser-init-bundle-error:" +
+      globalThis.String((err && (err.stack || err.message)) || err);
+    try {
+      __ohcodeFs.writeFileSync(
+        "/data/storage/el2/base/files/ohcode-bi-error.log",
+        String((err && (err.stack || err.message)) || err).slice(0, 4000));
+    } catch (err2) {}
+  }
 }
-try {
-  process
-    ._linkedBinding("electron_common_v8_util")
-    .setHiddenValue(global, "ohcodeProbeBI", String(__ohcodeOutcome).slice(0, 300));
-} catch (err) {}
 )OHCODE_JS";
     constexpr const char *kNodePostLoadTraceScript = R"OHCODE_JS(
 ;(() => {
@@ -837,6 +868,9 @@ try {
         uint32_t (*)(void *, void *, void *, void *, int);
     using V8CompileFunctionFn =
         void *(*)(void *, void *, size_t, void *, size_t, void *, int, int);
+    using V8CompileFunctionInternalFn =
+        void *(*)(void *, void *, size_t, void *, size_t, void *, int, int,
+                  void *);
     using OpenFn = int (*)(const char *, int, ...);
     using FopenFn = FILE *(*)(const char *, const char *);
     using AccessFn = int (*)(const char *, int);
@@ -940,6 +974,7 @@ try {
     static std::atomic<bool> g_skipV8SnapshotDataBlob{false};
     static std::atomic<bool> g_argvSwapBrowserInit{true};
     static std::atomic<bool> g_injectBrowserInitBundle{false};
+    static std::atomic<bool> g_insideSnapshotBuilder{false};
     static std::atomic<uint64_t> g_snapshotBlobSkips{0};
     static std::atomic<uint64_t> g_snapshotBlobReplacementAttempts{0};
     static std::atomic<uint64_t> g_snapshotBlobReplacements{0};
@@ -1109,6 +1144,7 @@ try {
     static std::atomic<void *> g_gotRealV8ObjectSetPrivate{nullptr};
     static std::atomic<void *> g_gotRealV8ObjectDefineOwnProperty{nullptr};
     static std::atomic<void *> g_gotRealV8CompileFunction{nullptr};
+    static std::atomic<void *> g_gotRealV8CompileFunctionInternal{nullptr};
     static std::atomic<void *> g_gotRealOpen{nullptr};
     static std::atomic<void *> g_gotRealFopen{nullptr};
     static std::atomic<void *> g_gotRealAccess{nullptr};
@@ -1291,6 +1327,7 @@ try {
     static std::atomic<uint32_t> g_patchedV8ObjectSetPrivateSlots{0};
     static std::atomic<uint32_t> g_patchedV8ObjectDefineOwnPropertySlots{0};
     static std::atomic<uint32_t> g_patchedV8CompileFunctionSlots{0};
+    static std::atomic<uint32_t> g_patchedV8CompileFunctionInternalSlots{0};
     static std::atomic<uint32_t> g_patchedOpenSlots{0};
     static std::atomic<uint32_t> g_patchedFopenSlots{0};
     static std::atomic<uint32_t> g_patchedAccessSlots{0};
@@ -1315,6 +1352,14 @@ try {
     static std::atomic<uint32_t> g_patchedAdapterStartIsolateChildProcessSlots{0};
     static thread_local bool g_insideNodeInitializeContextHook = false;
     static thread_local bool g_insideNodePlatformForIsolateHook = false;
+    static thread_local const std::string *g_directRescueSource = nullptr;
+    static thread_local const char *g_directRescueParameters = nullptr;
+    static thread_local const char *g_directRescueLabel = nullptr;
+    static thread_local int g_directRescueArgc = -1;
+    static thread_local bool g_insideDirectRescueCall = false;
+    static thread_local const std::string *g_perContextPrimordialsSource =
+        nullptr;
+    static thread_local bool g_nextCallIsPerContextPrimordials = false;
     static std::mutex g_entryPathProbeMutex;
     static std::string g_lastEntryPathProbeOp;
     static std::string g_lastEntryPathProbePath;
@@ -1367,26 +1412,27 @@ try {
         OH_LOG_Print(LOG_APP, LOG_INFO, 0x0000, "V8PoolHook", "%{public}s",
                      message);
 #endif
-        // App-domain hilog is often unreachable from `hdc shell hilog`, and the
-        // browser thread stalls without any trace in the ETS-side status file.
-        // Mirror every stage log into the el2 sandbox so the exact stall point
-        // can be pulled with `hdc file recv` while the process hangs.
+        // App-domain hilog is often unreachable from `hdc shell hilog`. Use
+        // raw syscalls for the sandbox trace so this logger never re-enters
+        // the open/fopen/write hooks that it is itself diagnosing.
         static std::mutex traceMutex;
-        static FILE *traceFile = nullptr;
+        static int traceFd = -1;
         static bool traceOpenAttempted = false;
         {
             std::lock_guard<std::mutex> lock(traceMutex);
             if (!traceOpenAttempted)
             {
                 traceOpenAttempted = true;
-                traceFile =
-                    fopen("/data/storage/el2/base/files/ohcode-native-trace.log",
-                          "w");
+                traceFd = static_cast<int>(syscall(
+                    SYS_openat, AT_FDCWD,
+                    "/data/storage/el2/base/files/ohcode-native-trace.log",
+                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0660));
             }
-            if (traceFile)
+            if (traceFd >= 0)
             {
-                fprintf(traceFile, "%s\n", message);
-                fflush(traceFile);
+                const size_t length = strnlen(message, sizeof(message));
+                (void)syscall(SYS_write, traceFd, message, length);
+                (void)syscall(SYS_write, traceFd, "\n", 1);
             }
         }
     }
@@ -1478,6 +1524,10 @@ try {
                         false),
             std::memory_order_relaxed);
         g_skipV8SnapshotDataBlob.store(
+            // Skipping the port's minimal snapshot blob is FATAL: the build
+            // has no fallback snapshot (verified on device — V8 init dies
+            // right after the skip). Keep the env override for future builds
+            // that ship a real embedded snapshot.
             ReadEnvBool("V8_POOL_HOOK_SKIP_SNAPSHOT_BLOB", false),
             std::memory_order_relaxed);
         g_argvSwapBrowserInit.store(
@@ -2103,9 +2153,7 @@ try {
         }
 
         constexpr const char *kSearchPaths[] = {
-            "resources/app",
             "app",
-            "resources/app.asar",
             "app.asar",
             "default_app.asar",
         };
@@ -2170,9 +2218,10 @@ try {
         std::call_once(g_realFopenOnce, []()
                        {
         g_realFopen = reinterpret_cast<FopenFn>(dlsym(RTLD_NEXT, "fopen"));
-        if (!g_realFopen) {
-            Log("WARNING: fopen real symbol not found");
-        } });
+        // Do not call Log() here: Log() opens its trace file through fopen,
+        // so a failed lookup would recursively enter Log while its mutex is
+        // already held and deadlock the module loader.
+        });
         return g_realFopen;
     }
 
@@ -2370,6 +2419,7 @@ try {
     // the failure. Whenever that id string is created, hand back the packaged
     // bundle path instead — runMain then loads the file through the full CJS
     // path where require/_linkedBinding/console are all real.
+    static void ResolveDirectScriptSymbols();
     static void *MaybeSwapBrowserInitId(void *isolate, const char *data,
                                         int length)
     {
@@ -2419,6 +2469,36 @@ try {
     static bool PathContains(const char *path, const char *needle)
     {
         return path && needle && strstr(path, needle) != nullptr;
+    }
+
+    // The port's argv bootstrap ends with Module.runMain('electron/js2c/
+    // browser_init'), which the CJS loader cannot resolve — the id string is
+    // snapshot-internalized so it cannot be swapped at creation time either.
+    // But resolution stat()s the id as a file path (<cwd>/electron/js2c/
+    // browser_init[.js]), so redirect those lookups (and the follow-up reads)
+    // to the packaged bundle extracted from the patched libelectron.so. The
+    // loader then compiles and runs browser_init through the full CJS path,
+    // where require/_linkedBinding/console are all real.
+    static const char *MaybeRedirectBrowserInitPath(const char *path,
+                                                    const char *op)
+    {
+        if (!path ||
+            !g_argvSwapBrowserInit.load(std::memory_order_relaxed))
+        {
+            return path;
+        }
+        const char *hit = strstr(path, "electron/js2c/browser_init");
+        if (!hit)
+        {
+            return path;
+        }
+        const size_t tail = strlen(hit);
+        if (tail != 27 && tail != 30) // with and without a ".js" suffix
+        {
+            return path;
+        }
+        Log("redirected %s %s -> browser_init bundle", op, path);
+        return kBrowserInitBundlePath;
     }
 
     static bool ShouldTraceEntryPath(const char *path)
@@ -3234,7 +3314,256 @@ try {
         return value;
     }
 
+    // Minimal SerializeInternalFieldsCallback: node's real callback
+    // (SerializeNodeContextInternalFields) is not exported from libelectron,
+    // but its own signature shows that returning StartupData{nullptr, 0} is
+    // the legal "nothing serializable" answer — node itself returns it for
+    // every slot except BaseObject::kEmbedderType. Dropping node's embedder
+    // graph matches the port's minimal blob; the point of the rebuild is the
+    // heap state that InitializeContext sets up on the context.
+    struct OhcodeStartupData
+    {
+        const char *data;
+        int rawSize;
+    };
+    static OhcodeStartupData OhcodeSerializeContextFields(void *holder,
+                                                          int index,
+                                                          void *data)
+    {
+        (void)holder;
+        (void)index;
+        (void)data;
+        return OhcodeStartupData{nullptr, 0};
+    }
+
+    // Rebuilds a full node context snapshot ON DEVICE with the fork's own
+    // exported V8/node APIs, replicating node's mksnapshot flow: a fresh
+    // SnapshotCreator isolate, node::NewContext, an explicit
+    // node::InitializeContext (which the port's normal startup skips), then
+    // SetDefaultContext + CreateBlob. The port's minimal 170KB
+    // v8_context_snapshot.bin leaves the restored realm builtin map empty
+    // (nativeRequire cannot resolve even 'fs'); a rebuilt blob restores it.
+    // Output: /data/storage/el2/base/files/ohcode-built-v8-context-snapshot.bin
+    static void BuildFullNodeContextSnapshot()
+    {
+        // Disabled by default: SetDefaultContext crashes during context
+        // serialization — node's BaseObject graph needs the real (unexported)
+        // SerializeNodeContextInternalFields plus a live Environment on the
+        // creator isolate, which this builder does not construct yet.
+        // Re-enable only while iterating (OHCODE_BUILD_SNAPSHOT=1).
+        if (!ReadEnvBool("OHCODE_BUILD_SNAPSHOT", false))
+        {
+            return;
+        }
+
+        using CreatorCtorFn = void *(*)(const void *, const void *);
+        using IsolateScopeCtorFn = void *(*)(void *, void *);
+        using HandleScopeCtorFn = void *(*)(void *, void *);
+        using CreatorGetIsolateFn = void *(*)(void *);
+        using CreatorSetDefaultContextFn = void *(*)(void *, void *, void *);
+        using CreatorCreateBlobFn = void *(*)(void *, int);
+        using ContextEnterFn = void (*)(void *);
+        using ContextExitFn = void (*)(void *);
+        using NodeNewContextFn = void *(*)(void *, void *);
+        using NodeInitializeContextFn = uint32_t (*)(void *);
+
+        auto creatorCtor = reinterpret_cast<CreatorCtorFn>(ResolveElectronExport(
+            "_ZN2v815SnapshotCreatorC1EPKlPKNS_11StartupDataE", nullptr));
+        auto isolateScopeCtor =
+            reinterpret_cast<IsolateScopeCtorFn>(ResolveElectronExport(
+                "_ZN2v811Isolate5ScopeC1EPNS_7IsolateE", nullptr));
+        auto handleScopeCtor =
+            reinterpret_cast<HandleScopeCtorFn>(ResolveElectronExport(
+                "_ZN2v811HandleScopeC1EPNS_7IsolateE", nullptr));
+        auto creatorGetIsolate =
+            reinterpret_cast<CreatorGetIsolateFn>(ResolveElectronExport(
+                "_ZN2v815SnapshotCreator10GetIsolateEv", nullptr));
+        auto creatorSetDefaultContext =
+            reinterpret_cast<CreatorSetDefaultContextFn>(
+                ResolveElectronExport(
+                    "_ZN2v815SnapshotCreator17SetDefaultContextENS_5LocalINS_"
+                    "7ContextEEENS_31SerializeInternalFieldsCallbackE",
+                    nullptr));
+        auto creatorCreateBlob =
+            reinterpret_cast<CreatorCreateBlobFn>(ResolveElectronExport(
+                "_ZN2v815SnapshotCreator10CreateBlobENS0_20FunctionCodeHandlingE",
+                nullptr));
+        auto contextEnter = reinterpret_cast<ContextEnterFn>(
+            ResolveElectronExport("_ZN2v87Context5EnterEv", nullptr));
+        auto contextExit = reinterpret_cast<ContextExitFn>(
+            ResolveElectronExport("_ZN2v87Context4ExitEv", nullptr));
+        auto nodeNewContext = reinterpret_cast<NodeNewContextFn>(
+            ResolveElectronExport(
+                "_ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplate"
+                "EEE",
+                nullptr));
+        auto nodeInitializeContext =
+            reinterpret_cast<NodeInitializeContextFn>(ResolveElectronExport(
+                "_ZN4node17InitializeContextEN2v85LocalINS0_7ContextEEE",
+                nullptr));
+
+        if (!creatorCtor || !handleScopeCtor || !creatorGetIsolate ||
+            !creatorSetDefaultContext || !creatorCreateBlob ||
+            !contextEnter || !contextExit || !nodeNewContext ||
+            !nodeInitializeContext)
+        {
+            Log("snapshot builder symbols unavailable ctor=%p scope=%p hs=%p "
+                "iso=%p set=%p blob=%p nc=%p ic=%p",
+                reinterpret_cast<void *>(creatorCtor),
+                reinterpret_cast<void *>(isolateScopeCtor),
+                reinterpret_cast<void *>(handleScopeCtor),
+                reinterpret_cast<void *>(creatorGetIsolate),
+                reinterpret_cast<void *>(creatorSetDefaultContext),
+                reinterpret_cast<void *>(creatorCreateBlob),
+                reinterpret_cast<void *>(nodeNewContext),
+                reinterpret_cast<void *>(nodeInitializeContext));
+            return;
+        }
+
+        // The fork's isolate init REQUIRES a startup blob (its normal flow
+        // calls SetSnapshotDataBlob before creating any isolate, and the
+        // "disable incompatible startup snapshot" binary patch removed the
+        // blob-less fallback). Feed the port's own minimal blob to the
+        // creator through the existing_blob constructor parameter.
+        static std::vector<char> portBlobData;
+        FILE *portBlob =
+            fopen("/data/storage/el1/bundle/electron/resources/resfile/"
+                  "v8_context_snapshot.bin",
+                  "rb");
+        if (portBlob)
+        {
+            char chunk[65536];
+            size_t got;
+            while ((got = fread(chunk, 1, sizeof(chunk), portBlob)) > 0)
+            {
+                portBlobData.insert(portBlobData.end(), chunk, chunk + got);
+            }
+            fclose(portBlob);
+        }
+        Log("snapshot builder port blob bytes=%llu",
+            static_cast<unsigned long long>(portBlobData.size()));
+        // v8::StartupData { const char* data; int raw_size; }
+        alignas(8) unsigned char startupDataStorage[16];
+        memset(startupDataStorage, 0, sizeof(startupDataStorage));
+        if (portBlobData.size() > 0 &&
+            portBlobData.size() < 16 * 1024 * 1024)
+        {
+            *reinterpret_cast<const char **>(startupDataStorage) =
+                portBlobData.data();
+            *reinterpret_cast<int *>(startupDataStorage + 8) =
+                static_cast<int>(portBlobData.size());
+        }
+
+        // The constructors placement-construct into caller storage and return
+        // `this`; sizes are overallocated (SnapshotCreator ~40B, scopes ~32B).
+        alignas(16) unsigned char creatorStorage[128];
+        memset(creatorStorage, 0, sizeof(creatorStorage));
+        g_insideSnapshotBuilder.store(true, std::memory_order_relaxed);
+        creatorCtor(
+            creatorStorage,
+            portBlobData.empty() ? nullptr : startupDataStorage);
+
+        void *isolate = creatorGetIsolate(creatorStorage);
+        g_insideSnapshotBuilder.store(false, std::memory_order_relaxed);
+        Log("snapshot builder creator isolate=%p", isolate);
+        if (!isolate)
+        {
+            return;
+        }
+
+        alignas(16) unsigned char isolateScopeStorage[64];
+        alignas(16) unsigned char handleScopeStorage[64];
+        if (isolateScopeCtor)
+        {
+            isolateScopeCtor(isolateScopeStorage, isolate);
+        }
+        handleScopeCtor(handleScopeStorage, isolate);
+
+        void *context = nodeNewContext(isolate, nullptr);
+        Log("snapshot builder NewContext context=%p", context);
+        if (!context)
+        {
+            return;
+        }
+
+        contextEnter(context);
+        const uint32_t initializeResult = nodeInitializeContext(context);
+        contextExit(context);
+        Log("snapshot builder InitializeContext result=%u", initializeResult);
+
+        // SerializeInternalFieldsCallback { CallbackFn callback; void* data; }
+        alignas(8) unsigned char callbackStorage[64];
+        memset(callbackStorage, 0, sizeof(callbackStorage));
+        *reinterpret_cast<void **>(callbackStorage) =
+            reinterpret_cast<void *>(&OhcodeSerializeContextFields);
+        creatorSetDefaultContext(creatorStorage, context, callbackStorage);
+
+        // FunctionCodeHandling: kKeep (=1) preserves compiled code in the
+        // blob, matching what mksnapshot produces for node contexts.
+        void *startupData = creatorCreateBlob(creatorStorage, 1);
+        Log("snapshot builder CreateBlob data=%p", startupData);
+        if (!startupData)
+        {
+            return;
+        }
+
+        // v8::StartupData { const char* data; int raw_size; }
+        const char *blobData =
+            *reinterpret_cast<const char **>(startupData);
+        const int rawSize = *reinterpret_cast<const int *>(
+            static_cast<uint8_t *>(startupData) + 8);
+        Log("snapshot builder blob bytes=%d", rawSize);
+        if (!blobData || rawSize <= 0 || rawSize > 64 * 1024 * 1024)
+        {
+            return;
+        }
+
+        const char *outPath =
+            "/data/storage/el2/base/files/ohcode-built-v8-context-snapshot"
+            ".bin";
+        FILE *out = fopen(outPath, "wb");
+        if (!out)
+        {
+            Log("snapshot builder output open failed path=%s errno=%d",
+                outPath, errno);
+            return;
+        }
+        const size_t written = fwrite(blobData, 1, static_cast<size_t>(rawSize), out);
+        fclose(out);
+        Log("snapshot builder wrote %llu bytes to %s",
+            static_cast<unsigned long long>(written), outPath);
+    }
+
     static void *ResolveElectronOffset(uintptr_t offset);
+
+    static bool ReadFileWithRawSyscalls(const char *path, std::string *output,
+                                        size_t maxBytes)
+    {
+        if (!path || !output)
+        {
+            return false;
+        }
+        const int fd = static_cast<int>(
+            syscall(SYS_openat, AT_FDCWD, path, O_RDONLY | O_CLOEXEC, 0));
+        if (fd < 0)
+        {
+            return false;
+        }
+        output->clear();
+        char buffer[65536];
+        ssize_t chunk;
+        while ((chunk = syscall(SYS_read, fd, buffer, sizeof(buffer))) > 0)
+        {
+            output->append(buffer, static_cast<size_t>(chunk));
+            if (output->size() > maxBytes)
+            {
+                output->clear();
+                break;
+            }
+        }
+        (void)syscall(SYS_close, fd);
+        return chunk >= 0 && !output->empty();
+    }
 
     static bool BootstrapMissingNodeInternalLoaders(void *environment)
     {
@@ -3255,9 +3584,28 @@ try {
             return false;
         }
 
+        std::string loadersSource;
+        if (!ReadFileWithRawSyscalls(kNodeBootstrapLoadersPath,
+                                     &loadersSource, 256 * 1024))
+        {
+            Log("Node internal-loader rescue source unavailable path=%s "
+                "errno=%d",
+                kNodeBootstrapLoadersPath, errno);
+            return false;
+        }
         Log("running Node Realm::BootstrapInternalLoaders realm=%p function=%p",
             realm, reinterpret_cast<void *>(bootstrap));
+        g_directRescueSource = &loadersSource;
+        g_directRescueParameters =
+            "process, getLinkedBinding, getInternalBinding, primordials";
+        g_directRescueLabel = "node-bootstrap-loaders";
+        g_directRescueArgc = 4;
         void *result = bootstrap(realm);
+        CaptureNodePostLoadStage();
+        g_directRescueSource = nullptr;
+        g_directRescueParameters = nullptr;
+        g_directRescueLabel = nullptr;
+        g_directRescueArgc = -1;
         Log("Node Realm::BootstrapInternalLoaders returned value=%p realm=%p",
             result, realm);
         return result != nullptr;
@@ -5445,12 +5793,6 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
     size_t context_extension_count, void *context_extensions,
     int compile_options, int no_cache_reason)
 {
-    V8CompileFunctionFn realCompileFunction = GetRealV8CompileFunction();
-    if (!realCompileFunction)
-    {
-        return nullptr;
-    }
-
     g_v8CompileFunctionCalls.fetch_add(1, std::memory_order_relaxed);
     g_lastV8CompileFunctionContext.store(
         reinterpret_cast<uintptr_t>(context), std::memory_order_relaxed);
@@ -5463,10 +5805,129 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
     g_lastV8CompileFunctionNoCacheReason.store(
         no_cache_reason, std::memory_order_relaxed);
     RecordV8CompileFunctionSource(context, source);
+    const uint64_t compileCall =
+        g_v8CompileFunctionCalls.load(std::memory_order_relaxed);
+    if (compileCall <= 24)
+    {
+        Log("v8::ScriptCompiler::CompileFunction[%llu] argc=%llu options=%d "
+            "noCache=%d source=%s",
+            static_cast<unsigned long long>(compileCall),
+            static_cast<unsigned long long>(arguments_count), compile_options,
+            no_cache_reason, GetLastV8CompileFunctionSource().c_str());
+    }
 
-    return realCompileFunction(context, source, arguments_count, arguments,
-                               context_extension_count, context_extensions,
-                               compile_options, no_cache_reason);
+    // CompileFunction returns callable-but-empty functions in this fork even
+    // with kNoCompileOptions. Rebuild it through the working Script::Compile
+    // path. A function expression preserves Node's caller-supplied parameter
+    // names and body semantics without using CompileFunction again.
+    std::call_once(g_v8DirectScriptSymbolsOnce, ResolveDirectScriptSymbols);
+    std::call_once(g_v8AppSearchPathSymbolsOnce,
+                   ResolveV8AppSearchPathSymbols);
+    void *isolate =
+        g_v8ContextGetIsolate ? g_v8ContextGetIsolate(context) : nullptr;
+    void *sourceString = source ? *reinterpret_cast<void **>(source) : nullptr;
+    if (context_extension_count == 0 && isolate && sourceString &&
+        g_v8StringUtf8Length && g_v8StringWriteUtf8 &&
+        g_v8DirectStringNewFromUtf8 && g_v8DirectScriptCompile &&
+        g_v8DirectScriptRun)
+    {
+        const int sourceLength = g_v8StringUtf8Length(sourceString, isolate);
+        if (sourceLength >= 0 && sourceLength <= 4 * 1024 * 1024)
+        {
+            std::vector<char> sourceBytes(static_cast<size_t>(sourceLength) +
+                                          1, '\0');
+            int charsWritten = 0;
+            const int bytesWritten = g_v8StringWriteUtf8(
+                sourceString, isolate, sourceBytes.data(), sourceLength,
+                &charsWritten, 0);
+            if (bytesWritten >= 0)
+            {
+                std::string directSource("(function(");
+                bool argumentsOk = true;
+                auto **argumentValues = reinterpret_cast<void **>(arguments);
+                for (size_t i = 0; i < arguments_count; ++i)
+                {
+                    char argumentName[256];
+                    if (!argumentValues ||
+                        !ReadV8StringValue(context, argumentValues[i],
+                                           argumentName,
+                                           sizeof(argumentName)))
+                    {
+                        argumentsOk = false;
+                        break;
+                    }
+                    if (i != 0)
+                    {
+                        directSource += ',';
+                    }
+                    directSource += argumentName;
+                }
+                if (argumentsOk)
+                {
+                    directSource += "){\n";
+                    directSource.append(sourceBytes.data(),
+                                        static_cast<size_t>(bytesWritten));
+                    directSource += "\n})";
+                    void *directString = g_v8DirectStringNewFromUtf8(
+                        isolate, directSource.c_str(), 0,
+                        static_cast<int>(directSource.size()));
+                    void *script =
+                        directString
+                            ? g_v8DirectScriptCompile(context, directString,
+                                                      nullptr)
+                            : nullptr;
+                    void *function = script
+                                         ? g_v8DirectScriptRun(script, context)
+                                         : nullptr;
+                    if (function &&
+                        (!g_v8ValueIsFunction ||
+                         g_v8ValueIsFunction(function)))
+                    {
+                        if (compileCall <= 24)
+                        {
+                            Log("CompileFunction[%llu] replaced via Script "
+                                "fn=%p bytes=%d",
+                                static_cast<unsigned long long>(compileCall),
+                                function, bytesWritten);
+                        }
+                        return function;
+                    }
+                }
+            }
+        }
+    }
+
+    auto realCompileFunctionInternal =
+        reinterpret_cast<V8CompileFunctionInternalFn>(ResolveElectronExport(
+            "_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_"
+            "7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEE"
+            "NS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE",
+            reinterpret_cast<const void *>(
+                &_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE)));
+    Log("CompileFunction direct replacement unavailable; falling back to "
+        "internal=%p",
+        reinterpret_cast<void *>(realCompileFunctionInternal));
+    return realCompileFunctionInternal
+               ? realCompileFunctionInternal(
+                     context, source, arguments_count, arguments,
+                     context_extension_count, context_extensions,
+                     compile_options, no_cache_reason, nullptr)
+               : nullptr;
+}
+
+// Calls originating inside libelectron reach CompileFunctionInternal through
+// its PLT slot. Redirecting that writable GOT entry avoids patching executable
+// pages, which is prohibited by the device's W^X policy.
+extern "C" void *
+_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE(
+    void *context, void *source, size_t arguments_count, void *arguments,
+    size_t context_extension_count, void *context_extensions,
+    int compile_options, int no_cache_reason, void *host_defined_options)
+{
+    (void)host_defined_options;
+    return _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE(
+        context, source, arguments_count, arguments, context_extension_count,
+        context_extensions, compile_options, no_cache_reason);
 }
 
 extern "C" uint32_t
@@ -5708,7 +6169,7 @@ extern "C" int access(const char *path, int mode)
     }
 
     TraceEntryPathProbe("access", path);
-    return realAccess(path, mode);
+    return realAccess(MaybeRedirectBrowserInitPath(path, "access"), mode);
 }
 
 extern "C" int stat(const char *path, struct stat *buffer)
@@ -5721,7 +6182,7 @@ extern "C" int stat(const char *path, struct stat *buffer)
     }
 
     TraceEntryPathProbe("stat", path);
-    return realStat(path, buffer);
+    return realStat(MaybeRedirectBrowserInitPath(path, "stat"), buffer);
 }
 
 extern "C" int lstat(const char *path, struct stat *buffer)
@@ -5734,7 +6195,7 @@ extern "C" int lstat(const char *path, struct stat *buffer)
     }
 
     TraceEntryPathProbe("lstat", path);
-    return realLstat(path, buffer);
+    return realLstat(MaybeRedirectBrowserInitPath(path, "lstat"), buffer);
 }
 
 extern "C" int uv_fs_open(void *loop, void *req, const char *path, int flags,
@@ -5749,7 +6210,9 @@ extern "C" int uv_fs_open(void *loop, void *req, const char *path, int flags,
 
     g_uvFsOpenCalls.fetch_add(1, std::memory_order_relaxed);
     TraceUvFsPath("uv_fs_open", path);
-    return realUvFsOpen(loop, req, path, flags, mode, cb);
+    return realUvFsOpen(loop, req,
+                        MaybeRedirectBrowserInitPath(path, "uv_fs_open"),
+                        flags, mode, cb);
 }
 
 extern "C" int uv_fs_stat(void *loop, void *req, const char *path, void *cb)
@@ -5763,7 +6226,8 @@ extern "C" int uv_fs_stat(void *loop, void *req, const char *path, void *cb)
 
     g_uvFsStatCalls.fetch_add(1, std::memory_order_relaxed);
     TraceUvFsPath("uv_fs_stat", path);
-    return realUvFsStat(loop, req, path, cb);
+    return realUvFsStat(loop, req,
+                        MaybeRedirectBrowserInitPath(path, "uv_fs_stat"), cb);
 }
 
 extern "C" int uv_fs_lstat(void *loop, void *req, const char *path, void *cb)
@@ -5777,7 +6241,8 @@ extern "C" int uv_fs_lstat(void *loop, void *req, const char *path, void *cb)
 
     g_uvFsLstatCalls.fetch_add(1, std::memory_order_relaxed);
     TraceUvFsPath("uv_fs_lstat", path);
-    return realUvFsLstat(loop, req, path, cb);
+    return realUvFsLstat(
+        loop, req, MaybeRedirectBrowserInitPath(path, "uv_fs_lstat"), cb);
 }
 
 extern "C" int uv_fs_access(void *loop, void *req, const char *path, int flags,
@@ -5792,7 +6257,9 @@ extern "C" int uv_fs_access(void *loop, void *req, const char *path, int flags,
 
     g_uvFsAccessCalls.fetch_add(1, std::memory_order_relaxed);
     TraceUvFsPath("uv_fs_access", path);
-    return realUvFsAccess(loop, req, path, flags, cb);
+    return realUvFsAccess(
+        loop, req, MaybeRedirectBrowserInitPath(path, "uv_fs_access"), flags,
+        cb);
 }
 
 extern "C" int uv_fs_scandir(void *loop, void *req, const char *path,
@@ -5807,7 +6274,9 @@ extern "C" int uv_fs_scandir(void *loop, void *req, const char *path,
 
     g_uvFsScandirCalls.fetch_add(1, std::memory_order_relaxed);
     TraceUvFsPath("uv_fs_scandir", path);
-    return realUvFsScandir(loop, req, path, flags, cb);
+    return realUvFsScandir(
+        loop, req, MaybeRedirectBrowserInitPath(path, "uv_fs_scandir"), flags,
+        cb);
 }
 
 extern "C" void *
@@ -5826,6 +6295,16 @@ _ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi(
         1;
     if (data)
     {
+        if (length == 37 &&
+            memcmp(data, "node:internal/per_context/primordials", 37) == 0)
+        {
+            g_nextCallIsPerContextPrimordials = true;
+        }
+        else if (length >= 26 &&
+                 memcmp(data, "node:internal/per_context/", 26) == 0)
+        {
+            g_nextCallIsPerContextPrimordials = false;
+        }
         char preview[81];
         const int copy = length < 0 || length > 80 ? 80 : length;
         memcpy(preview, data, static_cast<size_t>(copy));
@@ -5862,26 +6341,49 @@ _ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi(
     // extracted from the patched libelectron.so at build time — so runMain
     // loads it as a plain file through the FULL CJS path (pre_execution has
     // already run there, so require/_linkedBinding/console all work).
-    if (g_argvSwapBrowserInit.load(std::memory_order_relaxed) && data &&
-        length == 27 &&
-        memcmp(data, "electron/js2c/browser_init", 27) == 0)
+    if (void *swapped = MaybeSwapBrowserInitId(
+            isolate, reinterpret_cast<const char *>(data), length))
     {
-        std::call_once(g_v8DirectScriptSymbolsOnce,
-                       ResolveDirectScriptSymbols);
-        if (g_v8DirectStringNewFromUtf8)
-        {
-            void *replacement = g_v8DirectStringNewFromUtf8(
-                isolate, kBrowserInitBundlePath, 0, -1);
-            Log("swapped browser_init id -> bundle path replacement=%p",
-                replacement);
-            if (replacement)
-            {
-                return replacement;
-            }
-        }
+        return swapped;
     }
 
     return realNewFromOneByte(isolate, data, type, length);
+}
+
+extern "C" void *
+_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi(
+    void *isolate, const char *data, int type, int length)
+{
+    V8StringNewFromUtf8Fn realNewFromUtf8 = GetRealV8StringNewFromUtf8();
+    if (!realNewFromUtf8)
+    {
+        return nullptr;
+    }
+
+    g_v8StringNewFromUtf8Calls.fetch_add(1, std::memory_order_relaxed);
+    if (data)
+    {
+        const size_t available = length < 0 ? strlen(data) : (size_t)length;
+        if (available > 0 && available <= 256)
+        {
+            char preview[257];
+            memcpy(preview, data, available);
+            preview[available] = '\0';
+            if (strstr(preview, "browser_init") != nullptr)
+            {
+                Log("v8::String::NewFromUtf8 len=%zu text=%s caller=0x%llx",
+                    available, preview,
+                    static_cast<unsigned long long>(
+                        reinterpret_cast<uintptr_t>(
+                            __builtin_return_address(0))));
+            }
+        }
+    }
+    if (void *swapped = MaybeSwapBrowserInitId(isolate, data, length))
+    {
+        return swapped;
+    }
+    return realNewFromUtf8(isolate, data, type, length);
 }
 
 extern "C" void *
@@ -5903,6 +6405,81 @@ _ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_(
             static_cast<unsigned long long>(
                 reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
     }
+
+    // Several Node bootstrap sources are compiled through a broken
+    // CompileFunction path in this Electron fork: the returned functions are
+    // callable but their bodies are empty. Node still supplies the correct
+    // arguments at each call site, so recompile the selected body as a normal
+    // V8 script that evaluates to a function and call it with those arguments.
+    const std::string *rescueSource = g_directRescueSource;
+    const char *rescueParameters = g_directRescueParameters;
+    const char *rescueLabel = g_directRescueLabel;
+    int rescueArgc = g_directRescueArgc;
+    if (g_nextCallIsPerContextPrimordials &&
+        g_perContextPrimordialsSource)
+    {
+        rescueSource = g_perContextPrimordialsSource;
+        rescueParameters = "exports, primordials";
+        rescueLabel = "node-per-context-primordials";
+        rescueArgc = 2;
+    }
+    g_nextCallIsPerContextPrimordials = false;
+    if (rescueSource && rescueParameters && argc == rescueArgc &&
+        !g_insideDirectRescueCall)
+    {
+        std::call_once(g_v8DirectScriptSymbolsOnce,
+                       ResolveDirectScriptSymbols);
+        std::call_once(g_v8AppSearchPathSymbolsOnce,
+                       ResolveV8AppSearchPathSymbols);
+        void *isolate =
+            g_v8ContextGetIsolate ? g_v8ContextGetIsolate(context) : nullptr;
+        std::string directSource;
+        directSource.reserve(rescueSource->size() + 128);
+        directSource += "(function(";
+        directSource += rescueParameters;
+        directSource += ") {\ntry {\n";
+        directSource += *rescueSource;
+        directSource += "\n} catch (__ohcodeDirectError) {\n";
+        directSource += "globalThis.__ohcodeNativeRescueStage = \"";
+        directSource +=
+            rescueLabel ? rescueLabel : "direct-rescue";
+        directSource +=
+            ":error:\" + globalThis.String((__ohcodeDirectError && "
+            "(__ohcodeDirectError.stack || __ohcodeDirectError.message)) || "
+            "__ohcodeDirectError);\nreturn undefined;\n}\n})";
+        void *source =
+            isolate && g_v8DirectStringNewFromUtf8
+                ? g_v8DirectStringNewFromUtf8(isolate, directSource.c_str(),
+                                              0, -1)
+                : nullptr;
+        void *script =
+            source && g_v8DirectScriptCompile
+                ? g_v8DirectScriptCompile(context, source, nullptr)
+                : nullptr;
+        void *function =
+            script && g_v8DirectScriptRun
+                ? g_v8DirectScriptRun(script, context)
+                : nullptr;
+        if (function &&
+            (!g_v8ValueIsFunction || g_v8ValueIsFunction(function)))
+        {
+            Log("%s direct-script replacement fn=%p original=%p",
+                rescueLabel ? rescueLabel : "rescue", function, self);
+            g_insideDirectRescueCall = true;
+            void *directResult =
+                realFunctionCall(function, context, recv, argc, argv);
+            g_insideDirectRescueCall = false;
+            Log("%s direct-script call result=%p",
+                rescueLabel ? rescueLabel : "rescue", directResult);
+            CaptureNodePostLoadStage();
+            return directResult;
+        }
+        Log("%s direct-script compile failed isolate=%p source=%p script=%p "
+            "function=%p",
+            rescueLabel ? rescueLabel : "rescue", isolate, source, script,
+            function);
+    }
+
     void *result = realFunctionCall(self, context, recv, argc, argv);
     if (!result)
     {
@@ -5933,6 +6510,16 @@ extern "C" void _ZN2v87Isolate10InitializeEPS0_RKNS0_12CreateParamsE(
     V8IsolateInitializeFn realInitialize = GetRealV8IsolateInitialize();
     if (!realInitialize)
     {
+        return;
+    }
+
+    // SnapshotCreator's internal Isolate::New must reach the fork's real
+    // init untouched: the wrapper's config/platform registration below
+    // assumes the app's single bootstrap isolate and hangs on a
+    // creator-owned one.
+    if (g_insideSnapshotBuilder.load(std::memory_order_relaxed))
+    {
+        CallRealV8IsolateInitialize(realInitialize, isolate, params);
         return;
     }
 
@@ -6021,7 +6608,20 @@ _ZN4node10NewContextEPN2v87IsolateENS0_5LocalINS0_14ObjectTemplateEEE(
     g_lastNodeNewContextTemplate.store(
         reinterpret_cast<uintptr_t>(objectTemplate), std::memory_order_relaxed);
 
+    std::string primordialsSource;
+    if (ReadFileWithRawSyscalls(kNodePerContextPrimordialsPath,
+                                &primordialsSource, 256 * 1024))
+    {
+        g_perContextPrimordialsSource = &primordialsSource;
+    }
+    else
+    {
+        Log("Node per-context primordials rescue source unavailable path=%s "
+            "errno=%d",
+            kNodePerContextPrimordialsPath, errno);
+    }
     void *context = realNewContext(isolate, objectTemplate);
+    g_perContextPrimordialsSource = nullptr;
     g_lastNodeNewContextResult.store(reinterpret_cast<uintptr_t>(context),
                                      std::memory_order_relaxed);
     if (!context)
@@ -6157,6 +6757,17 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
     }
     if (value && callIndex == 1)
     {
+        // The normal run_main_module path is healthy once CompileFunction is
+        // repaired. Keep the legacy browser-init rescue available only as an
+        // explicit diagnostic override; replaying it boots Electron twice.
+        if (!g_injectBrowserInitBundle.load(std::memory_order_relaxed))
+        {
+            return value;
+        }
+        // At this point libelectron has fully initialized its own V8 (platform
+        // + snapshot blob + isolate), which the builder requires — running it
+        // any earlier hangs inside the fork's uninitialized V8 entry points.
+        BuildFullNodeContextSnapshot();
         // The previous rescue recovered the (process, require) pair through
         // env+0xa70/+0x1c8/+0x1a8 pointer spelunking. On current libelectron
         // builds that slot is the Realm (Realm::BootstrapInternalLoaders works
@@ -6184,12 +6795,10 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         // Embedder-context injection is a fallback (OHCODE_BI_INJECT=1): the
         // argv-swap in the NewFromOneByte hook is the primary path, and both
         // must not run or browser_init would boot Electron twice.
-        if (!g_injectBrowserInitBundle.load(std::memory_order_relaxed))
-        {
-            return value;
-        }
-        FILE *bundleFile = fopen(kBrowserInitBundlePath, "rb");
-        if (!bundleFile)
+        const int bundleFd = static_cast<int>(syscall(
+            SYS_openat, AT_FDCWD, kBrowserInitBundlePath,
+            O_RDONLY | O_CLOEXEC, 0));
+        if (bundleFd < 0)
         {
             Log("browser_init rescue bundle missing path=%s errno=%d",
                 kBrowserInitBundlePath, errno);
@@ -6197,16 +6806,17 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         }
         std::string bundleSource;
         char buffer[65536];
-        size_t chunk;
-        while ((chunk = fread(buffer, 1, sizeof(buffer), bundleFile)) > 0)
+        ssize_t chunk;
+        while ((chunk = syscall(SYS_read, bundleFd, buffer,
+                                sizeof(buffer))) > 0)
         {
-            bundleSource.append(buffer, chunk);
+            bundleSource.append(buffer, static_cast<size_t>(chunk));
             if (bundleSource.size() > 4 * 1024 * 1024)
             {
                 break;
             }
         }
-        fclose(bundleFile);
+        (void)syscall(SYS_close, bundleFd);
         Log("browser_init rescue bundle loaded bytes=%llu",
             static_cast<unsigned long long>(bundleSource.size()));
         if (bundleSource.empty())
@@ -6219,9 +6829,18 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         wrappedSource += kBrowserInitRescuePrefix;
         wrappedSource += bundleSource;
         wrappedSource += kBrowserInitRescueSuffix;
+        g_directRescueSource = &wrappedSource;
+        g_directRescueParameters = "process, require";
+        g_directRescueLabel = "browser_init";
+        g_directRescueArgc = 2;
         void *bundleValue =
             realLoadEnvironmentString(environment, wrappedSource.c_str());
+        g_directRescueSource = nullptr;
+        g_directRescueParameters = nullptr;
+        g_directRescueLabel = nullptr;
+        g_directRescueArgc = -1;
         Log("browser_init rescue injected result=%p", bundleValue);
+        CaptureNodePostLoadStage();
     }
     return value;
 }
@@ -6755,7 +7374,10 @@ namespace
     {
         constexpr size_t trampolineSize =
             kAarch64InlineBranchBytes + kAarch64InlineBranchBytes;
-        void *trampoline = mmap(nullptr, trampolineSize,
+        const long systemPageSize = sysconf(_SC_PAGESIZE);
+        const size_t allocationSize =
+            systemPageSize > 0 ? static_cast<size_t>(systemPageSize) : 4096;
+        void *trampoline = mmap(nullptr, allocationSize,
                                 PROT_READ | PROT_WRITE,
                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (trampoline == MAP_FAILED)
@@ -6770,10 +7392,11 @@ namespace
         __builtin___clear_cache(
             reinterpret_cast<char *>(trampoline),
             reinterpret_cast<char *>(trampoline) + trampolineSize);
-        if (mprotect(trampoline, trampolineSize, PROT_READ | PROT_EXEC) != 0)
+        if (mprotect(trampoline, allocationSize,
+                     PROT_READ | PROT_EXEC) != 0)
         {
             const int savedErrno = errno;
-            munmap(trampoline, trampolineSize);
+            munmap(trampoline, allocationSize);
             errno = savedErrno;
             return nullptr;
         }
@@ -7011,21 +7634,6 @@ namespace
 
         void *replacement = reinterpret_cast<void *>(
             &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE);
-        void *trampoline = CreateNodeInitializeContextTrampoline(target);
-        if (!trampoline)
-        {
-            g_v8CompileFunctionInlineFailures.fetch_add(
-                1, std::memory_order_relaxed);
-            Log("v8::ScriptCompiler::CompileFunction inline hook trampoline "
-                "setup failed target=%p errno=%d",
-                target, errno);
-            return false;
-        }
-
-        g_v8CompileFunctionInlineTrampoline.store(
-            trampoline, std::memory_order_release);
-        g_realV8CompileFunction =
-            reinterpret_cast<V8CompileFunctionFn>(trampoline);
 
         size_t pageSize = 0;
         void *pageStart = nullptr;
@@ -7033,11 +7641,6 @@ namespace
         if (!MakeCodePageWritable(target, &pageSize, &pageStart,
                                   &keptExecutable, allowRwFallback))
         {
-            g_v8CompileFunctionInlineTrampoline.store(
-                nullptr, std::memory_order_release);
-            g_realV8CompileFunction = nullptr;
-            munmap(trampoline,
-                   kAarch64InlineBranchBytes + kAarch64InlineBranchBytes);
             g_v8CompileFunctionInlineFailures.fetch_add(
                 1, std::memory_order_relaxed);
             Log("v8::ScriptCompiler::CompileFunction inline hook mprotect "
@@ -7054,9 +7657,6 @@ namespace
         {
             if (mprotect(pageStart, pageSize, PROT_READ | PROT_EXEC) != 0)
             {
-                g_v8CompileFunctionInlineTrampoline.store(
-                    nullptr, std::memory_order_release);
-                g_realV8CompileFunction = nullptr;
                 g_v8CompileFunctionInlineFailures.fetch_add(
                     1, std::memory_order_relaxed);
                 Log("v8::ScriptCompiler::CompileFunction inline hook restore RX "
@@ -7072,8 +7672,8 @@ namespace
                                                  std::memory_order_release);
         g_electronPltPatchInstalled.store(true, std::memory_order_release);
         Log("v8::ScriptCompiler::CompileFunction inline hook installed target=%p "
-            "trampoline=%p replacement=%p keptExec=%d",
-            target, trampoline, replacement, keptExecutable ? 1 : 0);
+            "replacement=%p keptExec=%d",
+            target, replacement, keptExecutable ? 1 : 0);
         return true;
     }
 
@@ -7222,10 +7822,25 @@ namespace
                  &_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi),
              &g_gotRealV8StringNewFromOneByte,
              &g_patchedV8StringNewFromOneByteSlots},
+            {"_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
+             reinterpret_cast<void *>(
+                 &_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi),
+             &g_gotRealV8StringNewFromUtf8,
+             &g_patchedV8StringNewFromUtf8Slots},
             {"_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_",
              reinterpret_cast<void *>(
                  &_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_),
              &g_gotRealV8FunctionCall, &g_patchedV8FunctionCallSlots},
+            {"_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE",
+             reinterpret_cast<void *>(
+                 &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE),
+             &g_gotRealV8CompileFunction,
+             &g_patchedV8CompileFunctionSlots},
+            {"_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE",
+             reinterpret_cast<void *>(
+                 &_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE),
+             &g_gotRealV8CompileFunctionInternal,
+             &g_patchedV8CompileFunctionInternalSlots},
             {"_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
              reinterpret_cast<void *>(
                  &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE),
@@ -8765,29 +9380,15 @@ static napi_value Init(napi_env env, napi_value exports)
 
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
 
+    // N-API invokes Init only after dlopen and the ELF constructors return,
+    // so logging and worker startup are safe here. Doing either from the
+    // constructor can re-enter the dynamic loader through stdio/dlsym.
     Log("V8 Pool Hook module initialized");
-    return exports;
-}
-
-EXTERN_C_END
-
-static napi_module v8PoolHookModule = {
-    .nm_version = 1,
-    .nm_flags = 0,
-    .nm_filename = nullptr,
-    .nm_register_func = Init,
-    .nm_modname = "v8poolhook",
-    .nm_priv = nullptr,
-    .reserved = {0}};
-
-extern "C" __attribute__((constructor)) void RegisterV8PoolHookModule()
-{
-    std::call_once(g_epollConfigOnce, InitEpollHookConfig);
-    std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
-    std::call_once(g_snapshotAllocConfigOnce, InitSnapshotAllocHookConfig);
-    std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
-    std::call_once(g_adapterChildHookConfigOnce, InitAdapterChildHookConfig);
-    napi_module_register(&v8PoolHookModule);
+    Log("ohcode rescue config: skipSnapshotBlob=%d argvSwap=%d "
+        "injectBundle=%d",
+        g_skipV8SnapshotDataBlob.load(std::memory_order_relaxed) ? 1 : 0,
+        g_argvSwapBrowserInit.load(std::memory_order_relaxed) ? 1 : 0,
+        g_injectBrowserInitBundle.load(std::memory_order_relaxed) ? 1 : 0);
     Log("epoll_wait preload hook: enabled=%d maxWaitMs=%d targetOffset=0x%zx",
         g_epollHookEnabled.load(std::memory_order_relaxed),
         g_chromeIoThreadMaxWaitMs.load(std::memory_order_relaxed),
@@ -8811,4 +9412,26 @@ extern "C" __attribute__((constructor)) void RegisterV8PoolHookModule()
     Log("Adapter crashpad child-process hook: enabled=%d",
         g_adapterCrashpadBlockEnabled.load(std::memory_order_relaxed));
     StartElectronPltHookMonitor();
+    return exports;
+}
+
+EXTERN_C_END
+
+static napi_module v8PoolHookModule = {
+    .nm_version = 1,
+    .nm_flags = 0,
+    .nm_filename = nullptr,
+    .nm_register_func = Init,
+    .nm_modname = "v8poolhook",
+    .nm_priv = nullptr,
+    .reserved = {0}};
+
+extern "C" __attribute__((constructor)) void RegisterV8PoolHookModule()
+{
+    std::call_once(g_epollConfigOnce, InitEpollHookConfig);
+    std::call_once(g_v8InitializeConfigOnce, InitV8InitializeHookConfig);
+    std::call_once(g_snapshotAllocConfigOnce, InitSnapshotAllocHookConfig);
+    std::call_once(g_nodePlatformHookConfigOnce, InitNodePlatformHookConfig);
+    std::call_once(g_adapterChildHookConfigOnce, InitAdapterChildHookConfig);
+    napi_module_register(&v8PoolHookModule);
 }

@@ -49,6 +49,28 @@ const outPath = path.join(
   "app",
   "ohcode-browser-init.js"
 );
+const loadersOutPath = path.join(
+  projectRoot,
+  "web_engine",
+  "src",
+  "main",
+  "resources",
+  "resfile",
+  "resources",
+  "app",
+  "ohcode-node-bootstrap-loaders.js"
+);
+const primordialsOutPath = path.join(
+  projectRoot,
+  "web_engine",
+  "src",
+  "main",
+  "resources",
+  "resfile",
+  "resources",
+  "app",
+  "ohcode-node-per-context-primordials.js"
+);
 
 function licenseMarker(name) {
   return Buffer.from(
@@ -102,4 +124,64 @@ console.info(
     projectRoot,
     soPath
   )} to ${path.relative(projectRoot, outPath)}`
+);
+
+// Node's builtin sources are stored contiguously in libelectron. Extract the
+// loaders builtin as plain source too, so the runtime can bypass the fork's
+// broken CompileFunction path while preserving Node's four bootstrap args.
+const loadersStartMarker = Buffer.from(
+  "'use strict';\n\n// This file is compiled as if it's wrapped in a function with arguments\n" +
+    "// passed by node::RunBootstrapping()\n" +
+    "/* global process, getLinkedBinding, getInternalBinding, primordials */"
+);
+const loadersEndMarker = Buffer.from(
+  "// Hello, and welcome to hacking node.js!"
+);
+const loadersStart = data.indexOf(loadersStartMarker);
+const loadersEnd = data.indexOf(loadersEndMarker, loadersStart);
+if (
+  loadersStart < 0 ||
+  loadersEnd < 0 ||
+  loadersEnd <= loadersStart ||
+  loadersEnd - loadersStart > 256 * 1024
+) {
+  throw new Error(
+    `node bootstrap loaders source not found (start=0x${loadersStart.toString(16)}, end=0x${loadersEnd.toString(16)})`
+  );
+}
+const loadersSource = data.subarray(loadersStart, loadersEnd);
+fs.writeFileSync(loadersOutPath, loadersSource);
+console.info(
+  `[OHcode] Extracted node bootstrap loaders ${loadersSource.length} bytes from ${path.relative(
+    projectRoot,
+    soPath
+  )} to ${path.relative(projectRoot, loadersOutPath)}`
+);
+
+const primordialsStartMarker = Buffer.from(
+  "'use strict';\n\n/* eslint-disable node-core/prefer-primordials */\n\n" +
+    "// This file subclasses and stores the JS builtins that come from the VM"
+);
+const primordialsEndMarker = Buffer.from(
+  "'use strict';\nconst {\n  ReflectConstruct,\n  SafeMap,\n  Symbol,\n} = primordials;"
+);
+const primordialsStart = data.indexOf(primordialsStartMarker);
+const primordialsEnd = data.indexOf(primordialsEndMarker, primordialsStart);
+if (
+  primordialsStart < 0 ||
+  primordialsEnd < 0 ||
+  primordialsEnd <= primordialsStart ||
+  primordialsEnd - primordialsStart > 256 * 1024
+) {
+  throw new Error(
+    `node per-context primordials source not found (start=0x${primordialsStart.toString(16)}, end=0x${primordialsEnd.toString(16)})`
+  );
+}
+const primordialsSource = data.subarray(primordialsStart, primordialsEnd);
+fs.writeFileSync(primordialsOutPath, primordialsSource);
+console.info(
+  `[OHcode] Extracted node per-context primordials ${primordialsSource.length} bytes from ${path.relative(
+    projectRoot,
+    soPath
+  )} to ${path.relative(projectRoot, primordialsOutPath)}`
 );
