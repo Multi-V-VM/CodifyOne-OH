@@ -146,6 +146,18 @@ const binaryPatches = [
       "7f2303d5ffc301d1fd7b04a9f65705a9f44f06a9fd030191080440f9",
       "hex"
     )
+  },
+  {
+    // NodeBindings::LoadEnvironment unconditionally emits process "loaded"
+    // after the embedder callback. In this single-process renderer the
+    // renderer bundle can leave process.emit non-callable, and Node's
+    // MakeCallback path deliberately crashes on that invalid V8 API call.
+    // Branch to the function's existing stack-canary/epilogue block after
+    // the callback result has already been destroyed.
+    name: "skip unsafe Node loaded event",
+    offset: 0x2d78290,
+    oldBytes: Buffer.from("683a45f9", "hex"),
+    newBytes: Buffer.from("1a000014", "hex")
   }
 ];
 

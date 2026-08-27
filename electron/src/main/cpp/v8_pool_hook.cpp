@@ -812,6 +812,9 @@ if (__ohcodeFs) {
     using NothrowNewFn = void *(*)(size_t, const void *) noexcept;
     using DeleteFn = void (*)(void *) noexcept;
     using NodeInitializeContextFn = uint32_t (*)(void *);
+    using NodeGetCurrentEnvironmentFn = void *(*)(void *);
+    using NodeGetLinkedModuleFn = const void *(*)(const char *);
+    using NodeAddLinkedBindingModuleFn = void (*)(void *, const void *);
     using V8ContextGetIsolateFn = void *(*)(void *);
     using V8ContextGlobalFn = void *(*)(void *);
     using V8ContextEnterFn = void (*)(void *);
@@ -1343,6 +1346,16 @@ if (__ohcodeFs) {
     static std::atomic<uint32_t> g_patchedV8StringNewFromOneByteSlots{0};
     static std::atomic<uint32_t> g_patchedV8StringNewFromUtf8Slots{0};
     static std::atomic<uint32_t> g_patchedV8FunctionCallSlots{0};
+    struct TransientV8HookSlot
+    {
+        void **slot;
+        std::atomic<void *> *original;
+        void *replacement;
+        const char *symbol;
+    };
+    static std::atomic<bool> g_transientV8HooksEnabled{true};
+    static std::mutex g_transientV8HookSlotMutex;
+    static std::vector<TransientV8HookSlot> g_transientV8HookSlots;
     static std::atomic<uint32_t> g_patchedNodeInitializeContextInlineEntrypoints{0};
     static std::atomic<uint32_t> g_patchedNodePlatformForIsolateInlineEntrypoints{0};
     static std::atomic<uint32_t> g_patchedV8CompileFunctionInlineEntrypoints{0};
@@ -1359,6 +1372,8 @@ if (__ohcodeFs) {
     static thread_local bool g_insideDirectRescueCall = false;
     static thread_local const std::string *g_perContextPrimordialsSource =
         nullptr;
+
+    static void DisableTransientV8BootstrapHooks();
     static thread_local bool g_nextCallIsPerContextPrimordials = false;
     static std::mutex g_entryPathProbeMutex;
     static std::string g_lastEntryPathProbeOp;
@@ -2464,6 +2479,197 @@ if (__ohcodeFs) {
                                  "_ZN2v88Function4CallENS_5LocalINS_7ContextEEE"
                                  "NS1_INS_5ValueEEEiPS5_")); });
         return g_realV8FunctionCall;
+    }
+
+    struct NodeModuleView
+    {
+        int version;
+        unsigned int flags;
+        void *dsoHandle;
+        const char *filename;
+        void *registerFunction;
+        void *contextRegisterFunction;
+        const char *name;
+        void *privateData;
+        void *link;
+    };
+
+    static_assert(sizeof(NodeModuleView) == 64,
+                  "node_module layout must match Electron's Node ABI");
+
+    struct RendererModuleLookup
+    {
+        const char *name;
+        NodeModuleView *module = nullptr;
+    };
+
+    static size_t ReadableBytesInImage(const dl_phdr_info *info,
+                                       const void *address)
+    {
+        const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+        for (ElfW(Half) i = 0; i < info->dlpi_phnum; ++i)
+        {
+            const ElfW(Phdr) &phdr = info->dlpi_phdr[i];
+            if (phdr.p_type != PT_LOAD || !(phdr.p_flags & PF_R))
+            {
+                continue;
+            }
+            const uintptr_t begin =
+                static_cast<uintptr_t>(info->dlpi_addr + phdr.p_vaddr);
+            const uintptr_t end = begin + phdr.p_memsz;
+            if (value >= begin && value < end)
+            {
+                return static_cast<size_t>(end - value);
+            }
+        }
+        return 0;
+    }
+
+    static int FindRendererNodeModuleCallback(dl_phdr_info *info, size_t,
+                                              void *opaque)
+    {
+        auto *lookup = static_cast<RendererModuleLookup *>(opaque);
+        if (!info->dlpi_name ||
+            !strstr(info->dlpi_name, "libelectron.so"))
+        {
+            return 0;
+        }
+
+        const size_t expectedLength = strlen(lookup->name);
+        for (ElfW(Half) i = 0; i < info->dlpi_phnum; ++i)
+        {
+            const ElfW(Phdr) &phdr = info->dlpi_phdr[i];
+            if (phdr.p_type != PT_LOAD || !(phdr.p_flags & PF_W))
+            {
+                continue;
+            }
+            const uintptr_t begin =
+                static_cast<uintptr_t>(info->dlpi_addr + phdr.p_vaddr);
+            const uintptr_t end = begin + phdr.p_memsz;
+            for (uintptr_t cursor = (begin + 7u) & ~uintptr_t{7u};
+                 cursor + sizeof(NodeModuleView) <= end; cursor += 8)
+            {
+                auto *candidate = reinterpret_cast<NodeModuleView *>(cursor);
+                if (candidate->version != 108 || candidate->flags != 2 ||
+                    candidate->registerFunction != nullptr ||
+                    candidate->contextRegisterFunction == nullptr ||
+                    candidate->name == nullptr)
+                {
+                    continue;
+                }
+                if (ReadableBytesInImage(info, candidate->name) <
+                    expectedLength + 1)
+                {
+                    continue;
+                }
+                if (memcmp(candidate->name, lookup->name,
+                           expectedLength + 1) == 0)
+                {
+                    lookup->module = candidate;
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    static NodeModuleView *FindRendererNodeModule(const char *name)
+    {
+        RendererModuleLookup lookup{name, nullptr};
+        dl_iterate_phdr(FindRendererNodeModuleCallback, &lookup);
+        return lookup.module;
+    }
+
+    static NodeModuleView **ResolveLinkedModuleListHead(
+        NodeGetLinkedModuleFn getLinkedModule)
+    {
+#if defined(__aarch64__)
+        // get_linked_module begins by loading modlist_linked through an ADRP +
+        // LDR pair. Decode that PC-relative address so this remains ASLR-safe.
+        const auto *instructions = reinterpret_cast<const uint32_t *>(
+            reinterpret_cast<uintptr_t>(getLinkedModule));
+        const uint32_t adrp = instructions[4];
+        const uint32_t load = instructions[5];
+        if ((adrp & 0x9f00001fu) != 0x90000008u ||
+            (load & 0xffc003ffu) != 0xf9400113u)
+        {
+            Log("unexpected get_linked_module prologue adrp=0x%x load=0x%x",
+                adrp, load);
+            return nullptr;
+        }
+
+        const uint64_t immediateLow = (adrp >> 29) & 0x3u;
+        const uint64_t immediateHigh = (adrp >> 5) & 0x7ffffu;
+        const uint64_t encodedImmediate =
+            (immediateHigh << 2) | immediateLow;
+        const int64_t pageDelta =
+            (static_cast<int64_t>(encodedImmediate << 43) >> 43) << 12;
+        const uintptr_t instructionAddress =
+            reinterpret_cast<uintptr_t>(&instructions[4]);
+        const uintptr_t page = instructionAddress & ~uintptr_t{0xfffu};
+        const size_t byteOffset = ((load >> 10) & 0xfffu) * sizeof(void *);
+        return reinterpret_cast<NodeModuleView **>(page + pageDelta +
+                                                   byteOffset);
+#else
+        (void)getLinkedModule;
+        return nullptr;
+#endif
+    }
+
+    static bool EnsureRendererLinkedBindings(void *context)
+    {
+        (void)context;
+        static std::mutex registrationMutex;
+        std::lock_guard<std::mutex> lock(registrationMutex);
+
+        auto getLinkedModule = reinterpret_cast<NodeGetLinkedModuleFn>(
+            ResolveElectronExport(
+                "_ZN4node7binding17get_linked_moduleEPKc", nullptr));
+        NodeModuleView **linkedModules = getLinkedModule
+                                             ? ResolveLinkedModuleListHead(
+                                                   getLinkedModule)
+                                             : nullptr;
+        if (!getLinkedModule || !linkedModules)
+        {
+            Log("renderer linked module registration unavailable get=%p "
+                "head=%p",
+                reinterpret_cast<void *>(getLinkedModule),
+                reinterpret_cast<void *>(linkedModules));
+            return false;
+        }
+
+        // Electron normally invokes these generated _register_* functions only
+        // when IsRendererProcess() is true. HarmonyOS runs the renderer in the
+        // browser process, so register their static node_module records here.
+        static constexpr const char *kRendererBindings[] = {
+            "electron_renderer_context_bridge",
+            "electron_renderer_crash_reporter",
+            "electron_renderer_ipc",
+            "electron_renderer_web_frame"};
+        bool success = true;
+        for (const char *name : kRendererBindings)
+        {
+            if (getLinkedModule(name))
+            {
+                continue;
+            }
+            NodeModuleView *module = FindRendererNodeModule(name);
+            if (!module)
+            {
+                Log("renderer node_module record missing: %s", name);
+                success = false;
+                continue;
+            }
+            module->flags = 2;
+            module->link = *linkedModules;
+            *linkedModules = module;
+            const void *registered = getLinkedModule(name);
+            Log("renderer node_module registration name=%s record=%p "
+                "verified=%p",
+                name, module, registered);
+            success = success && registered == module;
+        }
+        return success;
     }
 
     static bool PathContains(const char *path, const char *needle)
@@ -4830,6 +5036,19 @@ if (__ohcodeFs) {
         return g_v8StartupFlags;
     }
 
+    static V8SetFlagsFromStringFn GetV8SetFlagsFromString()
+    {
+        auto setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
+            dlsym(RTLD_NEXT, "_ZN2v82V818SetFlagsFromStringEPKc"));
+        if (!setFlags)
+        {
+            setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
+                dlsym(RTLD_DEFAULT,
+                      "_ZN2v82V818SetFlagsFromStringEPKc"));
+        }
+        return setFlags;
+    }
+
     static void ApplyV8StartupFlagsOnce()
     {
         g_v8StartupFlagsApplyAttempts.fetch_add(1, std::memory_order_relaxed);
@@ -4847,13 +5066,7 @@ if (__ohcodeFs) {
             return;
         }
 
-        auto setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
-            dlsym(RTLD_NEXT, "_ZN2v82V818SetFlagsFromStringEPKc"));
-        if (!setFlags)
-        {
-            setFlags = reinterpret_cast<V8SetFlagsFromStringFn>(
-                dlsym(RTLD_DEFAULT, "_ZN2v82V818SetFlagsFromStringEPKc"));
-        }
+        V8SetFlagsFromStringFn setFlags = GetV8SetFlagsFromString();
         if (!setFlags)
         {
             g_v8StartupFlagsResolveFailed.store(true, std::memory_order_relaxed);
@@ -5826,11 +6039,21 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
     void *isolate =
         g_v8ContextGetIsolate ? g_v8ContextGetIsolate(context) : nullptr;
     void *sourceString = source ? *reinterpret_cast<void **>(source) : nullptr;
-    if (context_extension_count == 0 && isolate && sourceString &&
+    // Context extensions cannot simply be discarded: Electron uses one for
+    // its sandboxed renderer/preload bootstrap, and an empty replacement leaves
+    // window.vscode and the renderer IPC bindings uninitialized. Recreate V8's
+    // lexical lookup with a non-strict outer factory containing nested `with`
+    // scopes. The returned inner function may still be strict and captures the
+    // extension objects exactly where its free-variable lookup expects them.
+    if (isolate && sourceString &&
         g_v8StringUtf8Length && g_v8StringWriteUtf8 &&
         g_v8DirectStringNewFromUtf8 && g_v8DirectScriptCompile &&
         g_v8DirectScriptRun)
     {
+        if (context_extension_count > 0)
+        {
+            EnsureRendererLinkedBindings(context);
+        }
         const int sourceLength = g_v8StringUtf8Length(sourceString, isolate);
         if (sourceLength >= 0 && sourceLength <= 4 * 1024 * 1024)
         {
@@ -5843,8 +6066,31 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
             if (bytesWritten >= 0)
             {
                 std::string directSource("(function(");
+                directSource.reserve(static_cast<size_t>(bytesWritten) +
+                                     arguments_count * 32 +
+                                     context_extension_count * 64 + 128);
                 bool argumentsOk = true;
                 auto **argumentValues = reinterpret_cast<void **>(arguments);
+                if (context_extension_count > 0)
+                {
+                    for (size_t i = 0; i < context_extension_count; ++i)
+                    {
+                        if (i != 0)
+                        {
+                            directSource += ',';
+                        }
+                        directSource += "__ohcodeContextExtension";
+                        directSource += std::to_string(i);
+                    }
+                    directSource += "){\n";
+                    for (size_t i = 0; i < context_extension_count; ++i)
+                    {
+                        directSource += "with (__ohcodeContextExtension";
+                        directSource += std::to_string(i);
+                        directSource += ") {\n";
+                    }
+                    directSource += "return (function(";
+                }
                 for (size_t i = 0; i < arguments_count; ++i)
                 {
                     char argumentName[256];
@@ -5868,6 +6114,15 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
                     directSource.append(sourceBytes.data(),
                                         static_cast<size_t>(bytesWritten));
                     directSource += "\n})";
+                    if (context_extension_count > 0)
+                    {
+                        directSource += ';';
+                        for (size_t i = 0; i < context_extension_count; ++i)
+                        {
+                            directSource += "\n}";
+                        }
+                        directSource += "\n})";
+                    }
                     void *directString = g_v8DirectStringNewFromUtf8(
                         isolate, directSource.c_str(), 0,
                         static_cast<int>(directSource.size()));
@@ -5879,16 +6134,36 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
                     void *function = script
                                          ? g_v8DirectScriptRun(script, context)
                                          : nullptr;
+                    if (function && context_extension_count > 0)
+                    {
+                        V8FunctionCallFn realFunctionCall =
+                            GetRealV8FunctionCall();
+                        void *receiver = g_v8ContextGlobal
+                                             ? g_v8ContextGlobal(context)
+                                             : nullptr;
+                        auto **extensionValues =
+                            reinterpret_cast<void **>(context_extensions);
+                        function = realFunctionCall && receiver &&
+                                           extensionValues
+                                       ? realFunctionCall(
+                                             function, context, receiver,
+                                             static_cast<int>(
+                                                 context_extension_count),
+                                             extensionValues)
+                                       : nullptr;
+                    }
                     if (function &&
                         (!g_v8ValueIsFunction ||
                          g_v8ValueIsFunction(function)))
                     {
-                        if (compileCall <= 24)
+                        if (compileCall <= 64)
                         {
                             Log("CompileFunction[%llu] replaced via Script "
-                                "fn=%p bytes=%d",
+                                "fn=%p bytes=%d contextExtensions=%llu",
                                 static_cast<unsigned long long>(compileCall),
-                                function, bytesWritten);
+                                function, bytesWritten,
+                                static_cast<unsigned long long>(
+                                    context_extension_count));
                         }
                         return function;
                     }
@@ -6306,7 +6581,10 @@ _ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi(
             g_nextCallIsPerContextPrimordials = false;
         }
         char preview[81];
-        const int copy = length < 0 || length > 80 ? 80 : length;
+        const int copy = length < 0
+                             ? static_cast<int>(strnlen(
+                                   reinterpret_cast<const char *>(data), 80))
+                             : (length > 80 ? 80 : length);
         memcpy(preview, data, static_cast<size_t>(copy));
         preview[copy] = '\0';
         for (int i = 0; i < copy; ++i)
@@ -6394,6 +6672,15 @@ _ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_(
     if (!realFunctionCall)
     {
         return nullptr;
+    }
+
+    // The replacement is needed only for the explicitly armed Node bootstrap
+    // rescues below. Keep ordinary Chromium/renderer C++ -> JS calls on a
+    // minimal ABI-transparent path: logging here runs inside callers' V8
+    // HandleScopes and destabilizes this HarmonyOS fork under heavy loading.
+    if (!g_directRescueSource && !g_nextCallIsPerContextPrimordials)
+    {
+        return realFunctionCall(self, context, recv, argc, argv);
     }
 
     const uint64_t callIndex =
@@ -6660,6 +6947,11 @@ _ZN4node17CreateEnvironmentEPNS_11IsolateDataEN2v85LocalINS2_7ContextEEERKNSt4__
     g_lastNodeCreateEnvironmentContext.store(
         reinterpret_cast<uintptr_t>(context), std::memory_order_relaxed);
     RecordNodeCreateEnvironmentArgs(args, execArgs, callIndex);
+    if (GetLastNodeCreateEnvironmentInitScript() ==
+        "electron/js2c/renderer_init")
+    {
+        EnsureRendererLinkedBindings(context);
+    }
     void *environment =
         realCreateEnvironment(isolateData, context, args, execArgs, flags,
                               threadId, inspectorParentHandle);
@@ -6762,6 +7054,7 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         // explicit diagnostic override; replaying it boots Electron twice.
         if (!g_injectBrowserInitBundle.load(std::memory_order_relaxed))
         {
+            DisableTransientV8BootstrapHooks();
             return value;
         }
         // At this point libelectron has fully initialized its own V8 (platform
@@ -6841,6 +7134,7 @@ _ZN4node15LoadEnvironmentEPNS_11EnvironmentENSt4__n18functionIFN2v810MaybeLocalI
         g_directRescueArgc = -1;
         Log("browser_init rescue injected result=%p", bundleValue);
         CaptureNodePostLoadStage();
+        DisableTransientV8BootstrapHooks();
     }
     return value;
 }
@@ -7679,6 +7973,23 @@ namespace
 
     static bool PatchGotSlot(void **slot, const PltHookTarget &target)
     {
+        const bool isTransientV8BootstrapHook =
+            target.original == &g_gotRealV8FunctionCall ||
+            target.original == &g_gotRealV8StringNewFromOneByte ||
+            target.original == &g_gotRealV8StringNewFromUtf8 ||
+            target.original == &g_gotRealV8ObjectSetPrivate ||
+            target.original == &g_gotRealV8ObjectDefineOwnProperty;
+        std::unique_lock<std::mutex> transientV8HookLock(
+            g_transientV8HookSlotMutex, std::defer_lock);
+        if (isTransientV8BootstrapHook)
+        {
+            transientV8HookLock.lock();
+            if (!g_transientV8HooksEnabled.load(std::memory_order_acquire))
+            {
+                return false;
+            }
+        }
+
         void *current = *slot;
         if (current == target.replacement)
         {
@@ -7708,6 +8019,23 @@ namespace
         }
 
         *slot = target.replacement;
+        if (isTransientV8BootstrapHook)
+        {
+            bool recorded = false;
+            for (const TransientV8HookSlot &known : g_transientV8HookSlots)
+            {
+                if (known.slot == slot)
+                {
+                    recorded = true;
+                    break;
+                }
+            }
+            if (!recorded)
+            {
+                g_transientV8HookSlots.push_back(
+                    {slot, target.original, target.replacement, target.symbol});
+            }
+        }
         if (current == nullptr && allowNullSlotPatch)
         {
             g_entryPathProbeNullSlotPatches.fetch_add(
@@ -7722,6 +8050,42 @@ namespace
         Log("PLT hook patched %s slot=%p original=%p replacement=%p",
             target.symbol, slot, current, target.replacement);
         return true;
+    }
+
+    static void DisableTransientV8BootstrapHooks()
+    {
+        std::lock_guard<std::mutex> lock(g_transientV8HookSlotMutex);
+        if (!g_transientV8HooksEnabled.exchange(
+                false, std::memory_order_acq_rel))
+        {
+            return;
+        }
+
+        uint32_t restored = 0;
+        uint32_t missingOriginal = 0;
+        for (const TransientV8HookSlot &hook : g_transientV8HookSlots)
+        {
+            void *original = hook.original->load(std::memory_order_acquire);
+            if (!original)
+            {
+                ++missingOriginal;
+                Log("transient V8 hook restore skipped: original missing "
+                    "symbol=%s slot=%p",
+                    hook.symbol, hook.slot);
+                continue;
+            }
+            if (hook.slot && *hook.slot == hook.replacement)
+            {
+                *hook.slot = original;
+                ++restored;
+            }
+        }
+        __sync_synchronize();
+        Log("transient V8 bootstrap hooks disabled: restored=%u "
+            "recorded=%llu missingOriginal=%u",
+            restored, static_cast<unsigned long long>(
+                          g_transientV8HookSlots.size()),
+            missingOriginal);
     }
 
     static const PltHookTarget *FindPltHookTarget(const char *symbol)
@@ -7817,20 +8181,12 @@ namespace
              &g_gotRealUvFsAccess, &g_patchedUvFsAccessSlots},
             {"uv_fs_scandir", reinterpret_cast<void *>(&uv_fs_scandir),
              &g_gotRealUvFsScandir, &g_patchedUvFsScandirSlots},
-            {"_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi",
-             reinterpret_cast<void *>(
-                 &_ZN2v86String14NewFromOneByteEPNS_7IsolateEPKhNS_13NewStringTypeEi),
-             &g_gotRealV8StringNewFromOneByte,
-             &g_patchedV8StringNewFromOneByteSlots},
-            {"_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi",
-             reinterpret_cast<void *>(
-                 &_ZN2v86String11NewFromUtf8EPNS_7IsolateEPKcNS_13NewStringTypeEi),
-             &g_gotRealV8StringNewFromUtf8,
-             &g_patchedV8StringNewFromUtf8Slots},
-            {"_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_",
-             reinterpret_cast<void *>(
-                 &_ZN2v88Function4CallENS_5LocalINS_7ContextEEENS1_INS_5ValueEEEiPS5_),
-             &g_gotRealV8FunctionCall, &g_patchedV8FunctionCallSlots},
+            // Do not interpose the high-frequency V8 String constructors or
+            // Function::Call. The filesystem hooks below already redirect the
+            // snapshot-internalized browser_init id, while wrapping every
+            // string insertion corrupts this fork's StringTable during later
+            // renderer parsing. Direct rescue code resolves the real exported
+            // APIs explicitly when it is enabled for diagnostics.
             {"_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE",
              reinterpret_cast<void *>(
                  &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE),

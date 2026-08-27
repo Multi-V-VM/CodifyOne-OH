@@ -159,6 +159,11 @@ export class WebAbility extends WebBaseAbility {
     const para: Record<string, Object | string[] | IUpdateStyle> = {
       'xcomponentId': this.xcomponentId,
       'startUri': this.startUri,
+      // WebWindow sends the native browser its initial drawable bounds from
+      // this object. Without it, only later resize events can establish a
+      // viewport; on phones that never resize after launch the Chromium
+      // surface stays at 0x0 even though the workbench reaches dom-ready.
+      'window': windowStage.getMainWindowSync(),
       'electronRelaunchArgs': this.electronRelaunchArgs,
       'updateStyle': {
         'registerUpdateStyleFunction': WindowStyle.registerUpdateStyleFunction,

@@ -54,6 +54,7 @@ const CHROMIUM_PROCESS_FLAGS: string[] = [
   '--disable-gpu-sandbox',
   '--in-process-gpu',
   '--single-process',
+  '--new-window',
   '--force-disable-user-env',
   '--disable-dev-shm-usage',
   '--disable-http-cache',
