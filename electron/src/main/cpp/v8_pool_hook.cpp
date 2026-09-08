@@ -140,7 +140,7 @@ namespace
     constexpr uintptr_t kV8ScriptCompilerCompileFunctionOffset = 0x1eea110;
     constexpr size_t kMaxCompileFunctionSourceSampleBytes = 262144;
     constexpr const char *kDefaultV8StartupFlags =
-        "--max-old-space-size=512 --max-semi-space-size=16";
+        "--max-old-space-size=2048 --max-semi-space-size=32";
     constexpr const char *kNodeArgvPreloadPath =
         "/data/storage/el2/base/files/ohcode-node-preload.js";
     constexpr const char *kNodeArgvPreloadScript = R"OHCODE_JS(
@@ -1049,6 +1049,7 @@ if (__ohcodeFs) {
     static std::once_flag g_realV8ObjectSetPrivateOnce;
     static std::once_flag g_realV8ObjectDefineOwnPropertyOnce;
     static std::once_flag g_realV8CompileFunctionOnce;
+    static std::once_flag g_realV8CompileFunctionInternalOnce;
     static std::once_flag g_realOpenOnce;
     static std::once_flag g_realFopenOnce;
     static std::once_flag g_realAccessOnce;
@@ -1087,6 +1088,7 @@ if (__ohcodeFs) {
     static V8ObjectSetPrivateFn g_realV8ObjectSetPrivate = nullptr;
     static V8ObjectDefineOwnPropertyFn g_realV8ObjectDefineOwnProperty = nullptr;
     static V8CompileFunctionFn g_realV8CompileFunction = nullptr;
+    static V8CompileFunctionInternalFn g_realV8CompileFunctionInternal = nullptr;
     static OpenFn g_realOpen = nullptr;
     static FopenFn g_realFopen = nullptr;
     static AccessFn g_realAccess = nullptr;
@@ -2005,11 +2007,6 @@ if (__ohcodeFs) {
         {
             return reinterpret_cast<V8CompileFunctionFn>(trampoline);
         }
-        if (void *gotReal =
-                g_gotRealV8CompileFunction.load(std::memory_order_acquire))
-        {
-            return reinterpret_cast<V8CompileFunctionFn>(gotReal);
-        }
         std::call_once(g_realV8CompileFunctionOnce, []()
                        {
         g_realV8CompileFunction =
@@ -2020,7 +2017,33 @@ if (__ohcodeFs) {
         if (!g_realV8CompileFunction) {
             Log("WARNING: v8::ScriptCompiler::CompileFunction real symbol not found");
         } });
-        return g_realV8CompileFunction;
+        if (g_realV8CompileFunction)
+        {
+            return g_realV8CompileFunction;
+        }
+        return reinterpret_cast<V8CompileFunctionFn>(
+            g_gotRealV8CompileFunction.load(std::memory_order_acquire));
+    }
+
+    static V8CompileFunctionInternalFn GetRealV8CompileFunctionInternal()
+    {
+        std::call_once(g_realV8CompileFunctionInternalOnce, []()
+                       {
+        g_realV8CompileFunctionInternal =
+            reinterpret_cast<V8CompileFunctionInternalFn>(ResolveElectronExport(
+                "_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE",
+                reinterpret_cast<void*>(
+                    &_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE)));
+        if (!g_realV8CompileFunctionInternal) {
+            Log("WARNING: v8::ScriptCompiler::CompileFunctionInternal real symbol not found");
+        } });
+        if (g_realV8CompileFunctionInternal)
+        {
+            return g_realV8CompileFunctionInternal;
+        }
+        return reinterpret_cast<V8CompileFunctionInternalFn>(
+            g_gotRealV8CompileFunctionInternal.load(
+                std::memory_order_acquire));
     }
 
     static void ResolveV8AppSearchPathSymbols()
@@ -6006,6 +6029,29 @@ _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPN
     size_t context_extension_count, void *context_extensions,
     int compile_options, int no_cache_reason)
 {
+    // The replacement below is required for Node's browser-side CommonJS/AMD
+    // bootstrap, but using Script::Compile as a CompileFunction substitute on
+    // Chrome_InProcRenderer corrupts this fork's renderer V8 heap. The main
+    // workbench is emitted as ordinary static scripts and has no renderer
+    // CompileFunction dependency, so let renderer-internal calls use the
+    // native implementation while retaining the repaired browser path.
+    if (ShouldRegisterNodePlatformForCurrentThread())
+    {
+        // Preserve the complete native public path in the renderer. Calling
+        // CompileFunctionInternal directly with a null ScriptOrModule loses
+        // Chromium's host-defined options and aborts with:
+        // "ScriptOrigin() Host-defined options has to be a PrimitiveArray".
+        // GetRealV8CompileFunction bypasses the patched GOT slot; the internal
+        // wrapper below similarly passes the original metadata through.
+        V8CompileFunctionFn realCompileFunction = GetRealV8CompileFunction();
+        return realCompileFunction
+                   ? realCompileFunction(
+                         context, source, arguments_count, arguments,
+                         context_extension_count, context_extensions,
+                         compile_options, no_cache_reason)
+                   : nullptr;
+    }
+
     g_v8CompileFunctionCalls.fetch_add(1, std::memory_order_relaxed);
     g_lastV8CompileFunctionContext.store(
         reinterpret_cast<uintptr_t>(context), std::memory_order_relaxed);
@@ -6199,7 +6245,19 @@ _ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6So
     size_t context_extension_count, void *context_extensions,
     int compile_options, int no_cache_reason, void *host_defined_options)
 {
-    (void)host_defined_options;
+    if (ShouldRegisterNodePlatformForCurrentThread())
+    {
+        V8CompileFunctionInternalFn realCompileFunctionInternal =
+            GetRealV8CompileFunctionInternal();
+        return realCompileFunctionInternal
+                   ? realCompileFunctionInternal(
+                         context, source, arguments_count, arguments,
+                         context_extension_count, context_extensions,
+                         compile_options, no_cache_reason,
+                         host_defined_options)
+                   : nullptr;
+    }
+
     return _ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE(
         context, source, arguments_count, arguments, context_extension_count,
         context_extensions, compile_options, no_cache_reason);
@@ -8153,14 +8211,11 @@ namespace
                  &_ZN4ohos7adapter12multiprocess19ChildProcessStarter24StartIsolateChildProcessERKNSt4__n16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEERKNS4_INS3_4pairIiiEENS8_ISG_EEEERKSA_),
              &g_gotRealAdapterStartIsolateChildProcess,
              &g_patchedAdapterStartIsolateChildProcessSlots},
-            {"_ZnamRKSt9nothrow_t", reinterpret_cast<void *>(&_ZnamRKSt9nothrow_t),
-             &g_gotRealArrayNothrowNew, &g_patchedArrayNothrowNewSlots},
-            {"_ZnwmRKSt9nothrow_t", reinterpret_cast<void *>(&_ZnwmRKSt9nothrow_t),
-             &g_gotRealScalarNothrowNew, &g_patchedScalarNothrowNewSlots},
-            {"_ZdaPv", reinterpret_cast<void *>(&_ZdaPv),
-             &g_gotRealArrayDelete, &g_patchedArrayDeleteSlots},
-            {"_ZdlPv", reinterpret_cast<void *>(&_ZdlPv),
-             &g_gotRealScalarDelete, &g_patchedScalarDeleteSlots},
+            // Do not globally interpose C++ allocation/deallocation. These
+            // symbols are used throughout the renderer, and forwarding them
+            // through saved PLT/GOT entries corrupts V8's HandleScope heap.
+            // Snapshot allocation fallback must remain disabled until it can
+            // be scoped to snapshot loading instead of the whole process.
             {"open", reinterpret_cast<void *>(&open),
              &g_gotRealOpen, &g_patchedOpenSlots},
             {"fopen", reinterpret_cast<void *>(&fopen),
@@ -8192,11 +8247,11 @@ namespace
                  &_ZN2v814ScriptCompiler15CompileFunctionENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonE),
              &g_gotRealV8CompileFunction,
              &g_patchedV8CompileFunctionSlots},
-            {"_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE",
-             reinterpret_cast<void *>(
-                 &_ZN2v814ScriptCompiler23CompileFunctionInternalENS_5LocalINS_7ContextEEEPNS0_6SourceEmPNS1_INS_6StringEEEmPNS1_INS_6ObjectEEENS0_14CompileOptionsENS0_13NoCacheReasonEPNS1_INS_14ScriptOrModuleEEE),
-             &g_gotRealV8CompileFunctionInternal,
-             &g_patchedV8CompileFunctionInternalSlots},
+            // Do not interpose CompileFunctionInternal. Renderer compilation
+            // reaches it from inside libelectron with live ScriptOrModule and
+            // HandleScope state; even a pass-through wrapper destabilizes that
+            // path. The exported public CompileFunction hook above is enough
+            // for the browser-side bootstrap repair.
             {"_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE",
              reinterpret_cast<void *>(
                  &_ZN2v86Object10SetPrivateENS_5LocalINS_7ContextEEENS1_INS_7PrivateEEENS1_INS_5ValueEEE),

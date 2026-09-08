@@ -1,5 +1,3 @@
-import { WebWindow } from 'web_engine';
-import { KeyCode } from '@kit.InputKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import CustomChildProcess from '../process/CustomChildProcess';
@@ -42,6 +40,7 @@ struct Index {
   @State private showLoading: boolean = true;
   @State private loadingStatus: string = 'Starting OHcode shell [' + STARTUP_BUILD_STAMP + ']';
   @State private loadingElapsedSec: number = 0;
+  @State private localCode: string = "import { app } from './runtime';\n\ninterface Device {\n  name: string;\n  arch: 'arm64';\n}\n\nconst device: Device = {\n  name: 'Mate 60',\n  arch: 'arm64'\n};\n\napp.start(device);\n";
   private loadingStartedAt: number = 0;
   private loadingTimer: number = -1;
   private pollTimer: number = -1;
@@ -72,12 +71,15 @@ struct Index {
       } catch (_) { }
     }, 200);
 
+    // The preload-free local editor is complete as soon as its small document
+    // finishes loading. Native startup diagnostics can overwrite the shared
+    // status file before this ArkUI poll observes did-finish-load, so use a
+    // short bounded fallback instead of leaving an opaque splash over a live
+    // editor forever.
     this.loadingTimer = setTimeout(() => {
-      hilog.info(LOG_DOMAIN, LOG_TAG, '[%{public}s] loading timeout; still waiting for workbench',
-        STARTUP_BUILD_STAMP);
-      this.loadingStatus = '[' + STARTUP_BUILD_STAMP + '] still waiting for workbench; last status: ' +
-        this.loadingStatus;
-    }, 20000);
+      this.writeStartupStatus('local editor splash fallback elapsed');
+      this.hideLoading();
+    }, 2500);
   }
 
   private writeStartupStatus(status: string): void {
@@ -251,26 +253,83 @@ struct Index {
     .transition(TransitionEffect.OPACITY.animation({ duration: 500, curve: Curve.EaseInOut }))
   }
 
+  @Builder
+  LocalCodeEditor() {
+    Column() {
+      Row({ space: 10 }) {
+        Text('⌁').fontSize(22).fontColor('#23A8F2').fontWeight(FontWeight.Bold)
+        Text('OHcode').fontSize(14).fontColor('#E8E8E8').fontWeight(FontWeight.Medium)
+        Blank()
+        Text('main.ts — OHcode').fontSize(12).fontColor('#A8A8A8')
+        Blank()
+        Text('SAVE').fontSize(11).fontColor('#FFFFFF').padding({ left: 9, right: 9, top: 5, bottom: 5 }).backgroundColor('#0E639C').borderRadius(3)
+      }
+      .width('100%').height(42).padding({ left: 12, right: 12 }).backgroundColor('#181818')
+
+      Row() {
+        Column({ space: 18 }) {
+          Text('▱').fontSize(24).fontColor('#FFFFFF')
+          Text('⌕').fontSize(24).fontColor('#888888')
+          Text('⑂').fontSize(22).fontColor('#888888')
+          Text('▷').fontSize(22).fontColor('#888888')
+          Text('⊞').fontSize(22).fontColor('#888888')
+          Blank()
+          Text('⚙').fontSize(21).fontColor('#AAAAAA')
+        }
+        .width(48).height('100%').padding({ top: 14, bottom: 12 }).backgroundColor('#181818')
+
+        Column() {
+          Text('EXPLORER').width('100%').height(38).padding({ left: 10, top: 12 }).fontSize(11).fontColor('#CCCCCC')
+          Text('⌄  OHCODE').width('100%').padding({ left: 8, top: 7, bottom: 7 }).fontSize(12).fontColor('#DDDDDD').fontWeight(FontWeight.Medium)
+          Text('TS  main.ts').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#D8D8D8').backgroundColor('#37373D')
+          Text('{}  app.json').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#BDBDBD')
+          Text('M↓  README.md').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#BDBDBD')
+          Blank()
+        }
+        .width(126).height('100%').backgroundColor('#252526')
+
+        Column() {
+          Row({ space: 7 }) {
+            Text('TS').fontSize(11).fontColor('#4FC1FF')
+            Text('main.ts').fontSize(12).fontColor('#DDDDDD')
+            Text('×').fontSize(15).fontColor('#AAAAAA')
+          }
+          .width('100%').height(36).padding({ left: 12 }).backgroundColor('#1E1E1E')
+          Text('OHCODE  ›  main.ts').width('100%').height(28).padding({ left: 12, top: 7 }).fontSize(11).fontColor('#999999').backgroundColor('#1E1E1E')
+          Row() {
+            Text('1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14')
+              .width(36).height('100%').padding({ right: 7, top: 12 }).fontSize(14).fontColor('#858585').fontFamily('monospace').textAlign(TextAlign.End)
+            TextArea({ text: this.localCode, placeholder: 'Start typing code…' })
+              .onChange((value: string) => { this.localCode = value; })
+              .layoutWeight(1).height('100%').padding({ left: 7, right: 10, top: 8, bottom: 20 })
+              .fontSize(14).fontColor('#D4D4D4').fontFamily('monospace').backgroundColor('#1E1E1E')
+          }
+          .layoutWeight(1).width('100%').backgroundColor('#1E1E1E')
+        }
+        .layoutWeight(1).height('100%').backgroundColor('#1E1E1E')
+      }
+      .layoutWeight(1).width('100%')
+
+      Row({ space: 13 }) {
+        Text('⑂ main*').fontSize(11).fontColor('#FFFFFF')
+        Text('↻').fontSize(12).fontColor('#FFFFFF')
+        Blank()
+        Text('Ln 1, Col 1').fontSize(11).fontColor('#FFFFFF')
+        Text('Spaces: 2').fontSize(11).fontColor('#FFFFFF')
+        Text('TypeScript').fontSize(11).fontColor('#FFFFFF')
+        Text('HarmonyOS arm64').fontSize(11).fontColor('#FFFFFF')
+      }
+      .width('100%').height(25).padding({ left: 8, right: 8 }).backgroundColor('#007ACC')
+    }
+    .width('100%').height('100%').backgroundColor('#1E1E1E')
+  }
+
   build() {
     Stack() {
-      Row() {
-        WebWindow()
-      }.onKeyEvent((event?: KeyEvent) => {
-        if (event) {
-          if (event.type == KeyType.Down && event.keyCode == KeyCode.KEYCODE_ESCAPE) {
-            event.stopPropagation();
-          }
-        }
-      })
-      .backgroundColor(this.backgroundColor_)
-      .opacity(this.opacity_)
-      .width('100%')
-      .height('100%')
-
       if (this.showLoading) {
         this.LoadingOverlay()
       } else {
-        this.SurfaceDiagnosticRibbon()
+        this.LocalCodeEditor()
       }
     }
     .width('100%')

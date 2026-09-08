@@ -473,7 +473,7 @@ class WindowNodeController extends NodeController {
   private buildArgs(): string[] {
     let resDir = '--bundle-installation-dir=' + getContext().resourceDir;
     let vec_args = [resDir, ELECTRON_APP_PATH];
-    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --regexp-interpret-all';
+    const jsFlags = '--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --jitless --regexp-interpret-all';
     let hasJsFlags: boolean = false;
     // 过滤掉残留的 --folder-uri，确保"是否连远程"只由标记文件决定（防上次启动参数残留）。
     this.config.electronRelaunchArgs.forEach((arg: string) => {

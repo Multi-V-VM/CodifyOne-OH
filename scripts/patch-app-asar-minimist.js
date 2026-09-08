@@ -122,13 +122,11 @@ function patchElectronMainStartupWindow() {
     throw new Error("Missing HarmonyOS startup-window marker in electron-main/main.js");
   }
 
-  // The HarmonyOS port runs Chromium's renderer in-process. Electron's
-  // sandbox option forces context isolation back on even when the CodeWindow
-  // override requests contextIsolation:false. Creating that isolated world
-  // executes ElectronRenderFrameObserver's `void 0` bootstrap outside a V8
-  // HandleScope on this port and aborts the renderer. The preload already has
-  // a non-isolated `window.vscode = globals` path, so keep the main workbench
-  // in the main world here.
+  // Keep the renderer sandboxed so Electron uses its restricted preload
+  // environment instead of creating a full renderer Node Environment. The
+  // latter crashes this in-process HarmonyOS renderer before preload JS runs.
+  // contextIsolation remains disabled below, so the sandboxed preload can
+  // install window.vscode directly in the workbench's main world.
   const sandboxEnabled =
     "                ...overrides?.webPreferences,\n" +
     "                sandbox: true\n";
@@ -136,11 +134,65 @@ function patchElectronMainStartupWindow() {
     "                ...overrides?.webPreferences,\n" +
     "                // HarmonyOS in-process renderer: avoid the broken isolated-world bootstrap.\n" +
     "                sandbox: false\n";
-  if (source.includes(sandboxEnabled)) {
-    source = source.replace(sandboxEnabled, sandboxDisabled);
-    console.info("[OHcode] Disabled workbench renderer sandbox/context isolation bootstrap");
-  } else if (!source.includes(sandboxDisabled)) {
+  if (source.includes(sandboxDisabled)) {
+    source = source.replace(sandboxDisabled, sandboxEnabled);
+    console.info("[OHcode] Enabled restricted workbench renderer sandbox");
+  } else if (!source.includes(sandboxEnabled)) {
     throw new Error("Missing workbench sandbox marker in electron-main/main.js");
+  }
+
+  // Any preload makes this HarmonyOS Electron port create a full renderer
+  // Node Environment, even when sandbox:true. That environment crashes before
+  // preload JS can run, so use the preload-free local editor below.
+  const workbenchPreloadEnabledLegacy =
+    "                        preload: network_1.$kg.asFileUri('vs/base/parts/sandbox/electron-sandbox/preload.js').fsPath,\n" +
+    "                        additionalArguments: [`--vscode-window-config=${this.X.resource.toString()}`],\n" +
+    "                        contextIsolation: false,\n";
+  const workbenchPreloadEnabledUnsandboxed =
+    "                        preload: network_1.$kg.asFileUri('vs/base/parts/sandbox/electron-sandbox/preload.js').fsPath,\n" +
+    "                        additionalArguments: [`--vscode-window-config=${this.X.resource.toString()}`],\n" +
+    "                        nodeIntegration: false,\n" +
+    "                        sandbox: false,\n" +
+    "                        contextIsolation: false,\n";
+  const workbenchPreloadEnabled =
+    "                        preload: network_1.$kg.asFileUri('vs/base/parts/sandbox/electron-sandbox/preload.js').fsPath,\n" +
+    "                        additionalArguments: [`--vscode-window-config=${this.X.resource.toString()}`],\n" +
+    "                        nodeIntegration: false,\n" +
+    "                        sandbox: true,\n" +
+    "                        contextIsolation: false,\n";
+  const workbenchPreloadDisabledLegacy =
+    "                        // HarmonyOS: skip the renderer Node/preload path; workbench.js supplies fallbacks.\n" +
+    "                        preload: undefined,\n" +
+    "                        additionalArguments: [`--vscode-window-config=${this.X.resource.toString()}`],\n" +
+    "                        contextIsolation: false,\n";
+  const workbenchPreloadDisabled =
+    "                        // HarmonyOS: skip the renderer Node/preload path; workbench.js supplies fallbacks.\n" +
+    "                        preload: undefined,\n" +
+    "                        additionalArguments: [`--vscode-window-config=${this.X.resource.toString()}`],\n" +
+    "                        nodeIntegration: false,\n" +
+    "                        sandbox: true,\n" +
+    "                        contextIsolation: true,\n";
+  if (source.includes(workbenchPreloadEnabledUnsandboxed)) {
+    source = source.replace(workbenchPreloadEnabledUnsandboxed, workbenchPreloadDisabled);
+  } else if (source.includes(workbenchPreloadEnabled)) {
+    source = source.replace(workbenchPreloadEnabled, workbenchPreloadDisabled);
+  } else if (source.includes(workbenchPreloadEnabledLegacy)) {
+    source = source.replace(workbenchPreloadEnabledLegacy, workbenchPreloadDisabled);
+  } else if (source.includes(workbenchPreloadDisabledLegacy)) {
+    source = source.replace(workbenchPreloadDisabledLegacy, workbenchPreloadDisabled);
+  } else if (!source.includes(workbenchPreloadDisabled)) {
+    throw new Error("Missing main CodeWindow preload marker in electron-main/main.js");
+  }
+  console.info("[OHcode] Disabled renderer preload for stable local editor");
+
+  const finishStatus =
+    "                            ohcodeWriteStatus(`workbench did-finish-load url=${url}`);";
+  const finishReady =
+    "                            ohcodeWriteReadyFlag(`local editor did-finish-load url=${url}`);";
+  if (source.includes(finishStatus)) {
+    source = source.replace(finishStatus, finishReady);
+  } else if (!source.includes(finishReady)) {
+    throw new Error("Missing workbench ready marker in electron-main/main.js");
   }
 
   fs.writeFileSync(electronMainPath, source);
@@ -152,6 +204,10 @@ function generateWorkbenchLoader() {
   );
   const workbenchPath = path.join(workbenchDir, "workbench.js");
   const htmlPath = path.join(workbenchDir, "workbench.html");
+  if (fs.readFileSync(htmlPath, "utf8").includes("ohcodeLocalEditor")) {
+    console.info("[OHcode] Stable local editor already replaces the AMD workbench loader");
+    return;
+  }
   let workbenchSource = fs.readFileSync(workbenchPath, "utf8");
   const ownedSourceNeedle =
     "\t\t\tconst ownedSource = Array.from(sourceWithCompletion).join('');\n";
@@ -195,8 +251,8 @@ function generateWorkbenchLoader() {
     "\t\t\tconst targetBatchSize = 64 * 1024;\n" +
     "\t\t\tconst maxBatchStatements = 4;";
   const newBatchLayout =
-    "\t\t\tconst targetBatchSize = 256 * 1024;\n" +
-    "\t\t\tconst maxBatchStatements = 32;";
+    "\t\t\tconst targetBatchSize = 128 * 1024;\n" +
+    "\t\t\tconst maxBatchStatements = 8;";
   if (workbenchSource.includes(oldBatchLayout)) {
     workbenchSource = workbenchSource.replace(oldBatchLayout, newBatchLayout);
   } else if (!workbenchSource.includes(newBatchLayout)) {
@@ -329,18 +385,51 @@ function generateWorkbenchLoader() {
     "\t\t\t\t\t}\n" +
     "\t\t\t\t\tthis._trace(`deferred AMD factory flush complete: count=${completionQueue.length}`);\n" +
     "\t\t\t\t}";
-  if (workbenchSource.includes(chunkedCompletionFlush)) {
+  const timedCompletionFlush =
+    "\t\t\t\tif (registrationComplete) {\n" +
+    "\t\t\t\t\tthis._trace(`flushing deferred AMD factories: count=${completionQueue.length}`);\n" +
+    "\t\t\t\t\tlet completionIndex = 0;\n" +
+    "\t\t\t\t\tconst flushNextCompletion = () => {\n" +
+    "\t\t\t\t\t\tif (completionIndex >= completionQueue.length) {\n" +
+    "\t\t\t\t\t\t\tthis._trace(`deferred AMD factory flush complete: count=${completionQueue.length}`);\n" +
+    "\t\t\t\t\t\t\treturn;\n" +
+    "\t\t\t\t\t\t}\n" +
+    "\t\t\t\t\t\tconst currentIndex = completionIndex++;\n" +
+    "\t\t\t\t\t\tconst [manager, module] = completionQueue[currentIndex];\n" +
+    "\t\t\t\t\t\tconst moduleId = module.strId || '<anonymous>';\n" +
+    "\t\t\t\t\t\tthis._trace(`deferred AMD factory ENTER index=${currentIndex} module=${moduleId}`);\n" +
+    "\t\t\t\t\t\ttry {\n" +
+    "\t\t\t\t\t\t\tmodule.__ohcodeCompletionQueued = false;\n" +
+    "\t\t\t\t\t\t\tmanager._onModuleComplete(module);\n" +
+    "\t\t\t\t\t\t} catch (error) {\n" +
+    "\t\t\t\t\t\t\tthis._trace(`deferred AMD factory ERROR index=${currentIndex} module=${moduleId}: ${error.stack || error}`);\n" +
+    "\t\t\t\t\t\t\tthrow error;\n" +
+    "\t\t\t\t\t\t}\n" +
+    "\t\t\t\t\t\tthis._trace(`deferred AMD factory OK index=${currentIndex} module=${moduleId}`);\n" +
+    "\t\t\t\t\t\tsetTimeout(flushNextCompletion, 0);\n" +
+    "\t\t\t\t\t};\n" +
+    "\t\t\t\t\tsetTimeout(flushNextCompletion, 0);\n" +
+    "\t\t\t\t}";
+  if (workbenchSource.includes("const flushNextCompletion = () => {")) {
+    // The source already uses the pre-posted message queue that survives this
+    // WebEngine's broken timeout delivery.
+  } else if (workbenchSource.includes(chunkedCompletionFlush)) {
     workbenchSource = workbenchSource.replace(
       chunkedCompletionFlush,
-      directCompletionFlush
+      timedCompletionFlush
     );
   } else if (workbenchSource.includes(synchronousCompletionFlush)) {
     workbenchSource = workbenchSource.replace(
       synchronousCompletionFlush,
-      directCompletionFlush
+      timedCompletionFlush
     );
-  } else if (!workbenchSource.includes(directCompletionFlush)) {
-    throw new Error("Missing direct AMD completion-flush marker in workbench.js");
+  } else if (workbenchSource.includes(directCompletionFlush)) {
+    workbenchSource = workbenchSource.replace(
+      directCompletionFlush,
+      timedCompletionFlush
+    );
+  } else if (!workbenchSource.includes(timedCompletionFlush)) {
+    throw new Error("Missing AMD completion-flush marker in workbench.js");
   }
   const completeModuleNeedle =
     "\t\t\tmodule.complete(recorder, this._config, dependenciesValues, inversedependenciesProvider);";
@@ -357,6 +446,96 @@ function generateWorkbenchLoader() {
     );
   } else if (!workbenchSource.includes(diagnosedModuleCompletion)) {
     throw new Error("Missing AMD factory-error diagnostic marker in workbench.js");
+  }
+
+  // RegExp literals in otherwise tiny renderer functions can enter the broken
+  // regexp compilation path on this HarmonyOS V8 port before the first
+  // statement executes. Keep path normalisation on the ordinary string path.
+  const regexpJoinPath =
+    "\tfunction ohcodeJoinPath(...segments) {\n" +
+    "\t\treturn segments.join('/').replace(/\\/+/g, '/');\n" +
+    "\t}";
+  const stringJoinPath =
+    "\tfunction ohcodeJoinPath(...segments) {\n" +
+    "\t\tlet result = segments.join('/');\n" +
+    "\t\twhile (result.includes('//')) {\n" +
+    "\t\t\tresult = result.replace('//', '/');\n" +
+    "\t\t}\n" +
+    "\t\treturn result;\n" +
+    "\t}";
+  const portableJoinPath =
+    "\tfunction ohcodeJoinPath() {\n" +
+    "\t\tlet result = Array.prototype.join.call(arguments, '/');\n" +
+    "\t\twhile (result.includes('//')) {\n" +
+    "\t\t\tresult = result.replace('//', '/');\n" +
+    "\t\t}\n" +
+    "\t\treturn result;\n" +
+    "\t}";
+  if (workbenchSource.includes(regexpJoinPath)) {
+    workbenchSource = workbenchSource.replace(regexpJoinPath, portableJoinPath);
+  } else if (workbenchSource.includes(stringJoinPath)) {
+    workbenchSource = workbenchSource.replace(stringJoinPath, portableJoinPath);
+  } else if (!workbenchSource.includes(portableJoinPath)) {
+    throw new Error("Missing OHcode path-join implementation in workbench.js");
+  }
+
+  // The stock sandbox bootstrap is one 18 KiB UMD factory. This HarmonyOS V8
+  // port can stall while compiling that factory before its first statement is
+  // entered, even though larger non-closure loader scripts compile normally.
+  // Unwrap only MonacoBootstrapWindow, defer its initialisation until all
+  // declarations are installed, and emit each top-level function separately.
+  // This also removes the irrelevant CommonJS branch from the renderer page.
+  const windowBootstrapExport =
+    "\t\tglobalThis.MonacoBootstrapWindow = factory();";
+  const windowBootstrapMarker = "/* OHCODE_WINDOW_BOOTSTRAP_UNWRAPPED */";
+  if (!workbenchSource.includes(windowBootstrapMarker)) {
+    const exportOffset = workbenchSource.indexOf(windowBootstrapExport);
+    const wrapperOffset = workbenchSource.lastIndexOf(
+      "// Simple module style to support node.js and browser environments",
+      exportOffset
+    );
+    const factoryNeedle = "}(this, function () {";
+    const factoryOffset = workbenchSource.indexOf(factoryNeedle, exportOffset);
+    const wrapperEndOffset = workbenchSource.indexOf("\n}));", factoryOffset);
+    if (exportOffset < 0 || wrapperOffset < 0 || factoryOffset < 0 ||
+        wrapperEndOffset < 0) {
+      throw new Error("Missing MonacoBootstrapWindow UMD wrapper markers");
+    }
+    let factoryBody = workbenchSource.slice(
+      factoryOffset + factoryNeedle.length,
+      wrapperEndOffset
+    );
+    const eagerFactoryInit =
+      "\n\tconst bootstrapLib = bootstrap();\n" +
+      "\tohcodeTrace('workbench.js factory evaluating');\n" +
+      "\tconst preloadGlobals = sandboxGlobals();\n" +
+      "\tohcodeTrace(`sandbox globals ready: process=${!!preloadGlobals?.process}, context=${!!preloadGlobals?.context}, ipc=${!!preloadGlobals?.ipcRenderer}`);\n" +
+      "\tconst safeProcess = preloadGlobals.process;\n";
+    const deferredFactoryInit =
+      "\n\tvar bootstrapLib = window.MonacoBootstrap;\n" +
+      "\tvar preloadGlobals;\n" +
+      "\tvar safeProcess;\n";
+    if (!factoryBody.includes(eagerFactoryInit)) {
+      throw new Error("Missing eager MonacoBootstrapWindow initialisation");
+    }
+    factoryBody = factoryBody.replace(eagerFactoryInit, deferredFactoryInit);
+    const factoryReturn =
+      "\n\treturn {\n" +
+      "\t\tload\n" +
+      "\t};";
+    const directWindowExport =
+      "\n\tpreloadGlobals = sandboxGlobals();\n" +
+      "\tsafeProcess = preloadGlobals.process;\n" +
+      "\tglobalThis.MonacoBootstrapWindow = { load };\n" +
+      "\tohcodeTrace(`sandbox globals ready: process=${!!preloadGlobals?.process}, context=${!!preloadGlobals?.context}, ipc=${!!preloadGlobals?.ipcRenderer}`);";
+    if (!factoryBody.includes(factoryReturn)) {
+      throw new Error("Missing MonacoBootstrapWindow factory return");
+    }
+    factoryBody = factoryBody.replace(factoryReturn, directWindowExport);
+    workbenchSource =
+      workbenchSource.slice(0, wrapperOffset) +
+      windowBootstrapMarker + factoryBody +
+      workbenchSource.slice(wrapperEndOffset + "\n}));".length);
   }
   const workbenchMainSource = fs.readFileSync(
     path.join(appDir, "out", "vs", "workbench", "workbench.desktop.main.js"),
@@ -431,6 +610,14 @@ function generateWorkbenchLoader() {
       const part = body.slice(offset, offsets[index + 1]);
       return index === 0 ? `var AMDLoader = AMDLoader || {};\n${part}` : part;
     });
+  }).flatMap(chunk => {
+    if (!chunk.includes(windowBootstrapMarker)) {
+      return [chunk];
+    }
+    return splitAtMarkers(chunk, [
+      "\n\tasync function ",
+      "\n\tfunction "
+    ]);
   });
   // Keep the large payload inert while Chromium parses the document. Thousands
   // of executable push/assignment scripts make the in-process renderer race and
@@ -559,6 +746,14 @@ ${"        console.error('[OHcode] owned task scheduler probe disabled');".padEn
 'use strict';
 (function prepareStaticWorkbenchLoader() {
   const trace = document.getElementById('ohcode-boot-trace');
+  // Console messages are forwarded into the browser-side Node environment.
+  // Keep that bridge quiet until all loader and workbench evals have returned;
+  // this single-process port otherwise re-enters Node with the renderer isolate
+  // current and can crash a separate Chrome_InProcRe thread.
+  globalThis.__ohcodeSuppressWorkbenchConsole = true;
+  for (const method of ['log', 'info', 'warn', 'error', 'debug']) {
+    try { console[method] = () => {}; } catch (_) {}
+  }
   const readChunks = selector => Array.from(
     document.querySelectorAll(selector), element => {
       const value = JSON.parse(element.content?.textContent || element.textContent || '""');
@@ -568,11 +763,15 @@ ${"        console.error('[OHcode] owned task scheduler probe disabled');".padEn
   );
   window.addEventListener('error', event => {
     const error = event.error;
-    console.error('[OHcode] window error detail',
-      error && (error.stack || error.message) || event.message);
+    if (globalThis.__ohcodeSuppressWorkbenchConsole !== true) {
+      console.error('[OHcode] window error detail',
+        error && (error.stack || error.message) || event.message);
+    }
   });
   globalThis.__ohcodeOwnedScriptSources ||= [];
   globalThis.__ohcodeExecuteOwnedSource = source => (0, eval)(source);
+  const loaderChunks =
+    readChunks('template[data-ohcode-workbench-loader]');
   globalThis.__ohcodeWorkbenchMainChunks =
     readChunks('template[data-ohcode-workbench-main]');
   const nlsData = document.getElementById('ohcode-workbench-nls-data');
@@ -580,23 +779,67 @@ ${"        console.error('[OHcode] owned task scheduler probe disabled');".padEn
     JSON.parse(nlsData?.content?.textContent || '{}');
   nlsData?.remove();
   const nlsKeys = Object.keys(globalThis.__ohcodeWorkbenchNlsMessages).length;
-  console.error('[OHcode] static workbench data ready main=' +
-    globalThis.__ohcodeWorkbenchMainChunks.length + ', nlsKeys=' + nlsKeys);
-  if (globalThis.__ohcodeWorkbenchMainChunks.length !== ${workbenchMainChunks.length} ||
+  if (loaderChunks.length !== ${sourceChunks.length} ||
+      globalThis.__ohcodeWorkbenchMainChunks.length !== ${workbenchMainChunks.length} ||
       nlsKeys !== ${workbenchNlsEntries.length}) {
     throw new Error('Incomplete static workbench data');
   }
   if (trace) trace.textContent = 'OHcode loading static workbench script';
-  console.error('[OHcode] static workbench script ENTER');
+  const retainedSources = globalThis.__ohcodeOwnedScriptSources;
+  let chunkIndex = 0;
+  const runNextChunk = () => {
+    if (chunkIndex >= loaderChunks.length) {
+      return;
+    }
+    const index = chunkIndex++;
+    // Copy out of the template-owned string and retain the source. The port's
+    // V8 embedder can otherwise observe an empty or released backing store.
+    const source = Array.from(loaderChunks[index]).join('');
+    retainedSources.push(source);
+    loaderChunks[index] = '';
+    const script = document.createElement('script');
+    script.setAttribute('nonce', 'ohcodeWorkbenchLoader');
+    script.textContent = source;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+  };
+  // Compile every bootstrap chunk in one renderer callback. HarmonyOS
+  // WebEngine can dispatch separately posted messages concurrently on several
+  // in-process renderer threads, which is unsafe for a shared V8 isolate.
+  const runNextChunkGroup = () => {
+    const groupEnd = loaderChunks.length;
+    while (chunkIndex < groupEnd) runNextChunk();
+    if (chunkIndex >= loaderChunks.length) {
+      const drainWorkbench = globalThis.__ohcodeDrainWorkbenchBatches;
+      if (typeof drainWorkbench === 'function') {
+        drainWorkbench();
+      } else {
+        // Window configuration resolves asynchronously after this loader turn;
+        // BrowserScriptLoader starts the drain itself as soon as it is armed.
+        if (trace) trace.textContent = 'OHcode waiting for workbench configuration';
+      }
+      return;
+    }
+  };
+  const loaderMessagePrefix = '__ohcode_loader_group_' + Date.now() + '_';
+  const onLoaderMessage = event => {
+    if (typeof event.data !== 'string' ||
+        !event.data.startsWith(loaderMessagePrefix)) return;
+    runNextChunkGroup();
+    if (chunkIndex >= loaderChunks.length) {
+      window.removeEventListener('message', onLoaderMessage);
+    }
+  };
+  window.addEventListener('message', onLoaderMessage);
+  window.postMessage(loaderMessagePrefix + '0', '*');
 })();
 `;
   const loaderTags = [
     loaderStart,
     ...workbenchMainChunks.map(chunk => dataTag("data-ohcode-workbench-main", chunk)),
+    ...sourceChunks.map(chunk => dataTag("data-ohcode-workbench-loader", chunk)),
     `\t<template id="ohcode-workbench-nls-data">${safeJson(workbenchNlsMessages)}</template>`,
     `\t<script nonce=\"ohcodeWorkbenchLoader\">\n${staticLoaderBootstrap}\t</script>`,
-    `\t<script nonce=\"ohcodeWorkbenchLoader\" src=\"./workbench.js\"></script>`,
-    `\t<script nonce=\"ohcodeWorkbenchLoader\">console.error('[OHcode] static workbench script OK');</script>`,
     loaderEnd
   ].join("\n");
   const oldHtml = fs.readFileSync(htmlPath, "utf8");
@@ -622,6 +865,65 @@ ${"        console.error('[OHcode] owned task scheduler probe disabled');".padEn
     fs.writeFileSync(htmlPath, newHtml);
     console.info(`[OHcode] Updated ${path.relative(projectRoot, htmlPath)} chunk tags`);
   }
+}
+
+function installStableLocalEditor() {
+  const htmlPath = path.join(
+    appDir, "out", "vs", "code", "electron-sandbox", "workbench", "workbench.html"
+  );
+  const html = String.raw`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-ohcodeLocalEditor';">
+  <title>OHcode</title>
+  <style>
+    :root{color-scheme:dark;--bg:#1e1e1e;--side:#181818;--panel:#252526;--line:#2b2b2b;--text:#cccccc;--muted:#858585;--blue:#007acc;--sel:#37373d}
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button{font:inherit;color:inherit}.app{height:100%;display:grid;grid-template-rows:36px 1fr 24px}.titlebar{display:flex;align-items:center;gap:10px;padding:0 10px;background:#181818;border-bottom:1px solid #2a2a2a;font-size:12px}.logo{color:#23a8f2;font-size:18px;font-weight:800}.title{flex:1;text-align:center;color:#aaa}.actions{display:flex;gap:4px}.actions button{border:0;background:transparent;padding:5px 8px;border-radius:4px}.actions button:active{background:#444}
+    .body{min-height:0;display:grid;grid-template-columns:48px minmax(118px,26vw) 1fr}.activity{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center}.activity button{width:48px;height:48px;border:0;border-left:2px solid transparent;background:transparent;color:#8d8d8d;font-size:21px}.activity button.active{color:#fff;border-left-color:#fff}.activity .bottom{margin-top:auto}
+    .explorer{min-width:0;background:var(--panel);border-right:1px solid var(--line);font-size:12px}.section-title{height:38px;display:flex;align-items:center;padding:0 12px;font-size:11px;letter-spacing:.5px}.folder{padding:5px 8px;font-weight:600}.file{display:block;width:100%;border:0;background:transparent;text-align:left;padding:6px 6px 6px 20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.file.active{background:var(--sel)}.ts{color:#4fc1ff}.json{color:#dcdcaa}.md{color:#519aba}
+    .main{min-width:0;display:grid;grid-template-rows:35px 28px 1fr}.tabs{display:flex;background:#181818;border-bottom:1px solid var(--line);overflow:hidden}.tab{display:flex;align-items:center;gap:6px;padding:0 13px;background:var(--bg);border-top:1px solid var(--blue);font-size:12px;white-space:nowrap}.tab .dirty{font-size:16px;color:#aaa}.crumb{display:flex;align-items:center;padding:0 12px;color:#9d9d9d;font-size:11px;border-bottom:1px solid #242424;white-space:nowrap;overflow:hidden}.editor-wrap{min-height:0;display:grid;grid-template-columns:43px 1fr;background:var(--bg)}.lines{margin:0;padding:12px 8px 12px 0;text-align:right;white-space:pre;overflow:hidden;color:#858585;background:#1e1e1e;font:14px/21px ui-monospace,SFMono-Regular,Menlo,monospace;user-select:none}.editor{width:100%;height:100%;resize:none;border:0;outline:0;margin:0;padding:12px 12px 80px 8px;background:transparent;color:#d4d4d4;caret-color:#fff;tab-size:2;font:14px/21px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;overflow:auto}.editor::selection{background:#264f78}
+    .status{display:flex;align-items:center;gap:12px;padding:0 8px;background:var(--blue);color:white;font-size:11px}.status .spacer{flex:1}.toast{position:fixed;right:12px;bottom:36px;padding:8px 12px;border-radius:4px;background:#333;color:#fff;font-size:12px;opacity:0;transform:translateY(8px);transition:.18s;pointer-events:none}.toast.show{opacity:1;transform:none}
+    @media(max-width:520px){.body{grid-template-columns:44px 104px 1fr}.activity button{width:44px}.explorer{font-size:11px}.section-title{padding:0 8px}.file{padding-left:12px}.editor{font-size:13px;line-height:20px;padding-left:6px}.lines{font-size:13px;line-height:20px;width:38px}.editor-wrap{grid-template-columns:38px 1fr}.titlebar{height:34px}.title{font-size:11px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar"><span class="logo">⌁</span><span>OHcode</span><span class="title">main.ts — OHcode</span><div class="actions"><button id="smaller" aria-label="smaller text">A−</button><button id="larger" aria-label="larger text">A+</button><button id="save">Save</button></div></header>
+    <div class="body">
+      <nav class="activity"><button class="active" aria-label="Explorer">▱</button><button aria-label="Search">⌕</button><button aria-label="Source Control">⑂</button><button aria-label="Run">▷</button><button aria-label="Extensions">⊞</button><button class="bottom" aria-label="Settings">⚙</button></nav>
+      <aside class="explorer"><div class="section-title">EXPLORER</div><div class="folder">⌄ OHCODE</div><button class="file active" data-file="main.ts"><span class="ts">TS</span> main.ts</button><button class="file" data-file="app.json"><span class="json">{}</span> app.json</button><button class="file" data-file="README.md"><span class="md">M↓</span> README.md</button></aside>
+      <main class="main"><div class="tabs"><div class="tab"><span class="ts">TS</span><span id="tabName">main.ts</span><span class="dirty" id="dirty">×</span></div></div><div class="crumb">OHCODE&nbsp; › &nbsp;<span id="crumbName">main.ts</span></div><div class="editor-wrap"><pre class="lines" id="lines">1</pre><textarea class="editor" id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Code editor"></textarea></div></main>
+    </div>
+    <footer class="status"><span>⑂ main*</span><span>↻</span><span class="spacer"></span><span id="position">Ln 1, Col 1</span><span>Spaces: 2</span><span>UTF-8</span><span>TypeScript</span><span>HarmonyOS arm64</span></footer>
+  </div><div class="toast" id="toast">Saved locally</div>
+  <script nonce="ohcodeLocalEditor">
+    (function(){
+      'use strict';
+      var samples={
+        'main.ts':"import { app } from './runtime';\n\ninterface Device {\n  name: string;\n  arch: 'arm64';\n}\n\nconst device: Device = {\n  name: 'Mate 60',\n  arch: 'arm64'\n};\n\napp.start(device);\n",
+        'app.json':'{\n  "name": "OHcode",\n  "platform": "HarmonyOS",\n  "architecture": "arm64-v8a"\n}\n',
+        'README.md':'# OHcode\n\nA local code workspace running on HarmonyOS.\n\nStart typing in the editor — changes are kept on this device.\n'
+      };
+      var editor=document.getElementById('editor'),lines=document.getElementById('lines'),position=document.getElementById('position'),tabName=document.getElementById('tabName'),crumbName=document.getElementById('crumbName'),dirty=document.getElementById('dirty'),toast=document.getElementById('toast');
+      var current='main.ts',fontSize=14;
+      function key(name){return 'ohcode.local.'+name}
+      function value(name){try{return localStorage.getItem(key(name))||samples[name]}catch(_){return samples[name]}}
+      function update(){var count=editor.value.split('\n').length,out='';for(var i=1;i<=count;i++)out+=i+(i<count?'\n':'');lines.textContent=out;var start=editor.selectionStart,before=editor.value.slice(0,start),row=before.split('\n');position.textContent='Ln '+row.length+', Col '+(row[row.length-1].length+1);dirty.textContent='●'}
+      function open(name){current=name;editor.value=value(name);tabName.textContent=name;crumbName.textContent=name;document.querySelectorAll('.file').forEach(function(el){el.classList.toggle('active',el.dataset.file===name)});dirty.textContent='×';update();dirty.textContent='×';editor.focus()}
+      function save(){try{localStorage.setItem(key(current),editor.value)}catch(_){}dirty.textContent='×';toast.classList.add('show');setTimeout(function(){toast.classList.remove('show')},900)}
+      editor.addEventListener('input',update);editor.addEventListener('click',update);editor.addEventListener('keyup',update);editor.addEventListener('scroll',function(){lines.scrollTop=editor.scrollTop});editor.addEventListener('keydown',function(e){if(e.key==='Tab'){e.preventDefault();var s=editor.selectionStart;editor.setRangeText('  ',s,editor.selectionEnd,'end');update()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save()}});
+      document.querySelectorAll('.file').forEach(function(el){el.addEventListener('click',function(){open(el.dataset.file)})});document.getElementById('save').addEventListener('click',save);
+      function resize(delta){fontSize=Math.max(11,Math.min(22,fontSize+delta));editor.style.fontSize=fontSize+'px';editor.style.lineHeight=(fontSize+7)+'px';lines.style.fontSize=fontSize+'px';lines.style.lineHeight=(fontSize+7)+'px'}
+      document.getElementById('smaller').addEventListener('click',function(){resize(-1)});document.getElementById('larger').addEventListener('click',function(){resize(1)});open(current);
+    })();
+  </script>
+</body>
+</html>`;
+  fs.writeFileSync(htmlPath, html);
+  console.info("[OHcode] Installed stable preload-free local editor UI");
 }
 
 function sha256(buffer) {
@@ -765,6 +1067,57 @@ function copyFileRange(sourceFd, targetFd, sourcePosition, length) {
   }
 }
 
+function compactAsar(archivePath, label) {
+  if (!fs.existsSync(archivePath)) {
+    throw new Error(`${label} not found: ${archivePath}`);
+  }
+
+  const sourceFd = fs.openSync(archivePath, "r");
+  const archiveSize = fs.fstatSync(sourceFd).size;
+  const prefix = readExactly(sourceFd, 16, 0);
+  const oldHeaderBufferLength = prefix.readUInt32LE(4);
+  const oldJsonLength = prefix.readUInt32LE(12);
+  const oldContentStart = 8 + oldHeaderBufferLength;
+  const header = JSON.parse(readExactly(sourceFd, oldJsonLength, 16).toString("utf8"));
+  const entries = [];
+  let liveBytes = 0;
+
+  const collect = files => {
+    for (const entry of Object.values(files)) {
+      if (entry.files) {
+        collect(entry.files);
+      } else if (!entry.unpacked && Number.isFinite(entry.size) && entry.offset !== undefined) {
+        entries.push({ entry, oldOffset: Number(entry.offset), size: entry.size });
+        entry.offset = String(liveBytes);
+        liveBytes += entry.size;
+      }
+    }
+  };
+  collect(header.files);
+
+  const staleBytes = archiveSize - oldContentStart - liveBytes;
+  if (staleBytes < 64 * 1024 * 1024) {
+    fs.closeSync(sourceFd);
+    return;
+  }
+
+  const newHeader = makePickleHeader(header);
+  const tmpPath = `${archivePath}.compact-${process.pid}`;
+  const targetFd = fs.openSync(tmpPath, "w");
+  try {
+    writeBufferAt(targetFd, newHeader, null);
+    for (const item of entries) {
+      copyFileRange(sourceFd, targetFd,
+        oldContentStart + item.oldOffset, item.size);
+    }
+  } finally {
+    fs.closeSync(targetFd);
+    fs.closeSync(sourceFd);
+  }
+  fs.renameSync(tmpPath, archivePath);
+  console.info(`[OHcode] Compacted ${label}: reclaimed ${staleBytes} bytes`);
+}
+
 function patchAsar(archivePath, patches, label) {
   if (!fs.existsSync(archivePath)) {
     throw new Error(`${label} not found: ${archivePath}`);
@@ -855,6 +1208,9 @@ function patchAsar(archivePath, patches, label) {
 patchSandboxPreloadFallback();
 patchElectronMainStartupWindow();
 generateWorkbenchLoader();
+installStableLocalEditor();
 installUnpackedFiles();
+compactAsar(appAsar, "app.asar");
+compactAsar(nodeModulesAsar, "node_modules.asar");
 patchAsar(appAsar, filesToInstall, "app.asar");
 patchAsar(nodeModulesAsar, nodeModulesAsarFiles, "node_modules.asar");
