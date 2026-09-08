@@ -1,7 +1,7 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import CustomChildProcess from '../process/CustomChildProcess';
-import { getWasmerLastError, isWasmerReady, runWasiModule, startWasmer, WasiRunResult } from '../wasmer/WasmerHost';
+import { getWasmerLastError, isWasmerReady, runWasiModuleAsync, startWasmer, WasiRunResult } from '../wasmer/WasmerHost';
 import { ensureWasmerWorkspace, WASMER_WORKSPACE_DIR } from '../wasmer/Workspace';
 
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
@@ -11,7 +11,6 @@ const STARTUP_BUILD_STAMP: string = 'diag-20260715-directv8main1';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'OHcodeStartup';
 const WASMER_HELLO_RAWFILE: string = 'wasmer/hello.wasm';
-const WASMER_NODE_RAWFILE: string = 'wasmer/node.wasm';
 
 interface IStyleData {
   backgroundColor: string,
@@ -222,16 +221,16 @@ struct Index {
       return;
     }
     const args: string[] = parts.slice(parts[3] === '--' ? 4 : 3);
-    const rawName: string = moduleName === 'node.wasm' ? WASMER_NODE_RAWFILE : WASMER_HELLO_RAWFILE;
     if (moduleName === 'node.wasm') {
       this.wasmerStatus = 'READY';
       this.isRunning = false;
       this.terminalOutput = '$ ' + command + '\n' +
         '[Wasmer] bundled node.wasm verified: 112386681 bytes\n' +
         '[blocked] This WASIX module is not copied or run on the ArkUI thread because it can freeze the app.\n' +
-        'Use an isolated WASIX runner before enabling Node execution.';
+        'This phone does not expose an executable HNP/child-process sandbox for safe isolation.';
       return;
     }
+    const rawName: string = WASMER_HELLO_RAWFILE;
     this.isRunning = true;
     this.wasmerStatus = 'RUNNING';
     this.terminalOutput = '$ ' + command + '\nLoading ' + moduleName + '…';
@@ -245,21 +244,15 @@ struct Index {
       this.terminalOutput = '$ ' + command + '\nRESOURCE ERROR: ' + JSON.stringify(error);
       return;
     }
-    startWasmer()
-      .then(() => {
-        try {
-          const result: WasiRunResult = runWasiModule(modulePath, args);
-          const elapsed: number = Date.now() - startedAt;
-          this.wasmerStatus = result.error.length === 0 ? 'READY' : 'ERROR';
-          this.terminalOutput = '$ ' + command + '\n' +
-            '[Wasmer] exit=' + result.exitCode + ' time=' + elapsed + 'ms\n' +
-            (result.stdout.length > 0 ? result.stdout : '') +
-            (result.stderr.length > 0 ? '\n[stderr]\n' + result.stderr : '') +
-            (result.error.length > 0 ? '\n[error]\n' + result.error : '');
-        } catch (error) {
-          this.wasmerStatus = 'ERROR';
-          this.terminalOutput = '$ ' + command + '\nNATIVE RUN ERROR: ' + String(error);
-        }
+    runWasiModuleAsync(modulePath, args)
+      .then((result: WasiRunResult) => {
+        const elapsed: number = Date.now() - startedAt;
+        this.wasmerStatus = result.error.length === 0 ? 'READY' : 'ERROR';
+        this.terminalOutput = '$ ' + command + '\n' +
+          '[Wasmer] exit=' + result.exitCode + ' time=' + elapsed + 'ms\n' +
+          (result.stdout.length > 0 ? result.stdout : '') +
+          (result.stderr.length > 0 ? '\n[stderr]\n' + result.stderr : '') +
+          (result.error.length > 0 ? '\n[error]\n' + result.error : '');
       })
       .catch((error: Error) => {
         this.wasmerStatus = 'ERROR';

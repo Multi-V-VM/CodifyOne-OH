@@ -1,10 +1,15 @@
 #include "napi/native_api.h"
 
+#include <errno.h>
+#include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -123,6 +128,7 @@ struct WasiRunResult {
 
 static WasmerApi g_wasmer;
 static std::atomic<bool> g_wasmerReady(false);
+static std::atomic<bool> g_runInFlight(false);
 static std::mutex g_wasmerMutex;
 static std::string g_lastHostError;
 
@@ -260,6 +266,7 @@ static bool LoadWasmer()
     const char* candidates[] = {
         "libwasmer.so",
         "/data/app/wasmer-runner.org/wasmer-runner_1.0/lib/libwasmer.so",
+        "/data/service/hnp/wasmer-runner.org/wasmer-runner_1.0/lib/libwasmer.so",
         "/data/storage/el2/base/files/wasmer/libwasmer.so",
         "/data/storage/el2/base/files/libs/libwasmer.so"
     };
@@ -356,6 +363,41 @@ static bool ReadFileIntoWasmerVec(const std::string& path, wasm_byte_vec_t* out,
         g_wasmer.wasm_byte_vec_delete(out);
         *error = "failed to read wasm module: " + path;
         return false;
+    }
+
+    return true;
+}
+
+static bool ReadFdSliceIntoWasmerVec(
+    int fd, off_t offset, size_t size, wasm_byte_vec_t* out, std::string* error)
+{
+    if (fd < 0 || offset < 0 || size == 0) {
+        *error = "invalid rawfile descriptor";
+        return false;
+    }
+
+    g_wasmer.wasm_byte_vec_new_uninitialized(out, size);
+    if (out->data == nullptr) {
+        *error = "wasm_byte_vec_new_uninitialized returned null";
+        return false;
+    }
+
+    size_t total = 0;
+    while (total < size) {
+        ssize_t count = pread(
+            fd,
+            out->data + total,
+            size - total,
+            offset + static_cast<off_t>(total));
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count <= 0) {
+            g_wasmer.wasm_byte_vec_delete(out);
+            *error = "failed to read bundled wasm rawfile at byte " + std::to_string(total);
+            return false;
+        }
+        total += static_cast<size_t>(count);
     }
 
     return true;
@@ -539,10 +581,74 @@ static void WriteRunResult(const WasiRunResult& result)
     WriteResultFile("/data/storage/el2/base/files/wasmer/run-done.txt", "done");
 }
 
+static std::string FindFile(const std::string& directory, const char* name, int depth)
+{
+    if (depth < 0) {
+        return "";
+    }
+    DIR* dir = opendir(directory.c_str());
+    if (dir == nullptr) {
+        return "";
+    }
+    std::string found;
+    while (dirent* entry = readdir(dir)) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        std::string path = directory + "/" + entry->d_name;
+        struct stat info {};
+        if (lstat(path.c_str(), &info) != 0) {
+            continue;
+        }
+        if (strcmp(entry->d_name, name) == 0 && (S_ISREG(info.st_mode) || S_ISLNK(info.st_mode))) {
+            found = path;
+            break;
+        }
+        if (S_ISDIR(info.st_mode)) {
+            found = FindFile(path, name, depth - 1);
+            if (!found.empty()) {
+                break;
+            }
+        }
+    }
+    closedir(dir);
+    return found;
+}
+
+static std::string ResolveRunnerPath()
+{
+    const char* candidates[] = {
+        "/data/app/bin/ohcode-wasmer-runner",
+        "/data/app/wasmer-runner.org/wasmer-runner_1.0/bin/ohcode-wasmer-runner",
+        "/data/app/wasmer-runner.org/wasmer-runner_1.0/runner-hnp/bin/ohcode-wasmer-runner",
+        "/data/service/hnp/bin/ohcode-wasmer-runner",
+        "/data/service/hnp/wasmer-runner.org/wasmer-runner_1.0/bin/ohcode-wasmer-runner",
+        "/data/service/hnp/wasmer-runner.org/wasmer-runner_1.0/runner-hnp/bin/ohcode-wasmer-runner"
+    };
+    for (const char* candidate : candidates) {
+        if (access(candidate, X_OK) == 0) {
+            return candidate;
+        }
+    }
+    std::string found = FindFile("/data/service/hnp", "ohcode-wasmer-runner", 5);
+    return found.empty() ? FindFile("/data/app", "ohcode-wasmer-runner", 5) : found;
+}
+
 static bool StartIsolatedNode(const std::vector<std::string>& args, std::string* error)
 {
-    const char* runner = "/data/app/bin/ohcode-wasmer-runner";
-    const char* module = "/data/app/wasmer-runner.org/wasmer-runner_1.0/share/node.wasm";
+    std::string runner = ResolveRunnerPath();
+    if (runner.empty()) {
+        *error = "isolated Wasmer runner not found under /data/service/hnp or /data/app";
+        return false;
+    }
+    char resolvedRunner[PATH_MAX] = {};
+    std::string runnerTarget = realpath(runner.c_str(), resolvedRunner) == nullptr ? runner : resolvedRunner;
+    size_t binPos = runnerTarget.rfind("/bin/");
+    if (binPos == std::string::npos) {
+        *error = "cannot derive node.wasm path from runner: " + runnerTarget;
+        return false;
+    }
+    std::string module = runnerTarget.substr(0, binPos) + "/share/node.wasm";
     const char* stdoutPath = "/data/storage/el2/base/files/wasmer/node-child-stdout.txt";
     const char* stderrPath = "/data/storage/el2/base/files/wasmer/node-child-stderr.txt";
     int stdoutFd = open(stdoutPath, O_CREAT | O_TRUNC | O_WRONLY, 0600);
@@ -569,7 +675,7 @@ static bool StartIsolatedNode(const std::vector<std::string>& args, std::string*
     posix_spawn_file_actions_addclose(&actions, stdoutFd);
     posix_spawn_file_actions_addclose(&actions, stderrFd);
     pid_t pid = -1;
-    int spawnResult = posix_spawn(&pid, runner, &actions, nullptr, argv.data(), environ);
+    int spawnResult = posix_spawn(&pid, runner.c_str(), &actions, nullptr, argv.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
     close(stdoutFd);
     close(stderrFd);
