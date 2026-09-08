@@ -4,6 +4,7 @@ declare const require: any;
 declare const process: any;
 
 const { execFileSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -89,6 +90,7 @@ function stageHnpPath(modulePath: string, buildRoot: string, targetName: string)
 function patchAppAsarMinimist(context: any): void {
     const modulePath = context.modulePath.toString();
     const projectRoot = path.resolve(modulePath, '..');
+    stageWasmerDemo(projectRoot, modulePath);
     patchElectronBrowserInit(projectRoot);
     patchLibadapterAsyncCommand(projectRoot);
     extractJs2cBrowserInit(projectRoot);
@@ -100,6 +102,40 @@ function patchAppAsarMinimist(context: any): void {
         cwd: projectRoot,
         stdio: 'inherit'
     });
+}
+
+function stageWasmerDemo(projectRoot: string, modulePath: string): void {
+    const helloSource = path.join(
+        projectRoot,
+        'third_party', 'wasmer', 'tests', 'wasi-wast', 'wasi', 'snapshot1', 'hello.wasm'
+    );
+    const cacheDir = path.join(projectRoot, '.wasmer-ohos', 'assets');
+    const nodeSource = path.join(cacheDir, 'asplos-node.wasm');
+    const nodeSha256 = 'fd3af31c48e8259496d8d69465714a4ef86bda5e3e6067556854f3e181772e92';
+    requirePath('Wasmer WASI hello module', helloSource);
+    fs.mkdirSync(cacheDir, { recursive: true });
+    if (!fs.existsSync(nodeSource) || sha256File(nodeSource) !== nodeSha256) {
+        const temp = `${nodeSource}.download`;
+        execFileSync('curl', [
+            '-L', '--fail', '--silent', '--show-error',
+            'https://asplos.dev/about/node.wasm', '-o', temp
+        ], { stdio: 'inherit' });
+        if (sha256File(temp) !== nodeSha256) {
+            fs.rmSync(temp, { force: true });
+            throw new Error('Downloaded asplos.dev/about/node.wasm failed SHA-256 verification');
+        }
+        fs.renameSync(temp, nodeSource);
+    }
+
+    const rawfileDir = path.join(modulePath, 'src', 'main', 'resources', 'rawfile', 'wasmer');
+    fs.mkdirSync(rawfileDir, { recursive: true });
+    fs.copyFileSync(helloSource, path.join(rawfileDir, 'hello.wasm'));
+    fs.copyFileSync(nodeSource, path.join(rawfileDir, 'node.wasm'));
+    console.info(`[OHcode] Staged Wasmer demos in ${rawfileDir}`);
+}
+
+function sha256File(target: string): string {
+    return crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');
 }
 
 function patchElectronBrowserInit(projectRoot: string): void {

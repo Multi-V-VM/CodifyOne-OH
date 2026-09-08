@@ -52,3 +52,8 @@ export function runWasiModule(modulePath: string, args: string[] = []): WasiRunR
   ensureWasmerWorkspace();
   return native.runWasiModule(modulePath, args, WASMER_WORKSPACE_DIR) as WasiRunResult;
 }
+
+export async function runWasiModuleAsync(modulePath: string, args: string[] = []): Promise<WasiRunResult> {
+  ensureWasmerWorkspace();
+  return native.runWasiModuleAsync(modulePath, args, WASMER_WORKSPACE_DIR) as Promise<WasiRunResult>;
+}

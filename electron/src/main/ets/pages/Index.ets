@@ -1,6 +1,8 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import CustomChildProcess from '../process/CustomChildProcess';
+import { getWasmerLastError, isWasmerReady, runWasiModuleAsync, startWasmer, WasiRunResult } from '../wasmer/WasmerHost';
+import { ensureWasmerWorkspace, WASMER_WORKSPACE_DIR } from '../wasmer/Workspace';
 
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
 const READY_FLAG: string = '/data/storage/el2/base/files/ohcode-ready.flag';
@@ -8,6 +10,8 @@ const STARTUP_STATUS_FILE: string = '/data/storage/el2/base/files/ohcode-startup
 const STARTUP_BUILD_STAMP: string = 'diag-20260715-directv8main1';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'OHcodeStartup';
+const WASMER_HELLO_RAWFILE: string = 'wasmer/hello.wasm';
+const WASMER_NODE_RAWFILE: string = 'wasmer/node.wasm';
 
 interface IStyleData {
   backgroundColor: string,
@@ -40,7 +44,16 @@ struct Index {
   @State private showLoading: boolean = true;
   @State private loadingStatus: string = 'Starting OHcode shell [' + STARTUP_BUILD_STAMP + ']';
   @State private loadingElapsedSec: number = 0;
+  @State private currentFile: string = 'main.ts';
   @State private localCode: string = "import { app } from './runtime';\n\ninterface Device {\n  name: string;\n  arch: 'arm64';\n}\n\nconst device: Device = {\n  name: 'Mate 60',\n  arch: 'arm64'\n};\n\napp.start(device);\n";
+  @State private mainCode: string = this.localCode;
+  @State private appJson: string = '{\n  "name": "OHcode",\n  "runtime": "Wasmer",\n  "platform": "HarmonyOS",\n  "arch": "arm64-v8a"\n}\n';
+  @State private readmeText: string = '# OHcode\n\nTap files to edit. Tap RUN WASI to execute hello.wasm.\nUse the terminal commands for node.wasm.\n';
+  @State private showTerminal: boolean = true;
+  @State private terminalOutput: string = '$ wasmer status\nInitializing native Wasmer runtime…';
+  @State private commandText: string = 'wasmer run hello.wasm';
+  @State private wasmerStatus: string = 'STARTING';
+  @State private isRunning: boolean = false;
   private loadingStartedAt: number = 0;
   private loadingTimer: number = -1;
   private pollTimer: number = -1;
@@ -51,6 +64,15 @@ struct Index {
     this.updateStyle.registerUpdateStyleFunction(this.xcomponentId, this.initStyle, (style: IStyleData) => {
       this.backgroundColor_ = `#${style.backgroundColor}`;
       this.opacity_ = style.opacity;
+    });
+    startWasmer().then((ready: boolean) => {
+      this.wasmerStatus = ready ? 'READY' : 'ERROR';
+      this.terminalOutput = ready ?
+        '$ wasmer status\nWasmer native runtime: ready\nWASI/WASIX: enabled\nTry: wasmer run hello.wasm' :
+        '$ wasmer status\nWasmer unavailable: ' + getWasmerLastError();
+    }).catch((error: Error) => {
+      this.wasmerStatus = 'ERROR';
+      this.terminalOutput = '$ wasmer status\n' + error.message;
     });
 
     try {
@@ -125,6 +147,104 @@ struct Index {
     if (this.showLoading) {
       this.showLoading = false;
     }
+  }
+
+  private updateCode(value: string): void {
+    this.localCode = value;
+    if (this.currentFile === 'main.ts') {
+      this.mainCode = value;
+    } else if (this.currentFile === 'app.json') {
+      this.appJson = value;
+    } else {
+      this.readmeText = value;
+    }
+  }
+
+  private selectFile(name: string): void {
+    this.currentFile = name;
+    if (name === 'main.ts') {
+      this.localCode = this.mainCode;
+    } else if (name === 'app.json') {
+      this.localCode = this.appJson;
+    } else {
+      this.localCode = this.readmeText;
+    }
+  }
+
+  private saveCurrentFile(): void {
+    try {
+      ensureWasmerWorkspace();
+      const target: string = `${WASMER_WORKSPACE_DIR}/${this.currentFile}`;
+      const file = fileIo.openSync(target,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
+      fileIo.writeSync(file.fd, this.localCode);
+      fileIo.closeSync(file);
+      this.showTerminal = true;
+      this.terminalOutput = `$ save ${this.currentFile}\nSaved ${this.localCode.length} bytes to /workspace/${this.currentFile}`;
+    } catch (error) {
+      this.showTerminal = true;
+      this.terminalOutput = `$ save ${this.currentFile}\nERROR: ${JSON.stringify(error)}`;
+    }
+  }
+
+  private async materializeModule(rawName: string, targetName: string): Promise<string> {
+    ensureWasmerWorkspace();
+    const data: Uint8Array = await getContext(this).resourceManager.getRawFileContent(rawName);
+    const target: string = `${WASMER_WORKSPACE_DIR}/${targetName}`;
+    const file = fileIo.openSync(target,
+      fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
+    fileIo.writeSync(file.fd, data.buffer);
+    fileIo.closeSync(file);
+    return target;
+  }
+
+  private runCommand(): void {
+    const command: string = this.commandText.trim();
+    this.showTerminal = true;
+    if (command === 'clear') {
+      this.terminalOutput = '';
+      return;
+    }
+    if (command === 'wasmer status') {
+      this.terminalOutput = '$ wasmer status\nWasmer native runtime: ' +
+        (isWasmerReady() ? 'ready' : 'unavailable\n' + getWasmerLastError());
+      return;
+    }
+    const parts: string[] = command.split(/\s+/);
+    if (parts.length < 3 || parts[0] !== 'wasmer' || parts[1] !== 'run') {
+      this.terminalOutput = '$ ' + command +
+        '\nUsage: wasmer run <hello.wasm|node.wasm> [-- args]\nCommands: wasmer status, clear';
+      return;
+    }
+    const moduleName: string = parts[2];
+    if (moduleName !== 'hello.wasm' && moduleName !== 'node.wasm') {
+      this.terminalOutput = '$ ' + command + '\nUnknown bundled module: ' + moduleName;
+      return;
+    }
+    const args: string[] = parts.slice(parts[3] === '--' ? 4 : 3);
+    const rawName: string = moduleName === 'node.wasm' ? WASMER_NODE_RAWFILE : WASMER_HELLO_RAWFILE;
+    this.isRunning = true;
+    this.wasmerStatus = 'RUNNING';
+    this.terminalOutput = '$ ' + command + '\nLoading ' + moduleName + '…';
+    const startedAt: number = Date.now();
+    this.materializeModule(rawName, moduleName)
+      .then((modulePath: string) => startWasmer().then(() => runWasiModuleAsync(modulePath, args)))
+      .then((result: WasiRunResult) => {
+        const elapsed: number = Date.now() - startedAt;
+        this.wasmerStatus = result.error.length === 0 ? 'READY' : 'ERROR';
+        this.terminalOutput = '$ ' + command + '\n' +
+          '[Wasmer] exit=' + result.exitCode + ' time=' + elapsed + 'ms\n' +
+          (result.stdout.length > 0 ? result.stdout : '') +
+          (result.stderr.length > 0 ? '\n[stderr]\n' + result.stderr : '') +
+          (result.error.length > 0 ? '\n[error]\n' + result.error : '');
+      })
+      .catch((error: Error) => {
+        this.wasmerStatus = 'ERROR';
+        this.terminalOutput = '$ ' + command + '\nERROR: ' + error.message;
+      })
+      .finally(() => {
+        this.isRunning = false;
+      });
   }
 
   aboutToDisappear() {
@@ -260,63 +380,109 @@ struct Index {
         Text('⌁').fontSize(22).fontColor('#23A8F2').fontWeight(FontWeight.Bold)
         Text('OHcode').fontSize(14).fontColor('#E8E8E8').fontWeight(FontWeight.Medium)
         Blank()
-        Text('main.ts — OHcode').fontSize(12).fontColor('#A8A8A8')
+        Text(this.currentFile + ' — OHcode').fontSize(12).fontColor('#A8A8A8')
         Blank()
-        Text('SAVE').fontSize(11).fontColor('#FFFFFF').padding({ left: 9, right: 9, top: 5, bottom: 5 }).backgroundColor('#0E639C').borderRadius(3)
+        Text(this.isRunning ? 'RUNNING…' : 'RUN WASI')
+          .fontSize(11).fontColor('#FFFFFF').padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor(this.isRunning ? '#555555' : '#16825D').borderRadius(3)
+          .onClick(() => {
+            if (!this.isRunning) {
+              this.commandText = 'wasmer run hello.wasm';
+              this.runCommand();
+            }
+          })
+        Text('SAVE').fontSize(11).fontColor('#FFFFFF').padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor('#0E639C').borderRadius(3).onClick(() => this.saveCurrentFile())
       }
       .width('100%').height(42).padding({ left: 12, right: 12 }).backgroundColor('#181818')
 
       Row() {
         Column({ space: 18 }) {
-          Text('▱').fontSize(24).fontColor('#FFFFFF')
-          Text('⌕').fontSize(24).fontColor('#888888')
-          Text('⑂').fontSize(22).fontColor('#888888')
-          Text('▷').fontSize(22).fontColor('#888888')
-          Text('⊞').fontSize(22).fontColor('#888888')
+          Text('▱').fontSize(24).fontColor('#FFFFFF').onClick(() => { this.showTerminal = false; })
+          Text('⌕').fontSize(24).fontColor('#888888').onClick(() => {
+            this.showTerminal = true; this.terminalOutput = '$ search\nTap a file, then use the system Find action in the editor.';
+          })
+          Text('⑂').fontSize(22).fontColor('#888888').onClick(() => {
+            this.showTerminal = true; this.terminalOutput = '$ git status\nOn branch main\nChanges are stored in /workspace.';
+          })
+          Text('▷').fontSize(22).fontColor('#66D9A8').onClick(() => { this.showTerminal = true; this.runCommand(); })
+          Text('⊞').fontSize(22).fontColor('#888888').onClick(() => {
+            this.showTerminal = true; this.terminalOutput = '$ runtimes\n✓ Wasmer C API\n✓ WASI snapshot1\n✓ WASIX 32v1\n✓ HarmonyOS arm64';
+          })
           Blank()
-          Text('⚙').fontSize(21).fontColor('#AAAAAA')
+          Text('⚙').fontSize(21).fontColor('#AAAAAA').onClick(() => {
+            this.showTerminal = true; this.commandText = 'wasmer status'; this.runCommand();
+          })
         }
         .width(48).height('100%').padding({ top: 14, bottom: 12 }).backgroundColor('#181818')
 
         Column() {
           Text('EXPLORER').width('100%').height(38).padding({ left: 10, top: 12 }).fontSize(11).fontColor('#CCCCCC')
           Text('⌄  OHCODE').width('100%').padding({ left: 8, top: 7, bottom: 7 }).fontSize(12).fontColor('#DDDDDD').fontWeight(FontWeight.Medium)
-          Text('TS  main.ts').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#D8D8D8').backgroundColor('#37373D')
+          Text('TS  main.ts').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#D8D8D8')
+            .backgroundColor(this.currentFile === 'main.ts' ? '#37373D' : '#252526').onClick(() => this.selectFile('main.ts'))
           Text('{}  app.json').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#BDBDBD')
+            .backgroundColor(this.currentFile === 'app.json' ? '#37373D' : '#252526').onClick(() => this.selectFile('app.json'))
           Text('M↓  README.md').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(12).fontColor('#BDBDBD')
+            .backgroundColor(this.currentFile === 'README.md' ? '#37373D' : '#252526').onClick(() => this.selectFile('README.md'))
+          Text('W  hello.wasm').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(11).fontColor('#CE9178')
+            .onClick(() => { this.commandText = 'wasmer run hello.wasm'; this.showTerminal = true; })
+          Text('W  node.wasm').width('100%').padding({ left: 16, top: 8, bottom: 8 }).fontSize(11).fontColor('#CE9178')
+            .onClick(() => { this.commandText = 'wasmer run node.wasm -- --version'; this.showTerminal = true; })
           Blank()
         }
         .width(126).height('100%').backgroundColor('#252526')
 
         Column() {
           Row({ space: 7 }) {
-            Text('TS').fontSize(11).fontColor('#4FC1FF')
-            Text('main.ts').fontSize(12).fontColor('#DDDDDD')
+            Text(this.currentFile === 'main.ts' ? 'TS' : (this.currentFile === 'app.json' ? '{}' : 'M↓')).fontSize(11).fontColor('#4FC1FF')
+            Text(this.currentFile).fontSize(12).fontColor('#DDDDDD')
             Text('×').fontSize(15).fontColor('#AAAAAA')
           }
           .width('100%').height(36).padding({ left: 12 }).backgroundColor('#1E1E1E')
-          Text('OHCODE  ›  main.ts').width('100%').height(28).padding({ left: 12, top: 7 }).fontSize(11).fontColor('#999999').backgroundColor('#1E1E1E')
+          Text('OHCODE  ›  ' + this.currentFile).width('100%').height(28).padding({ left: 12, top: 7 }).fontSize(11).fontColor('#999999').backgroundColor('#1E1E1E')
           Row() {
             Text('1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14')
               .width(36).height('100%').padding({ right: 7, top: 12 }).fontSize(14).fontColor('#858585').fontFamily('monospace').textAlign(TextAlign.End)
             TextArea({ text: this.localCode, placeholder: 'Start typing code…' })
-              .onChange((value: string) => { this.localCode = value; })
+              .onChange((value: string) => this.updateCode(value))
               .layoutWeight(1).height('100%').padding({ left: 7, right: 10, top: 8, bottom: 20 })
               .fontSize(14).fontColor('#D4D4D4').fontFamily('monospace').backgroundColor('#1E1E1E')
           }
           .layoutWeight(1).width('100%').backgroundColor('#1E1E1E')
+          if (this.showTerminal) {
+            Column() {
+              Row({ space: 8 }) {
+                Text('TERMINAL').fontSize(11).fontColor('#FFFFFF').fontWeight(FontWeight.Medium)
+                Text('Wasmer ' + this.wasmerStatus).fontSize(10).fontColor(this.wasmerStatus === 'ERROR' ? '#F48771' : '#66D9A8')
+                Blank()
+                Text('×').fontSize(16).fontColor('#AAAAAA').onClick(() => { this.showTerminal = false; })
+              }.width('100%').height(30).padding({ left: 10, right: 10 }).border({ width: { top: 1 }, color: '#333333' })
+              Text(this.terminalOutput).width('100%').height(105).padding({ left: 10, right: 8, top: 7 })
+                .fontSize(11).fontColor('#D4D4D4').fontFamily('monospace').maxLines(8).textOverflow({ overflow: TextOverflow.Ellipsis })
+              Row({ space: 7 }) {
+                Text('$').fontSize(12).fontColor('#66D9A8')
+                TextInput({ text: this.commandText, placeholder: 'wasmer run hello.wasm' })
+                  .onChange((value: string) => { this.commandText = value; }).layoutWeight(1).height(32)
+                  .fontSize(11).fontColor('#FFFFFF').fontFamily('monospace').backgroundColor('#252526')
+                Text('RUN').fontSize(10).fontColor('#FFFFFF').padding({ left: 10, right: 10, top: 7, bottom: 7 })
+                  .backgroundColor(this.isRunning ? '#555555' : '#16825D').borderRadius(3)
+                  .onClick(() => { if (!this.isRunning) { this.runCommand(); } })
+              }.width('100%').height(40).padding({ left: 8, right: 8 })
+            }.width('100%').height(176).backgroundColor('#1E1E1E')
+          }
         }
         .layoutWeight(1).height('100%').backgroundColor('#1E1E1E')
       }
       .layoutWeight(1).width('100%')
 
       Row({ space: 13 }) {
-        Text('⑂ main*').fontSize(11).fontColor('#FFFFFF')
+        Text('⑂ ' + this.currentFile + '*').fontSize(11).fontColor('#FFFFFF')
         Text('↻').fontSize(12).fontColor('#FFFFFF')
         Blank()
         Text('Ln 1, Col 1').fontSize(11).fontColor('#FFFFFF')
         Text('Spaces: 2').fontSize(11).fontColor('#FFFFFF')
-        Text('TypeScript').fontSize(11).fontColor('#FFFFFF')
+        Text(this.currentFile === 'main.ts' ? 'TypeScript' : (this.currentFile === 'app.json' ? 'JSON' : 'Markdown')).fontSize(11).fontColor('#FFFFFF')
         Text('HarmonyOS arm64').fontSize(11).fontColor('#FFFFFF')
       }
       .width('100%').height(25).padding({ left: 8, right: 8 }).backgroundColor('#007ACC')

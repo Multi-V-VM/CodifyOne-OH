@@ -200,6 +200,7 @@ export const startWasmer: () => boolean;
 export const isWasmerReady: () => boolean;
 export const getWasmerLastError: () => string;
 export const runWasiModule: (modulePath: string, args?: string[], preopenDir?: string) => WasiRunResult;
+export const runWasiModuleAsync: (modulePath: string, args?: string[], preopenDir?: string) => Promise<WasiRunResult>;
 export const configureEpollHook: (
   enabled?: boolean,
   maxWaitMs?: number,

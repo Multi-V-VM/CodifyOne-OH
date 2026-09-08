@@ -642,6 +642,71 @@ static napi_value RunWasiModule(napi_env env, napi_callback_info info)
     return CreateRunResult(env, result);
 }
 
+struct AsyncWasiRun {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string modulePath;
+    std::vector<std::string> args;
+    std::string preopenDir;
+    WasiRunResult result;
+};
+
+static void ExecuteAsyncWasiRun(napi_env, void* data)
+{
+    AsyncWasiRun* run = static_cast<AsyncWasiRun*>(data);
+    run->result = RunWasiModuleInternal(run->modulePath, run->args, run->preopenDir);
+}
+
+static void CompleteAsyncWasiRun(napi_env env, napi_status status, void* data)
+{
+    AsyncWasiRun* run = static_cast<AsyncWasiRun*>(data);
+    if (status == napi_ok) {
+        napi_resolve_deferred(env, run->deferred, CreateRunResult(env, run->result));
+    } else {
+        napi_value message;
+        napi_value error;
+        napi_create_string_utf8(env, "Wasmer async execution failed", NAPI_AUTO_LENGTH, &message);
+        napi_create_error(env, nullptr, message, &error);
+        napi_reject_deferred(env, run->deferred, error);
+    }
+    napi_delete_async_work(env, run->work);
+    delete run;
+}
+
+static napi_value RunWasiModuleAsync(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    auto* run = new AsyncWasiRun();
+    run->preopenDir = "/data/storage/el2/base/files/wasmer/workspace";
+    if (argc < 1 || !GetString(env, argv[0], &run->modulePath) || run->modulePath.empty()) {
+        delete run;
+        napi_throw_type_error(env, nullptr, "runWasiModuleAsync requires a wasm module path");
+        napi_value ret;
+        napi_get_undefined(env, &ret);
+        return ret;
+    }
+    if (argc >= 2 && argv[1] != nullptr) {
+        run->args = GetStringArray(env, argv[1]);
+    }
+    if (argc >= 3 && argv[2] != nullptr) {
+        std::string requestedPreopen;
+        if (GetString(env, argv[2], &requestedPreopen) && !requestedPreopen.empty()) {
+            run->preopenDir = requestedPreopen;
+        }
+    }
+
+    napi_value promise;
+    napi_create_promise(env, &run->deferred, &promise);
+    napi_value name;
+    napi_create_string_utf8(env, "OHcodeWasmerRun", NAPI_AUTO_LENGTH, &name);
+    napi_create_async_work(env, nullptr, name, ExecuteAsyncWasiRun, CompleteAsyncWasiRun, run, &run->work);
+    napi_queue_async_work(env, run->work);
+    return promise;
+}
+
 EXTERN_C_START
 
 static napi_value Init(napi_env env, napi_value exports)
@@ -681,6 +746,16 @@ static napi_value Init(napi_env env, napi_value exports)
             "runWasiModule",
             nullptr,
             RunWasiModule,
+            nullptr,
+            nullptr,
+            nullptr,
+            napi_default,
+            nullptr
+        },
+        {
+            "runWasiModuleAsync",
+            nullptr,
+            RunWasiModuleAsync,
             nullptr,
             nullptr,
             nullptr,
