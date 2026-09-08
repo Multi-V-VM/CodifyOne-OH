@@ -57,7 +57,14 @@ export function runWasiModule(modulePath: string, args: string[] = []): WasiRunR
     fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
   fileIo.writeSync(request.fd, payload);
   fileIo.closeSync(request);
-  return native.startWasmer() as WasiRunResult;
+  native.startWasmer();
+  const result: WasiRunResult = {
+    exitCode: Number(fileIo.readTextSync('/data/storage/el2/base/files/wasmer/run-exit.txt')),
+    stdout: fileIo.readTextSync('/data/storage/el2/base/files/wasmer/run-stdout.txt'),
+    stderr: fileIo.readTextSync('/data/storage/el2/base/files/wasmer/run-stderr.txt'),
+    error: fileIo.readTextSync('/data/storage/el2/base/files/wasmer/run-error.txt')
+  };
+  return result;
 }
 
 export async function runWasiModuleAsync(modulePath: string, args: string[] = []): Promise<WasiRunResult> {

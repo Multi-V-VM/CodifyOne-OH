@@ -160,6 +160,11 @@
         "package": "fastfetch.hnp",
         "type": "public",
         "independentSign": false
+      },
+      {
+        "package": "wasmer-runner.hnp",
+        "type": "private",
+        "independentSign": false
       }
     ]
   }

@@ -1,16 +1,23 @@
 #include "napi/native_api.h"
 
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
+
+extern char** environ;
 
 struct wasm_engine_t;
 struct wasm_store_t;
@@ -64,15 +71,11 @@ using wasi_config_arg_fn = void (*)(wasi_config_t*, const char*);
 using wasi_config_env_fn = void (*)(wasi_config_t*, const char*, const char*);
 using wasi_config_preopen_dir_fn = bool (*)(wasi_config_t*, const char*);
 using wasi_config_mapdir_fn = bool (*)(wasi_config_t*, const char*, const char*);
-using wasi_config_capture_stdout_fn = void (*)(wasi_config_t*);
-using wasi_config_capture_stderr_fn = void (*)(wasi_config_t*);
 using wasi_env_new_fn = wasi_env_t* (*)(wasm_store_t*, wasi_config_t*);
 using wasi_env_delete_fn = void (*)(wasi_env_t*);
 using wasi_get_imports_fn = bool (*)(const wasm_store_t*, wasi_env_t*, const wasm_module_t*, wasm_extern_vec_t*);
 using wasi_env_initialize_instance_fn = bool (*)(wasi_env_t*, wasm_store_t*, wasm_instance_t*);
 using wasi_get_start_function_fn = wasm_func_t* (*)(wasm_instance_t*);
-using wasi_env_read_stdout_fn = ssize_t (*)(wasi_env_t*, char*, size_t);
-using wasi_env_read_stderr_fn = ssize_t (*)(wasi_env_t*, char*, size_t);
 
 using wasmer_last_error_length_fn = int (*)();
 using wasmer_last_error_message_fn = int (*)(char*, int);
@@ -101,15 +104,11 @@ struct WasmerApi {
     wasi_config_env_fn wasi_config_env = nullptr;
     wasi_config_preopen_dir_fn wasi_config_preopen_dir = nullptr;
     wasi_config_mapdir_fn wasi_config_mapdir = nullptr;
-    wasi_config_capture_stdout_fn wasi_config_capture_stdout = nullptr;
-    wasi_config_capture_stderr_fn wasi_config_capture_stderr = nullptr;
     wasi_env_new_fn wasi_env_new = nullptr;
     wasi_env_delete_fn wasi_env_delete = nullptr;
     wasi_get_imports_fn wasi_get_imports = nullptr;
     wasi_env_initialize_instance_fn wasi_env_initialize_instance = nullptr;
     wasi_get_start_function_fn wasi_get_start_function = nullptr;
-    wasi_env_read_stdout_fn wasi_env_read_stdout = nullptr;
-    wasi_env_read_stderr_fn wasi_env_read_stderr = nullptr;
 
     wasmer_last_error_length_fn wasmer_last_error_length = nullptr;
     wasmer_last_error_message_fn wasmer_last_error_message = nullptr;
@@ -140,6 +139,74 @@ static std::string Basename(const std::string& path)
         return path.empty() ? "wasm" : path;
     }
     return path.substr(pos + 1);
+}
+
+static void WriteResultFile(const char* path, const std::string& value)
+{
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (file) {
+        file.write(value.data(), static_cast<std::streamsize>(value.size()));
+    }
+}
+
+static std::string ReadWholeFile(const std::string& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return "";
+    }
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+struct StdioCapture {
+    int savedStdout = -1;
+    int savedStderr = -1;
+    int outputFd = -1;
+    int errorFd = -1;
+    std::string outputPath;
+    std::string errorPath;
+};
+
+static StdioCapture BeginStdioCapture(const std::string& directory)
+{
+    StdioCapture capture;
+    capture.outputPath = directory + "/run-native-stdout.txt";
+    capture.errorPath = directory + "/run-native-stderr.txt";
+    capture.outputFd = open(capture.outputPath.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    capture.errorFd = open(capture.errorPath.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    capture.savedStdout = dup(STDOUT_FILENO);
+    capture.savedStderr = dup(STDERR_FILENO);
+    fflush(nullptr);
+    if (capture.outputFd >= 0 && capture.savedStdout >= 0) {
+        dup2(capture.outputFd, STDOUT_FILENO);
+    }
+    if (capture.errorFd >= 0 && capture.savedStderr >= 0) {
+        dup2(capture.errorFd, STDERR_FILENO);
+    }
+    return capture;
+}
+
+static void EndStdioCapture(StdioCapture* capture, std::string* stdoutText, std::string* stderrText)
+{
+    fflush(nullptr);
+    if (capture->savedStdout >= 0) {
+        dup2(capture->savedStdout, STDOUT_FILENO);
+        close(capture->savedStdout);
+    }
+    if (capture->savedStderr >= 0) {
+        dup2(capture->savedStderr, STDERR_FILENO);
+        close(capture->savedStderr);
+    }
+    if (capture->outputFd >= 0) {
+        close(capture->outputFd);
+    }
+    if (capture->errorFd >= 0) {
+        close(capture->errorFd);
+    }
+    *stdoutText = ReadWholeFile(capture->outputPath);
+    *stderrText = ReadWholeFile(capture->errorPath);
+    unlink(capture->outputPath.c_str());
+    unlink(capture->errorPath.c_str());
 }
 
 template <typename T>
@@ -192,6 +259,7 @@ static bool LoadWasmer()
 
     const char* candidates[] = {
         "libwasmer.so",
+        "/data/app/wasmer-runner.org/wasmer-runner_1.0/lib/libwasmer.so",
         "/data/storage/el2/base/files/wasmer/libwasmer.so",
         "/data/storage/el2/base/files/libs/libwasmer.so"
     };
@@ -241,17 +309,13 @@ static bool LoadWasmer()
     ok &= ResolveRequired(handle, api.wasi_config_arg, "wasi_config_arg");
     ok &= ResolveRequired(handle, api.wasi_config_env, "wasi_config_env");
     ok &= ResolveRequired(handle, api.wasi_config_preopen_dir, "wasi_config_preopen_dir");
-    ok &= ResolveRequired(handle, api.wasi_config_capture_stdout, "wasi_config_capture_stdout");
     ok &= ResolveRequired(handle, api.wasi_env_new, "wasi_env_new");
     ok &= ResolveRequired(handle, api.wasi_env_delete, "wasi_env_delete");
     ok &= ResolveRequired(handle, api.wasi_get_imports, "wasi_get_imports");
     ok &= ResolveRequired(handle, api.wasi_env_initialize_instance, "wasi_env_initialize_instance");
     ok &= ResolveRequired(handle, api.wasi_get_start_function, "wasi_get_start_function");
-    ok &= ResolveRequired(handle, api.wasi_env_read_stdout, "wasi_env_read_stdout");
 
     ResolveOptional(handle, api.wasi_config_mapdir, "wasi_config_mapdir");
-    ResolveOptional(handle, api.wasi_config_capture_stderr, "wasi_config_capture_stderr");
-    ResolveOptional(handle, api.wasi_env_read_stderr, "wasi_env_read_stderr");
     ResolveOptional(handle, api.wasmer_last_error_length, "wasmer_last_error_length");
     ResolveOptional(handle, api.wasmer_last_error_message, "wasmer_last_error_message");
 
@@ -319,36 +383,6 @@ static std::string TrapMessage(wasm_trap_t* trap)
     return text;
 }
 
-static std::string ReadCapturedWasiPipe(wasi_env_t* env, ssize_t (*reader)(wasi_env_t*, char*, size_t))
-{
-    if (reader == nullptr) {
-        return "";
-    }
-
-    std::string output;
-    char buffer[4096];
-    while (true) {
-        ssize_t read = reader(env, buffer, sizeof(buffer));
-        if (read < 0) {
-            std::string err = ReadWasmerLastError();
-            if (!err.empty()) {
-                output += err;
-            }
-            break;
-        }
-
-        if (read == 0) {
-            break;
-        }
-
-        output.append(buffer, static_cast<size_t>(read));
-        if (static_cast<size_t>(read) < sizeof(buffer)) {
-            break;
-        }
-    }
-    return output;
-}
-
 static WasiRunResult RunWasiModuleInternal(
     const std::string& modulePath,
     const std::vector<std::string>& args,
@@ -400,11 +434,6 @@ static WasiRunResult RunWasiModuleInternal(
         g_wasmer.wasm_store_delete(store);
         g_wasmer.wasm_engine_delete(engine);
         return result;
-    }
-
-    g_wasmer.wasi_config_capture_stdout(config);
-    if (g_wasmer.wasi_config_capture_stderr != nullptr) {
-        g_wasmer.wasi_config_capture_stderr(config);
     }
 
     g_wasmer.wasi_config_env(config, "HOME", preopenDir.c_str());
@@ -480,17 +509,16 @@ static WasiRunResult RunWasiModuleInternal(
         return result;
     }
 
+    StdioCapture capture = BeginStdioCapture(preopenDir);
     wasm_val_vec_t emptyArgs {0, nullptr};
     wasm_val_vec_t emptyResults {0, nullptr};
     wasm_trap_t* callTrap = g_wasmer.wasm_func_call(start, &emptyArgs, &emptyResults);
+    EndStdioCapture(&capture, &result.stdoutText, &result.stderrText);
     if (callTrap != nullptr) {
         result.error = "wasm_func_call trapped: " + TrapMessage(callTrap);
     } else {
         result.exitCode = 0;
     }
-
-    result.stdoutText = ReadCapturedWasiPipe(wasiEnv, g_wasmer.wasi_env_read_stdout);
-    result.stderrText = ReadCapturedWasiPipe(wasiEnv, g_wasmer.wasi_env_read_stderr);
 
     g_wasmer.wasm_func_delete(start);
     g_wasmer.wasm_instance_delete(instance);
@@ -501,6 +529,105 @@ static WasiRunResult RunWasiModuleInternal(
 
     return result;
 }
+
+static void WriteRunResult(const WasiRunResult& result)
+{
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-exit.txt", std::to_string(result.exitCode));
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-stdout.txt", result.stdoutText);
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-stderr.txt", result.stderrText);
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-error.txt", result.error);
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-done.txt", "done");
+}
+
+static bool StartIsolatedNode(const std::vector<std::string>& args, std::string* error)
+{
+    const char* runner = "/data/app/bin/ohcode-wasmer-runner";
+    const char* module = "/data/app/wasmer-runner.org/wasmer-runner_1.0/share/node.wasm";
+    const char* stdoutPath = "/data/storage/el2/base/files/wasmer/node-child-stdout.txt";
+    const char* stderrPath = "/data/storage/el2/base/files/wasmer/node-child-stderr.txt";
+    int stdoutFd = open(stdoutPath, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    int stderrFd = open(stderrPath, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    if (stdoutFd < 0 || stderrFd < 0) {
+        if (stdoutFd >= 0) close(stdoutFd);
+        if (stderrFd >= 0) close(stderrFd);
+        *error = "failed to create isolated runner output files";
+        return false;
+    }
+
+    std::vector<std::string> argumentStorage {runner, module};
+    argumentStorage.insert(argumentStorage.end(), args.begin(), args.end());
+    std::vector<char*> argv;
+    for (std::string& argument : argumentStorage) {
+        argv.push_back(argument.data());
+    }
+    argv.push_back(nullptr);
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, stdoutFd, STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, stderrFd, STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, stdoutFd);
+    posix_spawn_file_actions_addclose(&actions, stderrFd);
+    pid_t pid = -1;
+    int spawnResult = posix_spawn(&pid, runner, &actions, nullptr, argv.data(), environ);
+    posix_spawn_file_actions_destroy(&actions);
+    close(stdoutFd);
+    close(stderrFd);
+    if (spawnResult != 0) {
+        *error = "posix_spawn isolated Wasmer runner failed: " + std::to_string(spawnResult);
+        return false;
+    }
+
+    std::thread([pid, stdoutPath = std::string(stdoutPath), stderrPath = std::string(stderrPath)]() {
+        int status = 0;
+        WasiRunResult result;
+        if (waitpid(pid, &status, 0) < 0) {
+            result.error = "waitpid failed for isolated Wasmer runner";
+        } else if (WIFEXITED(status)) {
+            result.exitCode = WEXITSTATUS(status);
+            if (result.exitCode != 0) {
+                result.error = "isolated Wasmer runner exited with code " + std::to_string(result.exitCode);
+            }
+        } else if (WIFSIGNALED(status)) {
+            result.error = "isolated Wasmer runner terminated by signal " + std::to_string(WTERMSIG(status));
+        } else {
+            result.error = "isolated Wasmer runner ended with unknown status";
+        }
+        result.stdoutText = ReadWholeFile(stdoutPath);
+        result.stderrText = ReadWholeFile(stderrPath);
+        unlink(stdoutPath.c_str());
+        unlink(stderrPath.c_str());
+        WriteRunResult(result);
+    }).detach();
+    return true;
+}
+
+#ifdef OHCODE_WASMER_RUNNER_MAIN
+int main(int argc, char** argv)
+{
+    if (argc < 2) {
+        fprintf(stderr, "usage: ohcode-wasmer-runner <module.wasm> [args...]\n");
+        return 64;
+    }
+    std::vector<std::string> args;
+    for (int i = 2; i < argc; ++i) {
+        args.emplace_back(argv[i]);
+    }
+    WasiRunResult result = RunWasiModuleInternal(
+        argv[1], args, "/data/storage/el2/base/files/wasmer/workspace");
+    if (!result.stdoutText.empty()) {
+        fwrite(result.stdoutText.data(), 1, result.stdoutText.size(), stdout);
+    }
+    if (!result.stderrText.empty()) {
+        fwrite(result.stderrText.data(), 1, result.stderrText.size(), stderr);
+    }
+    if (!result.error.empty()) {
+        fprintf(stderr, "[error] %s\n", result.error.c_str());
+        return result.exitCode == 0 ? 1 : result.exitCode;
+    }
+    return result.exitCode;
+}
+#else
 
 static bool GetString(napi_env env, napi_value value, std::string* out)
 {
@@ -598,6 +725,19 @@ static napi_value StartWasmer(napi_env env, napi_callback_info info)
         request.close();
         unlink(requestPath);
 
+        if (modulePath == "@bundled-node") {
+            std::string spawnError;
+            bool started = StartIsolatedNode(args, &spawnError);
+            if (!started) {
+                WasiRunResult result;
+                result.error = spawnError;
+                WriteRunResult(result);
+            }
+            napi_value ret;
+            napi_get_boolean(env, started, &ret);
+            return ret;
+        }
+
         WasiRunResult result;
         if (!ok) {
             result.error = g_lastHostError;
@@ -606,7 +746,10 @@ static napi_value StartWasmer(napi_env env, napi_callback_info info)
         } else {
             result = RunWasiModuleInternal(modulePath, args, preopenDir);
         }
-        return CreateRunResult(env, result);
+        WriteRunResult(result);
+        napi_value ret;
+        napi_get_boolean(env, result.error.empty(), &ret);
+        return ret;
     }
 
     napi_value ret;
@@ -814,3 +957,4 @@ extern "C" __attribute__((constructor)) void RegisterWasmerHostModule()
 {
     napi_module_register(&wasmerModule);
 }
+#endif

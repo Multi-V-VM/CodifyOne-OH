@@ -105,10 +105,7 @@ function patchAppAsarMinimist(context: any): void {
 }
 
 function stageWasmerDemo(projectRoot: string, modulePath: string): void {
-    const helloSource = path.join(
-        projectRoot,
-        'third_party', 'wasmer', 'tests', 'wasi-wast', 'wasi', 'snapshot1', 'hello.wasm'
-    );
+    const helloSource = path.join(projectRoot, 'scripts', 'wasmer', 'hello-minimal.wasm');
     const cacheDir = path.join(projectRoot, '.wasmer-ohos', 'assets');
     const nodeSource = path.join(cacheDir, 'asplos-node.wasm');
     const nodeSha256 = 'fd3af31c48e8259496d8d69465714a4ef86bda5e3e6067556854f3e181772e92';
