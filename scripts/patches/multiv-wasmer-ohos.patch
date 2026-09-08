@@ -11,7 +11,7 @@ index 1a0e633..272ae50 100644
 +            | Self::MigrationRequestV1 { .. } => JournalEntryRecordType::SnapshotV1,
          }
      }
- 
+
 @@ -987,6 +990,13 @@ impl JournalEntry<'_> {
                  },
                  serializer,
@@ -132,7 +132,7 @@ index c45fb4d..c4af3a2 100644
                      format!("--redefine-sym={old}={new}")
 @@ -866,7 +866,12 @@ fn build_wasmi() {
      use std::{env, path::PathBuf};
- 
+
      #[derive(Debug)]
 -    struct WasmiRenamer {}
 +    struct WasmiRenamer {
@@ -141,7 +141,7 @@ index c45fb4d..c4af3a2 100644
 +
 +    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
 +    let target_is_macho = target_os == "macos" || target_os == "ios";
- 
+
      impl ParseCallbacks for WasmiRenamer {
          /// This function will run for every extern variable and function. The returned value determines
 @@ -876,7 +881,7 @@ fn build_wasmi() {
@@ -162,3 +162,123 @@ index c45fb4d..c4af3a2 100644
          .generate()
          .expect("Unable to generate bindings for `wasmi`!");
      let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+diff --git a/lib/c-api/src/wasm_c_api/wasi/mod.rs b/lib/c-api/src/wasm_c_api/wasi/mod.rs
+index 72ee5f47c..9a4327013 100644
+--- a/lib/c-api/src/wasm_c_api/wasi/mod.rs
++++ b/lib/c-api/src/wasm_c_api/wasi/mod.rs
+@@ -19,8 +19,9 @@ use std::sync::Arc;
+ #[cfg(feature = "webc_runner")]
+ use wasmer_api::{AsStoreMut, Imports, Module};
+ use wasmer_wasix::{
+-    Pipe, PluggableRuntime, WasiEnv, WasiEnvBuilder, WasiFunctionEnv, WasiVersion,
+-    default_fs_backing, get_wasi_version,
++    Pipe, PluggableRuntime, WasiEnv, WasiEnvBuilder, WasiFunctionEnv,
++    WasiModuleInstanceHandles, WasiModuleTreeHandles, WasiVersion, default_fs_backing,
++    get_wasi_version,
+     runtime::task_manager::{block_on, tokio::TokioTaskManager},
+     virtual_fs::AsyncReadExt,
+     virtual_fs::VirtualFile,
+@@ -251,6 +252,7 @@ unsafe fn wasi_env_with_filesystem_inner(
+     Some(Box::new(wasi_env_t {
+         inner: wasi_env,
+         store: store.clone(),
++        imported_memory: None,
+     }))
+ }
+
+@@ -329,6 +331,7 @@ pub struct wasi_env_t {
+     /// cbindgen:ignore
+     pub(super) inner: WasiFunctionEnv,
+     pub(super) store: StoreRef,
++    pub(super) imported_memory: Option<wasmer_api::Memory>,
+ }
+
+ /// Create a new WASI environment.
+@@ -376,6 +379,7 @@ pub unsafe extern "C" fn wasi_env_new(
+     Some(Box::new(wasi_env_t {
+         inner: env,
+         store: store.clone(),
++        imported_memory: None,
+     }))
+ }
+
+@@ -556,7 +560,11 @@ unsafe fn wasi_get_imports_inner(
+
+     let mut import_object = {
+         let mut store_mut = unsafe { store.store_mut() };
+-        c_try!(wasi_env.inner.import_object(&mut store_mut, &module.inner))
++        c_try!(
++            wasi_env
++                .inner
++                .import_object_for_all_wasi_versions(&mut store_mut, &module.inner)
++        )
+     };
+
+     let shared_memory = module.inner.imports().memories().next().map(|a| *a.ty());
+@@ -577,10 +585,11 @@ unsafe fn wasi_get_imports_inner(
+     };
+     let memory = {
+         let mut store_mut = unsafe { store.store_mut() };
+-        tasks.build_memory(&mut store_mut, &spawn_type).unwrap()
++        c_try!(tasks.build_memory(&mut store_mut, &spawn_type))
+     };
+
+     if let Some(memory) = memory {
++        wasi_env.imported_memory = Some(memory.clone());
+         import_object.define("env", "memory", memory);
+     }
+
+@@ -624,10 +633,31 @@ pub unsafe extern "C" fn wasi_env_initialize_instance(
+     instance: &mut wasm_instance_t,
+ ) -> bool {
+     let mut store_mut = unsafe { store.inner.store_mut() };
+-    wasi_env
+-        .inner
+-        .initialize(&mut store_mut, instance.inner.clone())
+-        .unwrap();
++    if let Some(memory) = wasi_env.imported_memory.clone() {
++        let handles = WasiModuleTreeHandles::Static(WasiModuleInstanceHandles::new(
++            memory,
++            &store_mut,
++            instance.inner.clone(),
++            None,
++        ));
++        c_try!(
++            wasi_env.inner.initialize_handles_and_layout(
++                &mut store_mut,
++                instance.inner.clone(),
++                handles,
++                None,
++                true,
++            );
++            otherwise false
++        );
++    } else {
++        c_try!(
++            wasi_env
++                .inner
++                .initialize(&mut store_mut, instance.inner.clone());
++            otherwise false
++        );
++    }
+     true
+ }
+
+diff --git a/lib/wasix/src/state/func_env.rs b/lib/wasix/src/state/func_env.rs
+index 914edc2be..55b970b98 100644
+--- a/lib/wasix/src/state/func_env.rs
++++ b/lib/wasix/src/state/func_env.rs
+@@ -329,6 +329,13 @@ impl WasiFunctionEnv {
+     /// as it can potentially execute local thread variable cleanup
+     /// code
+     pub fn on_exit(&self, store: &mut impl AsStoreMut, process_exit_code: Option<ExitCode>) {
++        // C API callers may need to destroy an environment after import
++        // resolution or instantiation failed. In that case initialize() was
++        // never called and there are no instance handles to shut down.
++        if self.data(store).try_inner().is_none() {
++            return;
++        }
++
+         trace!(
+             "wasi[{}:{}]::on_exit",
+             self.data(store).pid(),

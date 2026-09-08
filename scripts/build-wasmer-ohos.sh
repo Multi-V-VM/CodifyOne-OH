@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_URL="${WASMER_REPO_URL:-https://github.com/Multi-V-VM/wasmer.git}"
 REPO_REF="${WASMER_REPO_REF:-affc5cc6e3532b0dc482e3d1b982b8443cd3aed7}"
 TARGET="${WASMER_OHOS_TARGET:-aarch64-unknown-linux-ohos}"
-FEATURES="${WASMER_FEATURES:-wat,wasmi-default,wasi}"
+FEATURES="${WASMER_FEATURES:-wat,cranelift,wasi}"
 
 if [[ "${TARGET}" != "aarch64-unknown-linux-ohos" ]]; then
   echo "Only aarch64-unknown-linux-ohos is supported right now; got ${TARGET}" >&2

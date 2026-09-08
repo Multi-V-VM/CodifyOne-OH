@@ -1,7 +1,9 @@
 import { fileIo } from '@kit.CoreFileKit';
+import { resourceManager } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import CustomChildProcess from '../process/CustomChildProcess';
-import { getWasmerLastError, isWasmerReady, runWasiModuleAsync, startWasmer, WasiRunResult } from '../wasmer/WasmerHost';
+import { getWasmerLastError, isWasmerReady, runBundledWasiModuleAsync, runWasiModuleAsync, startWasmer,
+  WasiRunResult } from '../wasmer/WasmerHost';
 import { ensureWasmerWorkspace, WASMER_WORKSPACE_DIR } from '../wasmer/Workspace';
 
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
@@ -11,6 +13,7 @@ const STARTUP_BUILD_STAMP: string = 'diag-20260715-directv8main1';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'OHcodeStartup';
 const WASMER_HELLO_RAWFILE: string = 'wasmer/hello.wasm';
+const WASMER_NODE_RAWFILE: string = 'wasmer/node.wasm';
 
 interface IStyleData {
   backgroundColor: string,
@@ -197,6 +200,17 @@ struct Index {
     return target;
   }
 
+  private async runBundledNode(args: string[]): Promise<WasiRunResult> {
+    const manager: resourceManager.ResourceManager = getContext(this).resourceManager;
+    const descriptor: resourceManager.RawFileDescriptor = await manager.getRawFd(WASMER_NODE_RAWFILE);
+    try {
+      return await runBundledWasiModuleAsync(
+        descriptor.fd, descriptor.offset, descriptor.length, 'node.wasm', args);
+    } finally {
+      await manager.closeRawFd(WASMER_NODE_RAWFILE);
+    }
+  }
+
   private runCommand(): void {
     const command: string = this.commandText.trim();
     this.showTerminal = true;
@@ -222,12 +236,29 @@ struct Index {
     }
     const args: string[] = parts.slice(parts[3] === '--' ? 4 : 3);
     if (moduleName === 'node.wasm') {
-      this.wasmerStatus = 'READY';
-      this.isRunning = false;
+      this.isRunning = true;
+      this.wasmerStatus = 'RUNNING';
       this.terminalOutput = '$ ' + command + '\n' +
-        '[Wasmer] bundled node.wasm verified: 112386681 bytes\n' +
-        '[blocked] This WASIX module is not copied or run on the ArkUI thread because it can freeze the app.\n' +
-        'This phone does not expose an executable HNP/child-process sandbox for safe isolation.';
+        '[Wasmer] opening bundled node.wasm by raw fd…\n' +
+        '[Wasmer] compiling WASIX on native worker…';
+      const startedAt: number = Date.now();
+      this.runBundledNode(args)
+        .then((result: WasiRunResult) => {
+          const elapsed: number = Date.now() - startedAt;
+          this.wasmerStatus = result.error.length === 0 ? 'READY' : 'ERROR';
+          this.terminalOutput = '$ ' + command + '\n' +
+            '[Wasmer/Cranelift] exit=' + result.exitCode + ' time=' + elapsed + 'ms\n' +
+            (result.stdout.length > 0 ? result.stdout : '') +
+            (result.stderr.length > 0 ? '\n[stderr]\n' + result.stderr : '') +
+            (result.error.length > 0 ? '\n[error]\n' + result.error : '');
+        })
+        .catch((error: Error) => {
+          this.wasmerStatus = 'ERROR';
+          this.terminalOutput = '$ ' + command + '\nNODE START ERROR: ' + error.message;
+        })
+        .finally(() => {
+          this.isRunning = false;
+        });
       return;
     }
     const rawName: string = WASMER_HELLO_RAWFILE;

@@ -425,42 +425,34 @@ static std::string TrapMessage(wasm_trap_t* trap)
     return text;
 }
 
-static WasiRunResult RunWasiModuleInternal(
-    const std::string& modulePath,
+static WasiRunResult RunWasiBinaryInternal(
+    const std::string& programName,
+    wasm_byte_vec_t* binary,
     const std::vector<std::string>& args,
     const std::string& preopenDir)
 {
     WasiRunResult result;
 
-    if (!LoadWasmer()) {
-        result.error = g_lastHostError;
-        return result;
-    }
-
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "engine");
     wasm_engine_t* engine = g_wasmer.wasm_engine_new();
     if (engine == nullptr) {
+        g_wasmer.wasm_byte_vec_delete(binary);
         result.error = "wasm_engine_new failed: " + ReadWasmerLastError();
         return result;
     }
 
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "store");
     wasm_store_t* store = g_wasmer.wasm_store_new(engine);
     if (store == nullptr) {
+        g_wasmer.wasm_byte_vec_delete(binary);
         result.error = "wasm_store_new failed: " + ReadWasmerLastError();
         g_wasmer.wasm_engine_delete(engine);
         return result;
     }
 
-    wasm_byte_vec_t binary {0, nullptr};
-    std::string readError;
-    if (!ReadFileIntoWasmerVec(modulePath, &binary, &readError)) {
-        result.error = readError;
-        g_wasmer.wasm_store_delete(store);
-        g_wasmer.wasm_engine_delete(engine);
-        return result;
-    }
-
-    wasm_module_t* module = g_wasmer.wasm_module_new(store, &binary);
-    g_wasmer.wasm_byte_vec_delete(&binary);
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "module-compile");
+    wasm_module_t* module = g_wasmer.wasm_module_new(store, binary);
+    g_wasmer.wasm_byte_vec_delete(binary);
     if (module == nullptr) {
         result.error = "wasm_module_new failed: " + ReadWasmerLastError();
         g_wasmer.wasm_store_delete(store);
@@ -468,7 +460,7 @@ static WasiRunResult RunWasiModuleInternal(
         return result;
     }
 
-    std::string programName = Basename(modulePath);
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "wasi-config");
     wasi_config_t* config = g_wasmer.wasi_config_new(programName.c_str());
     if (config == nullptr) {
         result.error = "wasi_config_new failed: " + ReadWasmerLastError();
@@ -497,6 +489,7 @@ static WasiRunResult RunWasiModuleInternal(
         g_wasmer.wasi_config_arg(config, arg.c_str());
     }
 
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "wasi-env");
     wasi_env_t* wasiEnv = g_wasmer.wasi_env_new(store, config);
     config = nullptr;
     if (wasiEnv == nullptr) {
@@ -507,6 +500,7 @@ static WasiRunResult RunWasiModuleInternal(
         return result;
     }
 
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "wasi-imports");
     wasm_extern_vec_t imports {0, nullptr};
     if (!g_wasmer.wasi_get_imports(store, wasiEnv, module, &imports)) {
         result.error = "wasi_get_imports failed: " + ReadWasmerLastError();
@@ -517,6 +511,7 @@ static WasiRunResult RunWasiModuleInternal(
         return result;
     }
 
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "instantiate");
     wasm_trap_t* trap = nullptr;
     wasm_instance_t* instance = g_wasmer.wasm_instance_new(store, module, &imports, &trap);
     g_wasmer.wasm_extern_vec_delete(&imports);
@@ -551,13 +546,20 @@ static WasiRunResult RunWasiModuleInternal(
         return result;
     }
 
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "start-call");
     StdioCapture capture = BeginStdioCapture(preopenDir);
     wasm_val_vec_t emptyArgs {0, nullptr};
     wasm_val_vec_t emptyResults {0, nullptr};
     wasm_trap_t* callTrap = g_wasmer.wasm_func_call(start, &emptyArgs, &emptyResults);
     EndStdioCapture(&capture, &result.stdoutText, &result.stderrText);
     if (callTrap != nullptr) {
-        result.error = "wasm_func_call trapped: " + TrapMessage(callTrap);
+        std::string trapMessage = TrapMessage(callTrap);
+        if (trapMessage.find("WASI exited with code: ExitCode::0") == std::string::npos) {
+            result.error = "wasm_func_call trapped: " + trapMessage;
+            result.exitCode = 1;
+        } else {
+            result.exitCode = 0;
+        }
     } else {
         result.exitCode = 0;
     }
@@ -569,7 +571,52 @@ static WasiRunResult RunWasiModuleInternal(
     g_wasmer.wasm_store_delete(store);
     g_wasmer.wasm_engine_delete(engine);
 
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "done");
     return result;
+}
+
+static WasiRunResult RunWasiModuleInternal(
+    const std::string& modulePath,
+    const std::vector<std::string>& args,
+    const std::string& preopenDir)
+{
+    WasiRunResult result;
+    if (!LoadWasmer()) {
+        result.error = g_lastHostError;
+        return result;
+    }
+
+    wasm_byte_vec_t binary {0, nullptr};
+    std::string readError;
+    if (!ReadFileIntoWasmerVec(modulePath, &binary, &readError)) {
+        result.error = readError;
+        return result;
+    }
+    return RunWasiBinaryInternal(Basename(modulePath), &binary, args, preopenDir);
+}
+
+static WasiRunResult RunBundledWasiModuleInternal(
+    int fd,
+    off_t offset,
+    size_t size,
+    const std::string& programName,
+    const std::vector<std::string>& args,
+    const std::string& preopenDir)
+{
+    WasiRunResult result;
+    if (!LoadWasmer()) {
+        result.error = g_lastHostError;
+        return result;
+    }
+
+    WriteResultFile("/data/storage/el2/base/files/wasmer/run-phase.txt", "rawfd-read");
+    wasm_byte_vec_t binary {0, nullptr};
+    std::string readError;
+    if (!ReadFdSliceIntoWasmerVec(fd, offset, size, &binary, &readError)) {
+        result.error = readError;
+        return result;
+    }
+    return RunWasiBinaryInternal(programName, &binary, args, preopenDir);
 }
 
 static void WriteRunResult(const WasiRunResult& result)
@@ -821,10 +868,99 @@ static napi_value StartWasmer(napi_env env, napi_callback_info info)
     if (request) {
         std::string modulePath;
         std::string preopenDir;
-        std::vector<std::string> args;
-        std::string line;
         std::getline(request, modulePath);
         std::getline(request, preopenDir);
+
+        if (modulePath == "@rawfd") {
+            std::string fdText;
+            std::string offsetText;
+            std::string sizeText;
+            std::string programName;
+            std::getline(request, fdText);
+            std::getline(request, offsetText);
+            std::getline(request, sizeText);
+            std::getline(request, programName);
+            std::vector<std::string> args;
+            std::string line;
+            while (std::getline(request, line)) {
+                args.push_back(line);
+            }
+            request.close();
+            unlink(requestPath);
+
+            char* end = nullptr;
+            long fdValue = strtol(fdText.c_str(), &end, 10);
+            if (end == fdText.c_str() || *end != '\0' || fdValue < 0) {
+                WasiRunResult result;
+                result.error = "invalid bundled rawfile fd";
+                WriteRunResult(result);
+                napi_value ret;
+                napi_get_boolean(env, false, &ret);
+                return ret;
+            }
+            end = nullptr;
+            long long offsetValue = strtoll(offsetText.c_str(), &end, 10);
+            if (end == offsetText.c_str() || *end != '\0' || offsetValue < 0) {
+                WasiRunResult result;
+                result.error = "invalid bundled rawfile offset";
+                WriteRunResult(result);
+                napi_value ret;
+                napi_get_boolean(env, false, &ret);
+                return ret;
+            }
+            end = nullptr;
+            unsigned long long sizeValue = strtoull(sizeText.c_str(), &end, 10);
+            if (end == sizeText.c_str() || *end != '\0' || sizeValue == 0 ||
+                static_cast<unsigned long long>(static_cast<size_t>(sizeValue)) != sizeValue) {
+                WasiRunResult result;
+                result.error = "invalid bundled rawfile length";
+                WriteRunResult(result);
+                napi_value ret;
+                napi_get_boolean(env, false, &ret);
+                return ret;
+            }
+
+            bool expected = false;
+            if (!g_runInFlight.compare_exchange_strong(expected, true)) {
+                WasiRunResult result;
+                result.error = "another Wasmer command is already running";
+                WriteRunResult(result);
+                napi_value ret;
+                napi_get_boolean(env, false, &ret);
+                return ret;
+            }
+            int ownedFd = dup(static_cast<int>(fdValue));
+            if (ownedFd < 0) {
+                g_runInFlight.store(false);
+                WasiRunResult result;
+                result.error = "failed to duplicate bundled rawfile fd";
+                WriteRunResult(result);
+                napi_value ret;
+                napi_get_boolean(env, false, &ret);
+                return ret;
+            }
+
+            std::thread([
+                ownedFd,
+                offset = static_cast<off_t>(offsetValue),
+                size = static_cast<size_t>(sizeValue),
+                programName,
+                args,
+                preopenDir]() {
+                WasiRunResult result = RunBundledWasiModuleInternal(
+                    ownedFd, offset, size, programName, args, preopenDir);
+                close(ownedFd);
+                WriteRunResult(result);
+                g_runInFlight.store(false);
+            }).detach();
+
+            napi_value ret;
+            napi_get_boolean(env, true, &ret);
+            return ret;
+        }
+
+        std::vector<std::string> args;
+        std::string line;
         while (std::getline(request, line)) {
             args.push_back(line);
         }
@@ -844,17 +980,30 @@ static napi_value StartWasmer(napi_env env, napi_callback_info info)
             return ret;
         }
 
-        WasiRunResult result;
         if (!ok) {
+            WasiRunResult result;
             result.error = g_lastHostError;
+            WriteRunResult(result);
         } else if (modulePath.empty()) {
+            WasiRunResult result;
             result.error = "Wasmer run request has no module path";
+            WriteRunResult(result);
         } else {
-            result = RunWasiModuleInternal(modulePath, args, preopenDir);
+            bool expected = false;
+            if (!g_runInFlight.compare_exchange_strong(expected, true)) {
+                WasiRunResult result;
+                result.error = "another Wasmer command is already running";
+                WriteRunResult(result);
+            } else {
+                std::thread([modulePath, args, preopenDir]() {
+                    WasiRunResult result = RunWasiModuleInternal(modulePath, args, preopenDir);
+                    WriteRunResult(result);
+                    g_runInFlight.store(false);
+                }).detach();
+            }
         }
-        WriteRunResult(result);
         napi_value ret;
-        napi_get_boolean(env, result.error.empty(), &ret);
+        napi_get_boolean(env, ok && !modulePath.empty(), &ret);
         return ret;
     }
 
