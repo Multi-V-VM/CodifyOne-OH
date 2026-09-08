@@ -1,7 +1,7 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import CustomChildProcess from '../process/CustomChildProcess';
-import { getWasmerLastError, isWasmerReady, runWasiModuleAsync, startWasmer, WasiRunResult } from '../wasmer/WasmerHost';
+import { getWasmerLastError, isWasmerReady, runWasiModule, startWasmer, WasiRunResult } from '../wasmer/WasmerHost';
 import { ensureWasmerWorkspace, WASMER_WORKSPACE_DIR } from '../wasmer/Workspace';
 
 // VS Code 工作台 onStartupFinished 时由 ohcode-splash 扩展写入；加载页轮询到它即淡出。
@@ -187,15 +187,25 @@ struct Index {
     }
   }
 
-  private async materializeModule(rawName: string, targetName: string): Promise<string> {
+  private materializeModule(rawName: string, targetName: string): string {
     ensureWasmerWorkspace();
-    const data: Uint8Array = await getContext(this).resourceManager.getRawFileContent(rawName);
+    const data: Uint8Array = getContext(this).resourceManager.getRawFileContentSync(rawName);
     const target: string = `${WASMER_WORKSPACE_DIR}/${targetName}`;
     const file = fileIo.openSync(target,
       fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
     fileIo.writeSync(file.fd, data.buffer);
     fileIo.closeSync(file);
     return target;
+  }
+
+  private showRunResult(command: string, startedAt: number, result: WasiRunResult): void {
+    const elapsed: number = Date.now() - startedAt;
+    this.wasmerStatus = result.error.length === 0 ? 'READY' : 'ERROR';
+    this.terminalOutput = '$ ' + command + '\n' +
+      '[Wasmer] exit=' + result.exitCode + ' time=' + elapsed + 'ms\n' +
+      (result.stdout.length > 0 ? result.stdout : '') +
+      (result.stderr.length > 0 ? '\n[stderr]\n' + result.stderr : '') +
+      (result.error.length > 0 ? '\n[error]\n' + result.error : '');
   }
 
   private runCommand(): void {
@@ -227,20 +237,27 @@ struct Index {
     this.wasmerStatus = 'RUNNING';
     this.terminalOutput = '$ ' + command + '\nLoading ' + moduleName + '…';
     const startedAt: number = Date.now();
-    this.materializeModule(rawName, moduleName)
-      .then((modulePath: string) => startWasmer().then(() => runWasiModuleAsync(modulePath, args)))
-      .then((result: WasiRunResult) => {
-        const elapsed: number = Date.now() - startedAt;
-        this.wasmerStatus = result.error.length === 0 ? 'READY' : 'ERROR';
-        this.terminalOutput = '$ ' + command + '\n' +
-          '[Wasmer] exit=' + result.exitCode + ' time=' + elapsed + 'ms\n' +
-          (result.stdout.length > 0 ? result.stdout : '') +
-          (result.stderr.length > 0 ? '\n[stderr]\n' + result.stderr : '') +
-          (result.error.length > 0 ? '\n[error]\n' + result.error : '');
+    let modulePath: string = '';
+    try {
+      modulePath = this.materializeModule(rawName, moduleName);
+    } catch (error) {
+      this.wasmerStatus = 'ERROR';
+      this.isRunning = false;
+      this.terminalOutput = '$ ' + command + '\nRESOURCE ERROR: ' + JSON.stringify(error);
+      return;
+    }
+    startWasmer()
+      .then(() => {
+        try {
+          this.showRunResult(command, startedAt, runWasiModule(modulePath, args));
+        } catch (error) {
+          this.wasmerStatus = 'ERROR';
+          this.terminalOutput = '$ ' + command + '\nNATIVE RUN ERROR: ' + JSON.stringify(error);
+        }
       })
       .catch((error: Error) => {
         this.wasmerStatus = 'ERROR';
-        this.terminalOutput = '$ ' + command + '\nERROR: ' + error.message;
+        this.terminalOutput = '$ ' + command + '\nSTART ERROR: ' + error.message;
       })
       .finally(() => {
         this.isRunning = false;

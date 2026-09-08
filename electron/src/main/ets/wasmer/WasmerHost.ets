@@ -1,4 +1,5 @@
-import native from 'libentry.so';
+import native from 'libwasmerhost.so';
+import { fileIo } from '@kit.CoreFileKit';
 import { ensureWasmerWorkspace, WASMER_WORKSPACE_DIR } from './Workspace';
 
 export interface WasiRunResult {
@@ -23,7 +24,7 @@ export async function startWasmer(): Promise<boolean> {
   starting = (async (): Promise<boolean> => {
     ensureWasmerWorkspace();
 
-    const ok: boolean = native.startWasmer();
+    const ok: boolean = native.startWasmer() as boolean;
     started = ok;
 
     if (ok) {
@@ -50,10 +51,15 @@ export function getWasmerLastError(): string {
 
 export function runWasiModule(modulePath: string, args: string[] = []): WasiRunResult {
   ensureWasmerWorkspace();
-  return native.runWasiModule(modulePath, args, WASMER_WORKSPACE_DIR) as WasiRunResult;
+  const requestPath: string = '/data/storage/el2/base/files/wasmer/run-request.txt';
+  const payload: string = modulePath + '\n' + WASMER_WORKSPACE_DIR + '\n' + args.join('\n');
+  const request = fileIo.openSync(requestPath,
+    fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.READ_WRITE);
+  fileIo.writeSync(request.fd, payload);
+  fileIo.closeSync(request);
+  return native.startWasmer() as WasiRunResult;
 }
 
 export async function runWasiModuleAsync(modulePath: string, args: string[] = []): Promise<WasiRunResult> {
-  ensureWasmerWorkspace();
-  return native.runWasiModuleAsync(modulePath, args, WASMER_WORKSPACE_DIR) as Promise<WasiRunResult>;
+  return Promise.resolve(runWasiModule(modulePath, args));
 }

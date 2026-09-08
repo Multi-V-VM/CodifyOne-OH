@@ -1,0 +1,6 @@
+{
+  "types": "./index.d.ts",
+  "name": "libwasmerhost.so",
+  "description": "OHcode Wasmer native host bindings",
+  "version": "1.0.0"
+}

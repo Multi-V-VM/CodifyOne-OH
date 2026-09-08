@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <fstream>
@@ -579,6 +580,35 @@ static napi_value StartWasmer(napi_env env, napi_callback_info info)
 
     bool ok = LoadWasmer();
 
+    // Command mailbox for HarmonyOS builds where additional N-API properties
+    // or a parameterized call are exposed as "undefined is not callable".
+    // ArkTS writes one request, then invokes this proven zero-argument entry.
+    const char* requestPath = "/data/storage/el2/base/files/wasmer/run-request.txt";
+    std::ifstream request(requestPath);
+    if (request) {
+        std::string modulePath;
+        std::string preopenDir;
+        std::vector<std::string> args;
+        std::string line;
+        std::getline(request, modulePath);
+        std::getline(request, preopenDir);
+        while (std::getline(request, line)) {
+            args.push_back(line);
+        }
+        request.close();
+        unlink(requestPath);
+
+        WasiRunResult result;
+        if (!ok) {
+            result.error = g_lastHostError;
+        } else if (modulePath.empty()) {
+            result.error = "Wasmer run request has no module path";
+        } else {
+            result = RunWasiModuleInternal(modulePath, args, preopenDir);
+        }
+        return CreateRunResult(env, result);
+    }
+
     napi_value ret;
     napi_get_boolean(env, ok, &ret);
     return ret;
@@ -775,12 +805,12 @@ static napi_module wasmerModule = {
     .nm_flags = 0,
     .nm_filename = nullptr,
     .nm_register_func = Init,
-    .nm_modname = "entry",
+    .nm_modname = "wasmerhost",
     .nm_priv = nullptr,
     .reserved = {0}
 };
 
-extern "C" __attribute__((constructor)) void RegisterEntryModule()
+extern "C" __attribute__((constructor)) void RegisterWasmerHostModule()
 {
     napi_module_register(&wasmerModule);
 }
